@@ -1,0 +1,247 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// User status enum
+enum UserStatus {
+  ENABLE
+  DISABLE
+  BANNED
+}
+
+// Sign up type enum
+enum SignUpType {
+  USERNAME
+  WECHAT
+  EMAIL
+}
+
+// Issue status enum
+enum IssueStatus {
+  OPEN
+  CLOSED
+  IN_PROGRESS
+}
+
+/// 词条类型
+enum PhraseType {
+  /// 单字
+  Single
+  /// 词组
+  Phrase
+  /// 短句
+  Sentence
+  /// 符号
+  Symbol
+  /// 链接
+  Link
+  /// 诗句
+  Poem
+  /// 其他
+  Other
+}
+
+/// 词条状态
+enum PhraseStatus {
+  /// 完成状态
+  Finish
+  /// 草案
+  Draft
+  /// 拒绝
+  Reject
+}
+
+/// 词条操作类型
+enum PullRequestType {
+  /// 创建
+  Create
+  /// 修改
+  Change
+  /// 删除
+  Delete
+}
+
+/// PR状态
+enum PullRequestStatus {
+  /// 待审核
+  Pending
+  /// 审核通过
+  Approved
+  /// 审核拒绝
+  Rejected
+}
+
+// User model
+model User {
+  id         Int        @id @default(autoincrement())
+  createAt   DateTime   @default(now())
+  updateAt   DateTime   @updatedAt
+  name       String?    @unique
+  nickname   String?
+  phone      String?
+  password   String?
+  email      String?    @unique
+  status     UserStatus @default(ENABLE)
+  signUpType SignUpType @default(USERNAME)
+
+  // Relations
+  roles                Role[]        @relation("UserRoles")
+  issues               Issue[]       @relation("UserIssues")
+  phrases              Phrase[]      @relation("UserPhrases")
+  pullRequests         PullRequest[] @relation("UserPullRequests")
+  likedPullRequests    PullRequest[] @relation("PullRequestLikes")
+  dislikedPullRequests PullRequest[] @relation("PullRequestDislikes")
+
+  @@map("users")
+}
+
+// Role model
+model Role {
+  id       Int      @id @default(autoincrement())
+  name     String
+  value    String   @unique
+  createAt DateTime @default(now())
+  updateAt DateTime @updatedAt
+
+  // Relations
+  users User[] @relation("UserRoles")
+
+  @@map("roles")
+}
+
+// Permission model
+model Permission {
+  id      Int                @id @default(autoincrement())
+  name    String
+  value   String             @unique
+  actions PermissionAction[] @relation("PermissionActions")
+
+  @@map("permissions")
+}
+
+// Permission Action model
+model PermissionAction {
+  id          Int          @id @default(autoincrement())
+  name        String
+  value       String       @unique
+  permissions Permission[] @relation("PermissionActions")
+
+  @@map("permission_actions")
+}
+
+// Casbin Rule model for RBAC
+model CasbinRule {
+  id    Int     @id @default(autoincrement())
+  ptype String
+  v0    String?
+  v1    String?
+  v2    String?
+  v3    String?
+  v4    String?
+  v5    String?
+
+  @@map("casbin_rule")
+}
+
+// Issue model
+model Issue {
+  id       Int         @id @default(autoincrement())
+  title    String
+  content  String      @db.Text
+  status   IssueStatus @default(OPEN)
+  createAt DateTime    @default(now())
+  updateAt DateTime    @updatedAt
+
+  // Relations
+  author   User @relation("UserIssues", fields: [authorId], references: [id], onDelete: Cascade)
+  authorId Int
+
+  @@map("issues")
+}
+
+/// 词条
+model Phrase {
+  id       Int      @id @default(autoincrement())
+  createAt DateTime @default(now())
+  updateAt DateTime @updatedAt
+
+  /// 词
+  word   String
+  /// 编码
+  code   String
+  /// 类型
+  type   PhraseType   @default(Phrase)
+  /// 状态
+  status PhraseStatus @default(Draft)
+  /// 备注
+  remark String?
+  /// 权重
+  weight Int          @default(0)
+
+  // Relations
+  /// 创建者
+  user         User          @relation("UserPhrases", fields: [userId], references: [id], onDelete: Cascade)
+  userId       Int
+  /// 标签
+  tags         Tag[]
+  /// 关联PR
+  pullRequests PullRequest[]
+
+  @@unique([word, code])
+  @@map("phrases")
+}
+
+/// 标签 - 用于搜索关联词条
+model Tag {
+  id       Int      @id @default(autoincrement())
+  createAt DateTime @default(now())
+  updateAt DateTime @updatedAt
+  name     String   @unique
+  phrases  Phrase[]
+
+  @@map("tags")
+}
+
+/// 词条拉取请求 - 记录如何调整词条
+model PullRequest {
+  id       Int      @id @default(autoincrement())
+  createAt DateTime @default(now())
+  updateAt DateTime @updatedAt
+
+  /// 关联词条
+  phrase   Phrase? @relation(fields: [phraseId], references: [id])
+  phraseId Int?
+
+  /// 词
+  word   String?
+  /// 编码
+  code   String?
+  /// 类型
+  type   PhraseType?
+  /// 状态
+  status PullRequestStatus @default(Pending)
+  /// 操作类型
+  action PullRequestType   @default(Create)
+  /// 备注
+  remark String?
+  /// 权重
+  weight Int?
+
+  // Relations
+  /// 创建者
+  user       User   @relation("UserPullRequests", fields: [userId], references: [id], onDelete: Cascade)
+  userId     Int
+  /// 点赞用户
+  likedBy    User[] @relation("PullRequestLikes")
+  /// 点踩用户
+  dislikedBy User[] @relation("PullRequestDislikes")
+
+  @@map("pull_requests")
+}

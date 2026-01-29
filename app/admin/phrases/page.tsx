@@ -1,0 +1,155 @@
+'use client'
+
+import { useState } from 'react'
+import {
+  Table,
+  TableHeader,
+  TableColumn,
+  TableBody,
+  TableRow,
+  TableCell,
+  Chip,
+  Button,
+  Spinner,
+  Input,
+  Pagination
+} from '@heroui/react'
+import Navbar from '@/app/components/Navbar'
+import { useAPI } from '@/lib/hooks/useSWR'
+
+interface Phrase {
+  id: number
+  word: string
+  code: string
+  type: string
+  status: string
+  weight: number
+  remark: string | null
+  createAt: string
+}
+
+export default function PhrasesPage() {
+  const [page, setPage] = useState(1)
+  const [search, setSearch] = useState('')
+
+  const { data, isLoading } = useAPI<{ phrases: Phrase[]; total: number }>(
+    `/api/admin/phrases?page=${page}&pageSize=20&search=${search}`
+  )
+
+  const phrases = data?.phrases || []
+  const total = data?.total || 0
+
+  const getTypeColor = (type: string) => {
+    const colors: Record<string, "default" | "primary" | "secondary" | "success" | "warning" | "danger"> = {
+      Single: 'primary',
+      Phrase: 'success',
+      Sentence: 'warning',
+      Symbol: 'secondary',
+      Link: 'secondary',
+      Poem: 'secondary',
+      Other: 'default'
+    }
+    return colors[type] || 'default'
+  }
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'Finish':
+        return 'success'
+      case 'Draft':
+        return 'warning'
+      case 'Reject':
+        return 'danger'
+      default:
+        return 'default'
+    }
+  }
+
+  if (isLoading) {
+    return (
+      <>
+        <Navbar />
+        <div className="min-h-screen flex items-center justify-center">
+          <Spinner size="lg" label="加载中..." />
+        </div>
+      </>
+    )
+  }
+
+  return (
+    <>
+      <Navbar />
+      <div className="min-h-screen bg-background">
+        <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          <div className="flex justify-between items-center mb-6">
+            <h1 className="text-3xl font-bold">词库管理</h1>
+            <p className="text-default-500">共 {total} 条词条</p>
+          </div>
+
+          <div className="mb-4">
+            <Input
+              placeholder="搜索词条..."
+              value={search}
+              onValueChange={setSearch}
+              className="max-w-md"
+            />
+          </div>
+
+          <Table aria-label="词条列表">
+            <TableHeader>
+              <TableColumn>词</TableColumn>
+              <TableColumn>编码</TableColumn>
+              <TableColumn>类型</TableColumn>
+              <TableColumn>状态</TableColumn>
+              <TableColumn>权重</TableColumn>
+              <TableColumn>备注</TableColumn>
+              <TableColumn>操作</TableColumn>
+            </TableHeader>
+            <TableBody>
+              {phrases.map((phrase) => (
+                <TableRow key={phrase.id}>
+                  <TableCell className="font-medium">{phrase.word}</TableCell>
+                  <TableCell className="font-mono text-sm">{phrase.code}</TableCell>
+                  <TableCell>
+                    <Chip color={getTypeColor(phrase.type)} variant="flat" size="sm">
+                      {phrase.type}
+                    </Chip>
+                  </TableCell>
+                  <TableCell>
+                    <Chip color={getStatusColor(phrase.status)} variant="flat" size="sm">
+                      {phrase.status}
+                    </Chip>
+                  </TableCell>
+                  <TableCell>{phrase.weight}</TableCell>
+                  <TableCell className="max-w-xs truncate">
+                    {phrase.remark || '-'}
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex gap-2">
+                      <Button size="sm" variant="flat" color="primary">
+                        编辑
+                      </Button>
+                      <Button size="sm" variant="flat" color="danger">
+                        删除
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+
+          {total > 20 && (
+            <div className="flex justify-center mt-4">
+              <Pagination
+                total={Math.ceil(total / 20)}
+                page={page}
+                onChange={setPage}
+              />
+            </div>
+          )}
+        </main>
+      </div>
+    </>
+  )
+}
