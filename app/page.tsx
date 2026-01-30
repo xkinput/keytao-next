@@ -1,7 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState } from 'react'
 import {
   Card,
   CardBody,
@@ -9,18 +8,12 @@ import {
   Button,
   Spinner,
   Chip,
-  Modal,
-  ModalContent,
-  ModalHeader,
-  ModalBody,
-  ModalFooter,
-  Input,
-  Textarea,
   useDisclosure
 } from '@heroui/react'
 import { useAuthStore } from '@/lib/store/auth'
-import { useAPI, apiRequest } from '@/lib/hooks/useSWR'
+import { useAPI } from '@/lib/hooks/useSWR'
 import Navbar from '@/app/components/Navbar'
+import CreateIssueModal from '@/app/components/CreateIssueModal'
 
 interface Issue {
   id: number
@@ -46,53 +39,14 @@ interface IssuesResponse {
 }
 
 export default function HomePage() {
-  const router = useRouter()
   const { isAuthenticated } = useAuthStore()
   const [page, setPage] = useState(1)
-  const [isClient, setIsClient] = useState(false)
 
   const { data, error, isLoading, mutate } = useAPI<IssuesResponse>(
-    isClient ? `/api/issues?page=${page}&pageSize=10` : null
+    `/api/issues?page=${page}&pageSize=10`
   )
 
   const { isOpen, onOpen, onClose } = useDisclosure()
-  const [title, setTitle] = useState('')
-  const [content, setContent] = useState('')
-  const [submitting, setSubmitting] = useState(false)
-
-  // Handle client-side hydration
-  useEffect(() => {
-    setIsClient(true)
-  }, [])
-
-  // No authentication redirect - homepage is public
-
-  const handleCreateIssue = async () => {
-    if (!isAuthenticated()) {
-      alert('请先登录')
-      router.push('/login')
-      return
-    }
-
-    if (!title || !content) return
-
-    setSubmitting(true)
-    try {
-      await apiRequest('/api/issues', {
-        method: 'POST',
-        body: { title, content }
-      })
-
-      setTitle('')
-      setContent('')
-      onClose()
-      mutate() // Refresh the issues list
-    } catch {
-      alert('创建 issue 失败')
-    } finally {
-      setSubmitting(false)
-    }
-  }
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -118,15 +72,6 @@ export default function HomePage() {
       default:
         return status
     }
-  }
-
-  // Show loading during SSR/hydration
-  if (!isClient) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <Spinner size="lg" label="加载中..." />
-      </div>
-    )
   }
 
   if (isLoading) {
@@ -231,41 +176,11 @@ export default function HomePage() {
           )}
         </main>
 
-        <Modal isOpen={isOpen} onClose={onClose} size="2xl">
-          <ModalContent>
-            <ModalHeader>新建 Issue</ModalHeader>
-            <ModalBody>
-              <Input
-                label="标题"
-                placeholder="请输入 issue 标题"
-                value={title}
-                onValueChange={setTitle}
-                isRequired
-              />
-              <Textarea
-                label="内容"
-                placeholder="请输入 issue 内容"
-                value={content}
-                onValueChange={setContent}
-                isRequired
-                minRows={6}
-              />
-            </ModalBody>
-            <ModalFooter>
-              <Button variant="light" onPress={onClose}>
-                取消
-              </Button>
-              <Button
-                color="primary"
-                onPress={handleCreateIssue}
-                isLoading={submitting}
-                isDisabled={!title || !content}
-              >
-                创建
-              </Button>
-            </ModalFooter>
-          </ModalContent>
-        </Modal>
+        <CreateIssueModal
+          isOpen={isOpen}
+          onClose={onClose}
+          onSuccess={mutate}
+        />
       </div>
     </>
   )

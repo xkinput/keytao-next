@@ -33,6 +33,7 @@ export default function Navbar() {
   const adminNavItems = [
     { label: '首页', href: '/' },
     { label: '数据概览', href: '/admin/dashboard' },
+    { label: '批次审核', href: '/admin/batches' },
     { label: '用户管理', href: '/admin/users' },
     { label: '词库管理', href: '/admin/phrases' },
     { label: '词库导入', href: '/admin/import' },
@@ -41,6 +42,8 @@ export default function Navbar() {
   // 普通导航
   const publicNavItems = [
     { label: '首页', href: '/' },
+    { label: '修改批次', href: '/batches' },
+    { label: '修改提议', href: '/pull-requests' },
   ]
 
   const navItems = isAdminArea ? adminNavItems : publicNavItems

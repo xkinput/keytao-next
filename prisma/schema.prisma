@@ -78,6 +78,20 @@ enum PullRequestStatus {
   Rejected
 }
 
+/// 批次状态
+enum BatchStatus {
+  /// 草稿
+  Draft
+  /// 已提交
+  Submitted
+  /// 已通过
+  Approved
+  /// 已拒绝
+  Rejected
+  /// 已发布
+  Published
+}
+
 // User model
 model User {
   id         Int        @id @default(autoincrement())
@@ -98,6 +112,7 @@ model User {
   pullRequests         PullRequest[] @relation("UserPullRequests")
   likedPullRequests    PullRequest[] @relation("PullRequestLikes")
   dislikedPullRequests PullRequest[] @relation("PullRequestDislikes")
+  batches              Batch[]       @relation("UserBatches")
 
   @@map("users")
 }
@@ -160,8 +175,9 @@ model Issue {
   updateAt DateTime    @updatedAt
 
   // Relations
-  author   User @relation("UserIssues", fields: [authorId], references: [id], onDelete: Cascade)
+  author   User    @relation("UserIssues", fields: [authorId], references: [id], onDelete: Cascade)
   authorId Int
+  batches  Batch[] @relation("IssueBatches")
 
   @@map("issues")
 }
@@ -219,29 +235,95 @@ model PullRequest {
   phrase   Phrase? @relation(fields: [phraseId], references: [id])
   phraseId Int?
 
-  /// 词
-  word   String?
+  /// 词（新增或修改后的词）
+  word    String?
+  /// 修改前的词（仅用于 Change 操作）
+  oldWord String?
   /// 编码
-  code   String?
+  code    String?
   /// 类型
-  type   PhraseType?
+  type    PhraseType?
   /// 状态
-  status PullRequestStatus @default(Pending)
+  status  PullRequestStatus @default(Pending)
   /// 操作类型
-  action PullRequestType   @default(Create)
+  action  PullRequestType   @default(Create)
   /// 备注
-  remark String?
+  remark  String?
   /// 权重
-  weight Int?
+  weight  Int?
+
+  /// 冲突状态
+  hasConflict    Boolean @default(false)
+  conflictReason String?
 
   // Relations
   /// 创建者
-  user       User   @relation("UserPullRequests", fields: [userId], references: [id], onDelete: Cascade)
-  userId     Int
+  user         User                    @relation("UserPullRequests", fields: [userId], references: [id], onDelete: Cascade)
+  userId       Int
   /// 点赞用户
-  likedBy    User[] @relation("PullRequestLikes")
+  likedBy      User[]                  @relation("PullRequestLikes")
   /// 点踩用户
-  dislikedBy User[] @relation("PullRequestDislikes")
+  dislikedBy   User[]                  @relation("PullRequestDislikes")
+  /// 所属批次
+  batch        Batch?                  @relation(fields: [batchId], references: [id])
+  batchId      String?
+  /// 依赖关系
+  dependencies PullRequestDependency[] @relation("DependentPR")
+  dependedBy   PullRequestDependency[] @relation("DependsOnPR")
+  /// 冲突记录
+  conflicts    CodeConflict[]
 
+  @@index([batchId])
   @@map("pull_requests")
+}
+
+/// 批次 - 组织相关的修改
+model Batch {
+  id          String      @id @default(uuid())
+  createAt    DateTime    @default(now())
+  updateAt    DateTime    @updatedAt
+  description String?
+  status      BatchStatus @default(Draft)
+  reviewNote  String?     @db.Text
+
+  // Relations
+  creator      User          @relation("UserBatches", fields: [creatorId], references: [id], onDelete: Cascade)
+  creatorId    Int
+  pullRequests PullRequest[]
+  sourceIssue  Issue?        @relation("IssueBatches", fields: [issueId], references: [id])
+  issueId      Int?
+
+  @@map("batches")
+}
+
+/// PR 依赖关系
+model PullRequestDependency {
+  id       Int      @id @default(autoincrement())
+  createAt DateTime @default(now())
+  reason   String
+
+  // dependent 依赖于 dependsOn
+  dependent   PullRequest @relation("DependentPR", fields: [dependentId], references: [id], onDelete: Cascade)
+  dependentId Int
+  dependsOn   PullRequest @relation("DependsOnPR", fields: [dependsOnId], references: [id], onDelete: Cascade)
+  dependsOnId Int
+
+  @@unique([dependentId, dependsOnId])
+  @@map("pull_request_dependencies")
+}
+
+/// 编码冲突记录
+model CodeConflict {
+  id           Int       @id @default(autoincrement())
+  createAt     DateTime  @default(now())
+  code         String
+  currentWord  String?
+  proposedWord String
+  resolvedAt   DateTime?
+  resolution   String?
+
+  pullRequest   PullRequest @relation(fields: [pullRequestId], references: [id], onDelete: Cascade)
+  pullRequestId Int
+
+  @@map("code_conflicts")
 }
