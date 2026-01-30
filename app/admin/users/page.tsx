@@ -82,7 +82,6 @@ export default function UsersPage() {
               <TableColumn>邮箱</TableColumn>
               <TableColumn>状态</TableColumn>
               <TableColumn>注册时间</TableColumn>
-              <TableColumn>操作</TableColumn>
             </TableHeader>
             <TableBody>
               {users.map((user) => (
@@ -98,16 +97,6 @@ export default function UsersPage() {
                   </TableCell>
                   <TableCell>
                     {new Date(user.createAt).toLocaleDateString('zh-CN')}
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex gap-2">
-                      <Button size="sm" variant="flat" color="primary">
-                        编辑
-                      </Button>
-                      <Button size="sm" variant="flat" color="danger">
-                        删除
-                      </Button>
-                    </div>
                   </TableCell>
                 </TableRow>
               ))}

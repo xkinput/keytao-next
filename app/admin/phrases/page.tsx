@@ -124,7 +124,6 @@ export default function PhrasesPage() {
               <TableColumn>状态</TableColumn>
               <TableColumn>权重</TableColumn>
               <TableColumn>备注</TableColumn>
-              <TableColumn>操作</TableColumn>
             </TableHeader>
             <TableBody
               emptyContent="暂无数据"
@@ -146,16 +145,6 @@ export default function PhrasesPage() {
                   <TableCell>{phrase.weight}</TableCell>
                   <TableCell className="max-w-xs truncate">
                     {phrase.remark || '-'}
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex gap-2">
-                      <Button size="sm" variant="flat" color="primary">
-                        编辑
-                      </Button>
-                      <Button size="sm" variant="flat" color="danger">
-                        删除
-                      </Button>
-                    </div>
                   </TableCell>
                 </TableRow>
               ))}

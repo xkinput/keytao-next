@@ -1,6 +1,6 @@
 # KeyTao Next
 
-基于 Next.js + Prisma 的权限管理系统，参考 [jd-dict-server](https://github.com/xkinput/jd-dict-server) 项目
+KeyTao(键道) 输入方案词库更新管理系统
 
 ## 技术栈
 
@@ -8,8 +8,9 @@
 - **Prisma 7** - 数据库 ORM
 - **PostgreSQL** - 数据库
 - **Casbin** - 权限管理
-- **TypeScript** - 类型支持
-- **Tailwind CSS** - 样式
+- **TypeScript**
+- HeroUI
+- TailwindCSS
 
 ## 快速开始
 
@@ -64,7 +65,7 @@ pnpm run init:all
 **默认管理员账号：**
 
 - 用户名：`admin`
-- 密码：`KeyTaoReal7123.`
+- 密码：`admin123`
 - 角色：初始管理员 (R:ROOT)
 
 ### 5. 启动开发服务器
