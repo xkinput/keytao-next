@@ -4,15 +4,21 @@ import { useRouter, usePathname } from 'next/navigation'
 import Link from 'next/link'
 import { Button } from '@heroui/react'
 import { useAuthStore } from '@/lib/store/auth'
-import { apiRequest } from '@/lib/hooks/useSWR'
+import { apiRequest, useAPI } from '@/lib/hooks/useSWR'
 
 export default function Navbar() {
   const router = useRouter()
   const pathname = usePathname()
-  const { user, isAuthenticated, clearAuth } = useAuthStore()
+  const { user, isAuthenticated, clearAuth, token } = useAuthStore()
 
   // 判断是否在管理后台
   const isAdminArea = pathname.startsWith('/admin')
+
+  // 检查是否是管理员
+  const { data: adminCheck } = useAPI(
+    isAuthenticated() && token ? '/api/admin/stats' : null
+  )
+  const isAdmin = !!adminCheck
 
   const handleLogout = async () => {
     try {
@@ -60,6 +66,14 @@ export default function Navbar() {
                   {item.label}
                 </Link>
               ))}
+              {!isAdminArea && isAdmin && (
+                <Link
+                  href="/admin"
+                  className="px-3 py-2 rounded-md text-sm font-medium transition-colors"
+                >
+                  管理后台
+                </Link>
+              )}
             </div>
           </div>
 

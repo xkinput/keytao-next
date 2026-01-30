@@ -44,17 +44,18 @@ const fetcher = async (url: string, token: string | null, options?: FetcherOptio
 
 export function useAPI<T = unknown>(
   url: string | null,
-  options?: FetcherOptions & { refreshInterval?: number }
+  options?: FetcherOptions & { refreshInterval?: number; keepPreviousData?: boolean }
 ) {
   const token = useAuthStore((state) => state.token)
   const withAuth = options?.withAuth ?? true
 
-  const { data, error, isLoading, mutate } = useSWR<T>(
+  const { data, error, isLoading, isValidating, mutate } = useSWR<T>(
     url ? [url, withAuth ? token : null, options] : null,
     ([url, token, options]: [string, string | null, FetcherOptions | undefined]) => fetcher(url, token, options),
     {
       refreshInterval: options?.refreshInterval,
       revalidateOnFocus: false,
+      keepPreviousData: options?.keepPreviousData,
     }
   )
 
@@ -62,6 +63,7 @@ export function useAPI<T = unknown>(
     data,
     error,
     isLoading,
+    isValidating,
     mutate,
   }
 }

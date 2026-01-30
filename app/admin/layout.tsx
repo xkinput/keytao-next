@@ -12,7 +12,7 @@ export default function AdminLayout({
   children: React.ReactNode
 }) {
   const router = useRouter()
-  const { token } = useAuthStore()
+  const { token, _hasHydrated } = useAuthStore()
 
   // Use useAPI to verify admin access
   const { data, error, isLoading } = useAPI(
@@ -20,6 +20,9 @@ export default function AdminLayout({
   )
 
   useEffect(() => {
+    // Wait for hydration to complete before checking auth
+    if (!_hasHydrated) return
+
     if (!token) {
       router.replace('/login')
       return
@@ -28,9 +31,10 @@ export default function AdminLayout({
     if (!isLoading && (error || !data)) {
       router.replace('/')
     }
-  }, [token, data, error, isLoading, router])
+  }, [_hasHydrated, token, data, error, isLoading, router])
 
-  if (!token || isLoading) {
+  // Show loading while hydrating or verifying
+  if (!_hasHydrated || !token || isLoading) {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <Spinner size="lg" label="验证权限中..." />

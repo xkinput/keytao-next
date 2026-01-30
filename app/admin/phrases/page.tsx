@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import {
   Table,
   TableHeader,
@@ -31,13 +31,27 @@ interface Phrase {
 export default function PhrasesPage() {
   const [page, setPage] = useState(1)
   const [search, setSearch] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
 
-  const { data, isLoading } = useAPI<{ phrases: Phrase[]; total: number }>(
-    `/api/admin/phrases?page=${page}&pageSize=20&search=${search}`
+  // Debounce search input
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(search)
+      setPage(1) // Reset to first page when search changes
+    }, 500)
+
+    return () => clearTimeout(timer)
+  }, [search])
+
+  const { data, isLoading, isValidating } = useAPI<{ phrases: Phrase[]; total: number }>(
+    `/api/admin/phrases?page=${page}&pageSize=20&search=${debouncedSearch}`,
+    { keepPreviousData: true }
   )
 
   const phrases = data?.phrases || []
   const total = data?.total || 0
+  const isSearching = search !== debouncedSearch
+  const isFirstLoad = !data && isLoading
 
   const getTypeColor = (type: string) => {
     const colors: Record<string, "default" | "primary" | "secondary" | "success" | "warning" | "danger"> = {
@@ -65,7 +79,8 @@ export default function PhrasesPage() {
     }
   }
 
-  if (isLoading) {
+  // Only show full page loading on first load
+  if (isFirstLoad && isLoading) {
     return (
       <>
         <Navbar />
@@ -83,15 +98,21 @@ export default function PhrasesPage() {
         <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           <div className="flex justify-between items-center mb-6">
             <h1 className="text-3xl font-bold">词库管理</h1>
-            <p className="text-default-500">共 {total} 条词条</p>
+            <div className="flex items-center gap-2">
+              {(isSearching || isValidating) && <Spinner size="sm" />}
+              <p className="text-default-500">共 {total} 条词条</p>
+            </div>
           </div>
 
           <div className="mb-4">
             <Input
-              placeholder="搜索词条..."
+              placeholder="搜索词条或编码..."
               value={search}
               onValueChange={setSearch}
+              onClear={() => setSearch('')}
+              isClearable
               className="max-w-md"
+              description={isSearching ? "正在输入..." : debouncedSearch ? `搜索: ${debouncedSearch}` : undefined}
             />
           </div>
 
@@ -105,7 +126,9 @@ export default function PhrasesPage() {
               <TableColumn>备注</TableColumn>
               <TableColumn>操作</TableColumn>
             </TableHeader>
-            <TableBody>
+            <TableBody
+              emptyContent="暂无数据"
+            >
               {phrases.map((phrase) => (
                 <TableRow key={phrase.id}>
                   <TableCell className="font-medium">{phrase.word}</TableCell>

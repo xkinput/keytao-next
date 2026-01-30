@@ -1,4 +1,4 @@
-# Key Tao Next
+# KeyTao Next
 
 基于 Next.js + Prisma 的权限管理系统，参考 [jd-dict-server](https://github.com/xkinput/jd-dict-server) 项目
 
@@ -62,6 +62,7 @@ pnpm run init:all
 ```
 
 **默认管理员账号：**
+
 - 用户名：`admin`
 - 密码：`KeyTaoReal7123.`
 - 角色：初始管理员 (R:ROOT)
@@ -77,25 +78,30 @@ pnpm run dev
 ## 数据库模型
 
 ### User (用户)
+
 - 基本信息：name, nickname, phone, email, password
 - 状态：ENABLE, DISABLE, BANNED
 - 注册类型：USERNAME, WECHAT, EMAIL
 - 关联角色：多对多关系
 
 ### Role (角色)
+
 - 预设角色：
   - `R:ROOT` - 初始管理员
   - `R:MANAGER` - 管理员
   - `R:NORMAL` - 普通用户
 
 ### Permission (权限)
+
 - 权限资源定义
 - 关联权限操作
 
 ### PermissionAction (权限操作)
+
 - 预设操作：create, read, update, delete, query
 
 ### CasbinRule (Casbin 规则)
+
 - RBAC 权限规则存储
 
 ## 可用脚本
@@ -164,7 +170,7 @@ m = g(r.sub, p.sub) && r.obj == p.obj && r.act == p.act
 ## 项目结构
 
 ```
-key-tao-next/
+keytao-next/
 ├── app/                 # Next.js App Router
 ├── lib/                 # 工具库
 │   └── prisma.ts       # Prisma Client 单例

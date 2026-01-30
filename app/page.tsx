@@ -54,6 +54,7 @@ export default function HomePage() {
   const { data, error, isLoading, mutate } = useAPI<IssuesResponse>(
     isClient ? `/api/issues?page=${page}&pageSize=10` : null
   )
+
   const { isOpen, onOpen, onClose } = useDisclosure()
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
