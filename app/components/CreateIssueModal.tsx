@@ -53,7 +53,7 @@ export default function CreateIssueModal({
       onClose()
       onSuccess()
     } catch {
-      alert('创建 issue 失败')
+      alert('创建讨论失败')
     } finally {
       setSubmitting(false)
     }
@@ -68,18 +68,18 @@ export default function CreateIssueModal({
   return (
     <Modal isOpen={isOpen} onClose={handleClose} size="2xl">
       <ModalContent>
-        <ModalHeader>新建 Issue</ModalHeader>
+        <ModalHeader>新建讨论</ModalHeader>
         <ModalBody>
           <Input
             label="标题"
-            placeholder="请输入 issue 标题"
+            placeholder="请输入讨论标题"
             value={title}
             onValueChange={setTitle}
             isRequired
           />
           <Textarea
             label="内容"
-            placeholder="请输入 issue 内容"
+            placeholder="请输入讨论内容"
             value={content}
             onValueChange={setContent}
             isRequired

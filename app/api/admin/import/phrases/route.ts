@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { checkAdminPermission } from '@/lib/adminAuth'
+import { getDefaultWeight, isValidPhraseType, PHRASE_TYPE_CONFIGS } from '@/lib/constants/phraseTypes'
 
 interface ImportResult {
   success: boolean
@@ -34,8 +35,12 @@ export async function POST(request: NextRequest) {
     }
 
     // Validate type
-    const validTypes = ['Single', 'Phrase', 'Sentence', 'Symbol', 'Link', 'Poem', 'Other']
-    const phraseType = type && validTypes.includes(type) ? type : 'Phrase'
+    if (type && !isValidPhraseType(type)) {
+      return NextResponse.json({
+        error: `无效的类型参数，支持的类型: ${Object.keys(PHRASE_TYPE_CONFIGS).join(', ')}`
+      }, { status: 400 })
+    }
+    const phraseType = type || 'Phrase'
 
     const results: ImportResult[] = []
     const validItems: Array<{ index: number; word: string; code: string }> = []
@@ -176,10 +181,11 @@ export async function POST(request: NextRequest) {
         }
 
         // Calculate weight based on code duplication count
-        // Base weight is 100, +1 for each existing phrase with same code
+        // For each type, use its default weight, +1 for each existing phrase with same code
+        const baseWeight = getDefaultWeight(phraseType)
         const existingCount = codeCountMap.get(code) || 0
         const batchCount = processedCodes.get(code) || 0
-        const weight = 100 + existingCount + batchCount
+        const weight = baseWeight + existingCount + batchCount
 
         // Create phrase
         try {

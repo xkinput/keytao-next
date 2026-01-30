@@ -218,7 +218,7 @@ export default function PRDetailPage({ params }: { params: Promise<{ id: string 
               <CardHeader className="font-semibold">所属批次</CardHeader>
               <CardBody>
                 <Link
-                  href={`/batches/${pr.batch.id}`}
+                  href={`/batch/${pr.batch.id}`}
                   className="text-primary hover:underline"
                 >
                   {pr.batch.description}
@@ -228,7 +228,7 @@ export default function PRDetailPage({ params }: { params: Promise<{ id: string 
                 </p>
                 {pr.batch.sourceIssue && (
                   <p className="text-small text-default-500">
-                    关联 Issue: #{pr.batch.sourceIssue.id} {pr.batch.sourceIssue.title}
+                    关联讨论: #{pr.batch.sourceIssue.id} {pr.batch.sourceIssue.title}
                   </p>
                 )}
               </CardBody>

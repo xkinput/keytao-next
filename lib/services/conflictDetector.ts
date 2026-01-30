@@ -175,11 +175,12 @@ export class ConflictDetector {
       }
     }
 
-    // Conflict detected
+    // Code exists with different word - this creates a duplicate code (重码)
+    // Allow creation but provide warning via currentPhrase
     const suggestions = await this.generateSuggestions(change, existing)
 
     return {
-      hasConflict: true,
+      hasConflict: false, // Allow creation, let user confirm
       code: change.code,
       currentPhrase: {
         id: existing.id,
@@ -188,7 +189,7 @@ export class ConflictDetector {
         weight: existing.weight,
         userId: existing.userId
       },
-      impact: `编码 "${change.code}" 已被词条 "${existing.word}" 占用，需要协调位置`,
+      impact: `编码 "${change.code}" 已被词条 "${existing.word}" 占用，将创建重码`,
       suggestions
     }
   }

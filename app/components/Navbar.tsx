@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { Button } from '@heroui/react'
 import { useAuthStore } from '@/lib/store/auth'
 import { apiRequest, useAPI } from '@/lib/hooks/useSWR'
+import Logo from './Logo'
 
 export default function Navbar() {
   const router = useRouter()
@@ -41,8 +42,8 @@ export default function Navbar() {
 
   // 普通导航
   const publicNavItems = [
-    { label: '首页', href: '/' },
-    { label: '修改批次', href: '/batches' },
+    { label: '改词', href: '/' },
+    { label: '讨论', href: '/issues' },
     { label: '修改提议', href: '/pull-requests' },
   ]
 
@@ -53,9 +54,7 @@ export default function Navbar() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center h-16">
           <div className="flex items-center gap-8">
-            <Link href="/" className="text-2xl font-bold text-primary">
-              KeyTao
-            </Link>
+            <Logo />
             <div className="hidden md:flex gap-1">
               {navItems.map((item) => (
                 <Link

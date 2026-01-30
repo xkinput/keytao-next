@@ -3,6 +3,7 @@ import { getSession } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { conflictDetector } from '@/lib/services/conflictDetector'
 import { PullRequestType } from '@prisma/client'
+import { getDefaultWeight, isValidPhraseType, type PhraseType } from '@/lib/constants/phraseTypes'
 
 // POST /api/pull-requests - Create a single PR
 export async function POST(request: NextRequest) {
@@ -88,6 +89,25 @@ export async function POST(request: NextRequest) {
       finalBatchId = batch.id
     }
 
+    // Calculate weight for Create action with duplicate codes
+    let finalWeight = weight
+    if (action === 'Create' && type) {
+      // Count existing phrases with this code
+      const existingCount = await prisma.phrase.count({
+        where: { code }
+      })
+
+      // If there are existing phrases with this code, adjust weight
+      if (existingCount > 0) {
+        const baseWeight = getDefaultWeight(type as PhraseType)
+        // Each additional phrase on same code gets base + count
+        finalWeight = baseWeight + existingCount
+      } else if (!finalWeight) {
+        // First phrase with this code, use default weight
+        finalWeight = getDefaultWeight(type as PhraseType)
+      }
+    }
+
     // Create PR
     const pr = await prisma.pullRequest.create({
       data: {
@@ -96,7 +116,7 @@ export async function POST(request: NextRequest) {
         code,
         action: action as PullRequestType,
         phraseId: finalPhraseId || undefined,
-        weight: weight || undefined,
+        weight: finalWeight || undefined,
         remark: remark || undefined,
         type: type || undefined,
         userId: session.id,

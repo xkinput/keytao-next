@@ -9,13 +9,15 @@ import {
   TableRow,
   TableCell,
   Chip,
-  Button,
   Spinner,
   Input,
-  Pagination
+  Pagination,
+  Select,
+  SelectItem
 } from '@heroui/react'
 import Navbar from '@/app/components/Navbar'
 import { useAPI } from '@/lib/hooks/useSWR'
+import { getPhraseTypeLabel, type PhraseType } from '@/lib/constants/phraseTypes'
 
 interface Phrase {
   id: number
@@ -28,10 +30,21 @@ interface Phrase {
   createAt: string
 }
 
+// Status label mapping
+const getStatusLabel = (status: string) => {
+  const labels: Record<string, string> = {
+    Finish: '已完成',
+    Draft: '草稿',
+    Reject: '已拒绝'
+  }
+  return labels[status] || status
+}
+
 export default function PhrasesPage() {
   const [page, setPage] = useState(1)
   const [search, setSearch] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
+  const [typeFilter, setTypeFilter] = useState<string>('')
 
   // Debounce search input
   useEffect(() => {
@@ -44,7 +57,7 @@ export default function PhrasesPage() {
   }, [search])
 
   const { data, isLoading, isValidating } = useAPI<{ phrases: Phrase[]; total: number }>(
-    `/api/admin/phrases?page=${page}&pageSize=20&search=${debouncedSearch}`,
+    `/api/admin/phrases?page=${page}&pageSize=20&search=${debouncedSearch}${typeFilter ? `&type=${typeFilter}` : ''}`,
     { keepPreviousData: true }
   )
 
@@ -104,7 +117,7 @@ export default function PhrasesPage() {
             </div>
           </div>
 
-          <div className="mb-4">
+          <div className="mb-4 flex gap-4">
             <Input
               placeholder="搜索词条或编码..."
               value={search}
@@ -114,6 +127,26 @@ export default function PhrasesPage() {
               className="max-w-md"
               description={isSearching ? "正在输入..." : debouncedSearch ? `搜索: ${debouncedSearch}` : undefined}
             />
+            <Select
+              placeholder="筛选类型"
+              className="max-w-xs"
+              selectedKeys={typeFilter ? [typeFilter] : []}
+              defaultSelectedKeys={""}
+              onSelectionChange={(keys) => {
+                const selected = Array.from(keys)[0] as string
+                setTypeFilter(selected || '')
+                setPage(1)
+              }}
+            >
+              <SelectItem key="" >全部类型</SelectItem>
+              <SelectItem key="Single">单字 (默认权重: 10)</SelectItem>
+              <SelectItem key="Phrase">词组 (默认权重: 100)</SelectItem>
+              <SelectItem key="Sentence">句子 (默认权重: 1000)</SelectItem>
+              <SelectItem key="Symbol">符号 (默认权重: 10)</SelectItem>
+              <SelectItem key="Link">连接 (默认权重: 10000)</SelectItem>
+              <SelectItem key="Poem">诗词 (默认权重: 10000)</SelectItem>
+              <SelectItem key="Other">其他 (默认权重: 10000)</SelectItem>
+            </Select>
           </div>
 
           <Table aria-label="词条列表">
@@ -121,8 +154,8 @@ export default function PhrasesPage() {
               <TableColumn>词</TableColumn>
               <TableColumn>编码</TableColumn>
               <TableColumn>类型</TableColumn>
-              <TableColumn>状态</TableColumn>
               <TableColumn>权重</TableColumn>
+              <TableColumn>状态</TableColumn>
               <TableColumn>备注</TableColumn>
             </TableHeader>
             <TableBody
@@ -134,15 +167,15 @@ export default function PhrasesPage() {
                   <TableCell className="font-mono text-sm">{phrase.code}</TableCell>
                   <TableCell>
                     <Chip color={getTypeColor(phrase.type)} variant="flat" size="sm">
-                      {phrase.type}
-                    </Chip>
-                  </TableCell>
-                  <TableCell>
-                    <Chip color={getStatusColor(phrase.status)} variant="flat" size="sm">
-                      {phrase.status}
+                      {getPhraseTypeLabel(phrase.type as PhraseType)}
                     </Chip>
                   </TableCell>
                   <TableCell>{phrase.weight}</TableCell>
+                  <TableCell>
+                    <Chip color={getStatusColor(phrase.status)} variant="flat" size="sm">
+                      {getStatusLabel(phrase.status)}
+                    </Chip>
+                  </TableCell>
                   <TableCell className="max-w-xs truncate">
                     {phrase.remark || '-'}
                   </TableCell>

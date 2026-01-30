@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import Link from 'next/link'
 import {
   Card,
   CardBody,
@@ -8,28 +9,39 @@ import {
   Button,
   Spinner,
   Chip,
-  useDisclosure
+  Tabs,
+  Tab
 } from '@heroui/react'
 import { useAuthStore } from '@/lib/store/auth'
 import { useAPI } from '@/lib/hooks/useSWR'
 import Navbar from '@/app/components/Navbar'
-import CreateIssueModal from '@/app/components/CreateIssueModal'
 
-interface Issue {
-  id: number
-  title: string
-  content: string
-  status: 'OPEN' | 'CLOSED' | 'IN_PROGRESS'
+interface Batch {
+  id: string
+  description: string
+  status: 'Draft' | 'Submitted' | 'Approved' | 'Rejected' | 'Published'
   createAt: string
-  author: {
+  creator: {
     id: number
     name: string
     nickname: string | null
   }
+  sourceIssue?: {
+    id: number
+    title: string
+  }
+  pullRequests: Array<{
+    id: number
+    status: string
+    hasConflict: boolean
+  }>
+  _count: {
+    pullRequests: number
+  }
 }
 
-interface IssuesResponse {
-  issues: Issue[]
+interface BatchesResponse {
+  batches: Batch[]
   pagination: {
     page: number
     pageSize: number
@@ -38,63 +50,86 @@ interface IssuesResponse {
   }
 }
 
-export default function HomePage() {
+export default function BatchesPage() {
   const { isAuthenticated } = useAuthStore()
+  const [status, setStatus] = useState<string>('all')
   const [page, setPage] = useState(1)
 
-  const { data, error, isLoading, mutate } = useAPI<IssuesResponse>(
-    `/api/issues?page=${page}&pageSize=10`
+  const statusParam = status === 'all' ? '' : `&status=${status}`
+  const { data, error, isLoading } = useAPI<BatchesResponse>(
+    isAuthenticated() ? `/api/batches?page=${page}&pageSize=10${statusParam}` : null
   )
-
-  const { isOpen, onOpen, onClose } = useDisclosure()
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'OPEN':
-        return 'success'
-      case 'CLOSED':
+      case 'Draft':
         return 'default'
-      case 'IN_PROGRESS':
-        return 'warning'
+      case 'Submitted':
+        return 'primary'
+      case 'Approved':
+        return 'success'
+      case 'Rejected':
+        return 'danger'
+      case 'Published':
+        return 'secondary'
       default:
         return 'default'
     }
   }
 
   const getStatusText = (status: string) => {
-    switch (status) {
-      case 'OPEN':
-        return '开放'
-      case 'CLOSED':
-        return '已关闭'
-      case 'IN_PROGRESS':
-        return '进行中'
-      default:
-        return status
+    const map: Record<string, string> = {
+      Draft: '草稿',
+      Submitted: '已提交',
+      Approved: '已通过',
+      Rejected: '已拒绝',
+      Published: '已发布'
     }
+    return map[status] || status
+  }
+
+  if (!isAuthenticated()) {
+    return (
+      <>
+        <Navbar />
+        <div className="min-h-screen flex items-center justify-center bg-background">
+          <Card>
+            <CardBody className="text-center">
+              <p className="text-default-500 mb-4">请先登录</p>
+              <Button as={Link} href="/login" color="primary">
+                去登录
+              </Button>
+            </CardBody>
+          </Card>
+        </div>
+      </>
+    )
   }
 
   if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <Spinner size="lg" label="正在加载数据..." />
-      </div>
+      <>
+        <Navbar />
+        <div className="min-h-screen flex items-center justify-center bg-background">
+          <Spinner size="lg" label="加载中..." />
+        </div>
+      </>
     )
   }
 
-  if (error && error.status !== 401) {
+  if (error) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background p-8">
-        <Card className="max-w-md">
-          <CardBody className="text-center">
-            <p className="text-danger mb-4">加载失败</p>
-            <p className="text-default-500 mb-4">{error.message || '发生未知错误'}</p>
-            <Button color="primary" onPress={() => mutate()}>
-              重试
-            </Button>
-          </CardBody>
-        </Card>
-      </div>
+      <>
+        <Navbar />
+        <div className="min-h-screen flex items-center justify-center bg-background p-8">
+          <Card className="max-w-md">
+            <CardBody className="text-center">
+              <p className="text-danger mb-4">加载失败</p>
+              <p className="text-default-500">{error.message}</p>
+            </CardBody>
+          </Card>
+        </div>
+      </>
     )
   }
 
@@ -105,51 +140,77 @@ export default function HomePage() {
         <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           <div className="flex justify-between items-center mb-6">
             <div>
-              <h2 className="text-2xl font-bold mb-2">Issues</h2>
+              <h2 className="text-2xl font-bold mb-2">改词</h2>
               <p className="text-default-500">
-                共 {data?.pagination.total || 0} 个 issue
+                共 {data?.pagination.total || 0} 个
               </p>
             </div>
-            {isAuthenticated() && (
-              <Button color="primary" onPress={onOpen}>
-                新建 Issue
-              </Button>
-            )}
+            <Button
+              as={Link}
+              href="/batch/new"
+              color="primary"
+            >
+              新建
+            </Button>
           </div>
 
-          {error && (
-            <div className="mb-4 p-4 bg-danger-50 dark:bg-danger-100/10 text-danger rounded-lg">
-              获取 issues 失败: {error.message}
-            </div>
-          )}
+          <Tabs
+            selectedKey={status}
+            onSelectionChange={(key) => setStatus(key as string)}
+            className="mb-6"
+          >
+            <Tab key="all" title="全部" />
+            <Tab key="Draft" title="草稿" />
+            <Tab key="Submitted" title="待审核" />
+            <Tab key="Approved" title="已通过" />
+            <Tab key="Published" title="已发布" />
+          </Tabs>
 
           <div className="grid gap-4">
-            {data?.issues.map((issue) => (
-              <Card key={issue.id}>
+            {data?.batches.map((batch) => (
+              <Card key={batch.id} isPressable as={Link} href={`/batch/${batch.id}`}>
                 <CardHeader className="flex justify-between items-start">
                   <div className="flex-1">
-                    <h3 className="text-lg font-semibold">{issue.title}</h3>
+                    <div className="flex items-center gap-2 mb-2">
+                      <h3 className="text-lg font-semibold">
+                        {batch.description || '未命名批次'}
+                      </h3>
+                      <Chip
+                        color={getStatusColor(batch.status)}
+                        size="sm"
+                        variant="flat"
+                      >
+                        {getStatusText(batch.status)}
+                      </Chip>
+                    </div>
                     <p className="text-small text-default-500">
-                      由 {issue.author.nickname || issue.author.name} 创建于{' '}
-                      {new Date(issue.createAt).toLocaleString('zh-CN')}
+                      由 {batch.creator.nickname || batch.creator.name} 创建于{' '}
+                      {new Date(batch.createAt).toLocaleString('zh-CN')}
                     </p>
+                    {batch.sourceIssue && (
+                      <p className="text-small text-primary mt-1">
+                        关联讨论: #{batch.sourceIssue.id} {batch.sourceIssue.title}
+                      </p>
+                    )}
                   </div>
-                  <Chip color={getStatusColor(issue.status)} variant="flat">
-                    {getStatusText(issue.status)}
-                  </Chip>
                 </CardHeader>
                 <CardBody>
-                  <p className="text-default-700 whitespace-pre-wrap">
-                    {issue.content}
-                  </p>
+                  <div className="flex items-center gap-4 text-small text-default-500">
+                    <span>📝 {batch._count.pullRequests} 个修改</span>
+                    {batch.pullRequests.some((pr) => pr.hasConflict) && (
+                      <Chip color="warning" size="sm" variant="flat">
+                        ⚠️ 有冲突
+                      </Chip>
+                    )}
+                  </div>
                 </CardBody>
               </Card>
             ))}
 
-            {data?.issues.length === 0 && !isLoading && (
+            {data?.batches.length === 0 && (
               <Card>
                 <CardBody className="text-center py-12">
-                  <p className="text-default-500">暂无 issue</p>
+                  <p className="text-default-500">暂无批次</p>
                 </CardBody>
               </Card>
             )}
@@ -175,12 +236,6 @@ export default function HomePage() {
             </div>
           )}
         </main>
-
-        <CreateIssueModal
-          isOpen={isOpen}
-          onClose={onClose}
-          onSuccess={mutate}
-        />
       </div>
     </>
   )

@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { conflictDetector } from '@/lib/services/conflictDetector'
+import { prisma } from '@/lib/prisma'
+import { getDefaultWeight, type PhraseType } from '@/lib/constants/phraseTypes'
 
 interface PRItemInput {
   id: string
@@ -8,6 +10,7 @@ interface PRItemInput {
   oldWord?: string
   code: string
   weight?: number
+  type?: string
 }
 
 export async function POST(request: NextRequest) {
@@ -52,6 +55,18 @@ export async function POST(request: NextRequest) {
         code: item.code,
         weight: item.weight
       })
+
+      // For Create action with duplicate code, calculate suggested weight
+      if (item.action === 'Create' && conflict.currentPhrase && item.type) {
+        const existingCount = await prisma.phrase.count({
+          where: { code: item.code }
+        })
+        const baseWeight = getDefaultWeight(item.type as PhraseType)
+        const suggestedWeight = baseWeight + existingCount
+
+        // Update impact message with weight info
+        conflict.impact = `编码 "${item.code}" 已被词条 "${conflict.currentPhrase.word}" 占用，将创建重码（权重: ${suggestedWeight}）`
+      }
 
       results.push({
         id: item.id,

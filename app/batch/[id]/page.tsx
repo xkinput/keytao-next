@@ -218,7 +218,7 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
               <p className="text-default-500">{error?.message || '批次不存在'}</p>
               <Button
                 className="mt-4"
-                onPress={() => router.push('/batches')}
+                onPress={() => router.push('/')}
               >
                 返回列表
               </Button>
@@ -241,7 +241,7 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
           <div className="mb-6">
             <Button
               variant="light"
-              onPress={() => router.push('/batches')}
+              onPress={() => router.push('/')}
               className="mb-4"
             >
               ← 返回列表

@@ -20,11 +20,11 @@ export default function NewBatchPage() {
           body: { description: defaultName }
         }) as { batch: { id: string } }
 
-        router.push(`/batches/${result.batch.id}`)
+        router.push(`/batch/${result.batch.id}`)
       } catch (err) {
         const error = err as Error
         alert(error.message || '创建失败')
-        router.push('/batches')
+        router.push('/')
       }
     }
 

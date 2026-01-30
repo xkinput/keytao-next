@@ -15,9 +15,12 @@ import {
   Card,
   CardBody,
   CardHeader,
-  Chip
+  Chip,
+  RadioGroup,
+  Radio
 } from '@heroui/react'
 import { apiRequest } from '@/lib/hooks/useSWR'
+import { getPhraseTypeOptions, getDefaultWeight, type PhraseType } from '@/lib/constants/phraseTypes'
 
 interface CreatePRModalProps {
   isOpen: boolean
@@ -133,6 +136,14 @@ export default function CreatePRModal({
     setPRItems(items => items.map(item => {
       if (item.id === id) {
         const newItem = { ...item, ...updates }
+        // If type changed and weight is default or empty, update to new default
+        if ('type' in updates && updates.type) {
+          const currentWeight = parseInt(item.weight) || 0
+          const oldDefaultWeight = getDefaultWeight(item.type as PhraseType)
+          if (!item.weight || currentWeight === oldDefaultWeight) {
+            newItem.weight = getDefaultWeight(updates.type as PhraseType).toString()
+          }
+        }
         // Reset check state if any data changed (except checking/hasChecked/conflict)
         if ('word' in updates || 'code' in updates || 'oldWord' in updates || 'action' in updates || 'weight' in updates) {
           newItem.hasChecked = false
@@ -192,7 +203,8 @@ export default function CreatePRModal({
             word: item.word,
             oldWord: item.action === 'Change' ? item.oldWord : undefined,
             code: item.code,
-            weight: item.weight ? parseInt(item.weight) : undefined
+            weight: item.weight ? parseInt(item.weight) : undefined,
+            type: item.type
           }))
         }
       }) as { results: Array<{ id: string; conflict: ConflictInfo }> }
@@ -235,6 +247,52 @@ export default function CreatePRModal({
       }
       if (item.conflict?.hasConflict) {
         alert(`存在冲突，请解决后再提交（项目 #${item.id}）`)
+        return
+      }
+    }
+
+    // Collect items that need confirmation
+    const itemsNeedingConfirmation: string[] = []
+
+    for (const item of prItems) {
+      // Check for duplicate code (重码) in Create action
+      if (item.action === 'Create' && item.conflict?.currentPhrase) {
+        // Extract suggested weight from impact message
+        const match = item.conflict.impact?.match(/权重: (\d+)/);
+        const actualWeight = match ? match[1] : (item.conflict.currentPhrase.weight + 1).toString();
+
+        itemsNeedingConfirmation.push(
+          `📍 项目 #${item.id} - 创建重码警告:\n` +
+          `   编码: ${item.code}\n` +
+          `   现有词条: ${item.conflict.currentPhrase.word} (权重: ${item.conflict.currentPhrase.weight})\n` +
+          `   新增词条: ${item.word} (权重: ${actualWeight})\n` +
+          `   ⚠️ 这将创建重码（同一编码对应多个词条）！`
+        )
+      }
+
+      // Check for Change action - warn about removal
+      if (item.action === 'Change' && item.oldWord) {
+        itemsNeedingConfirmation.push(
+          `📍 项目 #${item.id} - 修改操作警告:\n` +
+          `   将移除: "${item.oldWord}" @ "${item.code}"\n` +
+          `   替换为: "${item.word}" @ "${item.code}"\n` +
+          `   💡 如果 "${item.oldWord}" 仍然需要，请考虑:\n` +
+          `      1. 为它创建新的词条并分配其他编码\n` +
+          `      2. 或者使用"创建"操作添加新词，而不是"修改"`
+        )
+      }
+    }
+
+    // Show confirmation dialog if needed
+    if (itemsNeedingConfirmation.length > 0) {
+      const message =
+        '⚠️⚠️⚠️ 重要提示 - 请仔细阅读以下警告 ⚠️⚠️⚠️\n\n' +
+        itemsNeedingConfirmation.join('\n\n' + '─'.repeat(50) + '\n\n') +
+        '\n\n' + '═'.repeat(50) + '\n' +
+        '确认要继续提交吗？\n' +
+        '点击"确定"继续，点击"取消"返回修改。'
+
+      if (!confirm(message)) {
         return
       }
     }
@@ -340,16 +398,50 @@ export default function CreatePRModal({
                 )}
               </CardHeader>
               <CardBody className="gap-3">
-                <Select
-                  label="操作类型"
-                  selectedKeys={[item.action]}
-                  onChange={(e) => updatePRItem(item.id, { action: e.target.value as 'Create' | 'Change' | 'Delete' })}
+                <RadioGroup
+                  orientation="horizontal"
+                  value={item.action}
+                  onValueChange={(value) => updatePRItem(item.id, { action: value as 'Create' | 'Change' | 'Delete' })}
                   isRequired
+                  size="sm"
+                  classNames={{
+                    wrapper: "gap-3",
+                  }}
                 >
-                  <SelectItem key="Create">新增词条</SelectItem>
-                  <SelectItem key="Change">修改词</SelectItem>
-                  <SelectItem key="Delete">删除词条</SelectItem>
-                </Select>
+                  <Radio
+                    value="Create"
+                    classNames={{
+                      base: "inline-flex m-0 bg-content1 hover:bg-content2 items-center justify-between flex-row-reverse max-w-full cursor-pointer rounded-lg gap-4 p-4 border-2 border-transparent data-[selected=true]:border-primary",
+                    }}
+                  >
+                    <div className="flex flex-col gap-1">
+                      <span className="text-small font-semibold">新增词条</span>
+                      <span className="text-tiny text-default-400">创建新的词典条目</span>
+                    </div>
+                  </Radio>
+                  <Radio
+                    value="Change"
+                    classNames={{
+                      base: "inline-flex m-0 bg-content1 hover:bg-content2 items-center justify-between flex-row-reverse max-w-full cursor-pointer rounded-lg gap-4 p-4 border-2 border-transparent data-[selected=true]:border-primary",
+                    }}
+                  >
+                    <div className="flex flex-col gap-1">
+                      <span className="text-small font-semibold">修改词</span>
+                      <span className="text-tiny text-default-400">按编码更改现有词条</span>
+                    </div>
+                  </Radio>
+                  <Radio
+                    value="Delete"
+                    classNames={{
+                      base: "inline-flex m-0 bg-content1 hover:bg-content2 items-center justify-between flex-row-reverse max-w-full cursor-pointer rounded-lg gap-4 p-4 border-2 border-transparent data-[selected=true]:border-primary",
+                    }}
+                  >
+                    <div className="flex flex-col gap-1">
+                      <span className="text-small font-semibold">删除词条</span>
+                      <span className="text-tiny text-default-400">移除词典条目</span>
+                    </div>
+                  </Radio>
+                </RadioGroup>
 
                 {item.action === 'Change' ? (
                   <>
@@ -404,22 +496,26 @@ export default function CreatePRModal({
                   <div className="flex gap-2">
                     <Select
                       label="类型"
+                      defaultSelectedKeys={[item.type]}
                       selectedKeys={[item.type]}
-                      onChange={(e) => updatePRItem(item.id, { type: e.target.value })}
+                      onSelectionChange={(keys) => {
+                        const selected = Array.from(keys)[0] as string
+                        updatePRItem(item.id, { type: selected })
+                      }}
+                      multiple={false}
+                      disallowEmptySelection
                       className="flex-1"
                     >
-                      <SelectItem key="Single">单字</SelectItem>
-                      <SelectItem key="Phrase">词组</SelectItem>
-                      <SelectItem key="Sentence">短句</SelectItem>
-                      <SelectItem key="Symbol">符号</SelectItem>
-                      <SelectItem key="Link">链接</SelectItem>
-                      <SelectItem key="Poem">诗句</SelectItem>
-                      <SelectItem key="Other">其他</SelectItem>
+                      {getPhraseTypeOptions().map(option => (
+                        <SelectItem key={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
                     </Select>
                     <Input
                       label="权重"
                       type="number"
-                      placeholder="可选"
+                      placeholder={`默认: ${getDefaultWeight(item.type as PhraseType)}​`}
                       value={item.weight}
                       onValueChange={(v) => updatePRItem(item.id, { weight: v })}
                       className="flex-1"
@@ -436,7 +532,8 @@ export default function CreatePRModal({
                 />
 
                 {item.conflict && (
-                  <Card className={item.conflict.hasConflict ? 'border-warning' : 'border-success'}>
+                  <Card className={item.conflict.hasConflict ? 'border-warning' :
+                    item.conflict.currentPhrase && item.action === 'Create' ? 'border-warning' : 'border-success'}>
                     <CardBody className="max-h-75 overflow-y-auto">
                       {item.conflict.hasConflict ? (
                         <div>
@@ -467,6 +564,47 @@ export default function CreatePRModal({
                               )}
                             </div>
                           ))}
+                        </div>
+                      ) : item.conflict.currentPhrase && item.action === 'Create' ? (
+                        <div>
+                          <Chip color="warning" variant="flat" size="sm" className="mb-2">
+                            ⚠️ 重码警告
+                          </Chip>
+                          <p className="text-small mb-2 text-warning-600 dark:text-warning-400">
+                            {item.conflict.impact || '此编码已存在其他词条，将创建重码'}
+                          </p>
+                          <div className="mb-2 p-2 bg-warning-50 dark:bg-warning-100/10 rounded text-small">
+                            <p className="font-medium text-warning-700 dark:text-warning-400">现有词条:</p>
+                            <p>{item.conflict.currentPhrase.word} @ {item.conflict.currentPhrase.code} (权重: {item.conflict.currentPhrase.weight})</p>
+                          </div>
+                          <div className="p-2 bg-warning-50 dark:bg-warning-100/10 rounded text-small">
+                            <p className="font-medium text-warning-700 dark:text-warning-400">即将创建:</p>
+                            <p>{item.word} @ {item.code} (权重: {(() => {
+                              // Extract suggested weight from impact message
+                              const match = item.conflict.impact?.match(/权重: (\d+)/);
+                              if (match) return match[1];
+                              // Fallback: calculate based on current phrase weight
+                              return item.conflict.currentPhrase.weight + 1;
+                            })()})</p>
+                          </div>
+                          {item.conflict.suggestions.length > 0 && (
+                            <div className="mt-2 space-y-1">
+                              <p className="text-small font-medium">建议:</p>
+                              {item.conflict.suggestions.map((sug, idx) => (
+                                <div key={idx} className="p-2 bg-primary-50 dark:bg-primary-100/10 rounded text-small flex justify-between items-start">
+                                  <div className="flex-1">
+                                    <p className="text-default-600 dark:text-default-400">{sug.reason}</p>
+                                    {sug.toCode && <p className="text-primary">建议编码: {sug.toCode}</p>}
+                                  </div>
+                                  {sug.toCode && sug.action === 'Adjust' && (
+                                    <Button size="sm" variant="flat" color="primary" onPress={() => applySuggestion(item.id, sug)}>
+                                      应用
+                                    </Button>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
                         </div>
                       ) : (
                         <div>
@@ -499,18 +637,6 @@ export default function CreatePRModal({
               </CardBody>
             </Card>
           ))}
-
-          {!isEditMode && (
-            <Button
-              color="primary"
-              variant="bordered"
-              onPress={addPRItem}
-              fullWidth
-              className="mt-2 mb-4 shrink-0"
-            >
-              + 添加另一个修改
-            </Button>
-          )}
         </ModalBody>
         <ModalFooter className="flex-col gap-2">
           <Button
@@ -523,6 +649,15 @@ export default function CreatePRModal({
             🔍 检测所有冲突
           </Button>
           <div className="flex gap-2 w-full">
+            {!isEditMode && (
+              <Button
+                color="primary"
+                variant="bordered"
+                onPress={addPRItem}
+              >
+                + 添加
+              </Button>
+            )}
             <Button variant="light" onPress={handleClose} className="flex-1">
               取消
             </Button>
