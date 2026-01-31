@@ -55,10 +55,12 @@ export default function BatchesPage() {
   const [status, setStatus] = useState<string>('all')
   const [page, setPage] = useState(1)
 
-  const statusParam = status === 'all' ? '' : `&status=${status}`
-  const { data, error, isLoading } = useAPI<BatchesResponse>(
-    isAuthenticated() ? `/api/batches?page=${page}&pageSize=10${statusParam}` : null
+  const { data, isLoading } = useAPI<BatchesResponse>(
+    `/api/batches?page=${page}&pageSize=10${status === 'all' ? '' : `&status=${status}`}`,
+    { withAuth: false, keepPreviousData: true }
   )
+
+  const filteredBatches = (data?.batches || []).filter((b) => (status === 'all' ? true : b.status === status))
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -88,46 +90,12 @@ export default function BatchesPage() {
     return map[status] || status
   }
 
-  if (!isAuthenticated()) {
-    return (
-      <>
-        <Navbar />
-        <div className="min-h-screen flex items-center justify-center bg-background">
-          <Card>
-            <CardBody className="text-center">
-              <p className="text-default-500 mb-4">请先登录</p>
-              <Button as={Link} href="/login" color="primary">
-                去登录
-              </Button>
-            </CardBody>
-          </Card>
-        </div>
-      </>
-    )
-  }
-
   if (isLoading) {
     return (
       <>
         <Navbar />
         <div className="min-h-screen flex items-center justify-center bg-background">
           <Spinner size="lg" label="加载中..." />
-        </div>
-      </>
-    )
-  }
-
-  if (error) {
-    return (
-      <>
-        <Navbar />
-        <div className="min-h-screen flex items-center justify-center bg-background p-8">
-          <Card className="max-w-md">
-            <CardBody className="text-center">
-              <p className="text-danger mb-4">加载失败</p>
-              <p className="text-default-500">{error.message}</p>
-            </CardBody>
-          </Card>
         </div>
       </>
     )
@@ -142,8 +110,11 @@ export default function BatchesPage() {
             <div>
               <h2 className="text-2xl font-bold mb-2">改词</h2>
               <p className="text-default-500">
-                共 {data?.pagination.total || 0} 个
+                共 {data?.pagination?.total || 0} 个
               </p>
+              {!isAuthenticated() && (
+                <p className="text-sm text-default-500">当前为访客，仅可查看，登录后可创建与编辑。</p>
+              )}
             </div>
             <Button
               as={Link}
@@ -167,7 +138,7 @@ export default function BatchesPage() {
           </Tabs>
 
           <div className="grid gap-4">
-            {data?.batches.map((batch) => (
+            {filteredBatches.map((batch) => (
               <Card key={batch.id} isPressable as={Link} href={`/batch/${batch.id}`}>
                 <CardHeader className="flex justify-between items-start">
                   <div className="flex-1">
@@ -207,7 +178,7 @@ export default function BatchesPage() {
               </Card>
             ))}
 
-            {data?.batches.length === 0 && (
+            {filteredBatches.length === 0 && (
               <Card>
                 <CardBody className="text-center py-12">
                   <p className="text-default-500">暂无批次</p>
@@ -220,7 +191,7 @@ export default function BatchesPage() {
             <div className="mt-6 flex justify-center gap-2">
               <Button
                 isDisabled={data.pagination.page === 1}
-                onPress={() => setPage(data.pagination.page - 1)}
+                onPress={() => setPage((p) => Math.max(1, p - 1))}
               >
                 上一页
               </Button>
@@ -229,7 +200,7 @@ export default function BatchesPage() {
               </span>
               <Button
                 isDisabled={data.pagination.page === data.pagination.totalPages}
-                onPress={() => setPage(data.pagination.page + 1)}
+                onPress={() => setPage((p) => Math.min(data.pagination.totalPages, p + 1))}
               >
                 下一页
               </Button>

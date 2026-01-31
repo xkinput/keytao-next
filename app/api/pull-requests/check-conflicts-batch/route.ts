@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { getSession } from '@/lib/auth'
 import { conflictDetector } from '@/lib/services/conflictDetector'
 import { prisma } from '@/lib/prisma'
 import { getDefaultWeight, type PhraseType } from '@/lib/constants/phraseTypes'
@@ -15,6 +16,11 @@ interface PRItemInput {
 
 export async function POST(request: NextRequest) {
   try {
+    const session = await getSession()
+    if (!session) {
+      return NextResponse.json({ error: '未登录' }, { status: 401 })
+    }
+
     const body = await request.json()
     const { items } = body as { items: PRItemInput[] }
 
@@ -131,22 +137,29 @@ export async function POST(request: NextRequest) {
           }
 
           // Check if item2 resolves item1's conflict
-          // e.g., item1 creates a duplicate, item2 moves the existing one away
+          // e.g., item1 creates a duplicate, item2 moves or deletes the existing one
           if (
-            result1.conflict.hasConflict &&
             result1.conflict.currentPhrase &&
-            item2.action === 'Change' &&
-            item2.oldWord === result1.conflict.currentPhrase.word &&
-            item2.code === result1.conflict.currentPhrase.code
+            ((item2.action === 'Change' &&
+              item2.oldWord === result1.conflict.currentPhrase.word &&
+              item2.code === result1.conflict.currentPhrase.code) ||
+              (item2.action === 'Delete' &&
+                item2.word === result1.conflict.currentPhrase.word &&
+                item2.code === result1.conflict.currentPhrase.code))
           ) {
-            // item2 is moving away the conflicting phrase
+            // item2 is removing the conflicting phrase
             result1.conflict.hasConflict = false
-            result1.conflict.impact = `冲突已由本批次修改 #${j + 1} 解决（移动了重码词）`
+            const resolutionAction = item2.action === 'Change' ? '移动' : '删除'
+            const explanation = item2.action === 'Change'
+              ? `修改 #${j + 1} 将 "${item2.oldWord}" 移动到其他编码`
+              : `修改 #${j + 1} 删除了 "${item2.word}"`
+
+            result1.conflict.impact = `冲突已由本批次${explanation}而解决`
             result1.conflict.suggestions = [
               {
                 action: 'Resolved',
                 word: item1.word,
-                reason: `修改 #${j + 1} 将 "${item2.oldWord}" 移动到其他编码`
+                reason: explanation
               }
             ]
           }

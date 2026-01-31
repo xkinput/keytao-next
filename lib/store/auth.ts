@@ -18,6 +18,15 @@ interface AuthState {
   setHasHydrated: (state: boolean) => void
 }
 
+const isTokenExpired = (token: string): boolean => {
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1]))
+    return payload.exp * 1000 < Date.now()
+  } catch {
+    return true
+  }
+}
+
 export const useAuthStore = create<AuthState>()(
   persist(
     (set, get) => ({
@@ -26,13 +35,20 @@ export const useAuthStore = create<AuthState>()(
       _hasHydrated: false,
       setAuth: (token, user) => set({ token, user }),
       clearAuth: () => set({ token: null, user: null }),
-      isAuthenticated: () => !!get().token,
+      isAuthenticated: () => {
+        const token = get().token
+        return !!token && !isTokenExpired(token)
+      },
       setHasHydrated: (state) => set({ _hasHydrated: state }),
     }),
     {
       name: 'auth-storage',
       onRehydrateStorage: () => (state) => {
-        state?.setHasHydrated(true)
+        if (state?.token && isTokenExpired(state.token)) {
+          state.clearAuth()
+        } else {
+          state?.setHasHydrated(true)
+        }
       },
     }
   )

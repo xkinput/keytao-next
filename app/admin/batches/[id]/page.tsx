@@ -9,10 +9,15 @@ import {
   Button,
   Spinner,
   Chip,
-  Textarea
+  Textarea,
+  Tabs,
+  Tab
 } from '@heroui/react'
+import BatchPreview from '@/app/components/BatchPreview'
 import { useAPI, apiRequest } from '@/lib/hooks/useSWR'
 import Navbar from '@/app/components/Navbar'
+import BatchPRList from '@/app/components/BatchPRList'
+import { useUIStore } from '@/lib/store/ui'
 
 interface PullRequest {
   id: number
@@ -66,68 +71,61 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
   const router = useRouter()
   const [reviewNote, setReviewNote] = useState('')
   const [processing, setProcessing] = useState(false)
+  const { openAlert, openConfirm } = useUIStore()
 
   const { data: batch, error, isLoading, mutate } = useAPI<{ batch: BatchDetail }>(
-    `/api/admin/batches/${resolvedParams.id}`
+    `/api/admin/batches/${resolvedParams.id}`,
+    { withAuth: true }
   )
 
   const handleApprove = async () => {
-    if (!confirm('确定要批准这个批次吗？')) {
-      return
-    }
-
-    setProcessing(true)
-    try {
-      await apiRequest(`/api/admin/batches/${resolvedParams.id}/approve`, {
-        method: 'POST',
-        body: { reviewNote: reviewNote || undefined }
-      })
-      alert('批次已批准')
-      mutate()
-      router.push('/admin/batches')
-    } catch (err) {
-      const error = err as Error
-      alert(error.message || '批准失败')
-    } finally {
-      setProcessing(false)
-    }
+    openConfirm('确定要批准这个批次吗？', async () => {
+      setProcessing(true)
+      try {
+        await apiRequest(`/api/admin/batches/${resolvedParams.id}/approve`, {
+          method: 'POST',
+          body: { reviewNote: reviewNote || undefined },
+          withAuth: true
+        })
+        openAlert('批次已批准', '操作成功')
+        mutate()
+        router.push('/admin/batches')
+      } catch (err) {
+        const error = err as Error
+        openAlert(error.message || '批准失败', '操作失败')
+      } finally {
+        setProcessing(false)
+      }
+    }, '确认批准', '批准')
   }
 
   const handleReject = async () => {
     if (!reviewNote.trim()) {
-      alert('拒绝时必须填写审核意见')
+      openAlert('拒绝时必须填写审核意见', '验证错误')
       return
     }
 
-    if (!confirm('确定要拒绝这个批次吗？')) {
-      return
-    }
-
-    setProcessing(true)
-    try {
-      await apiRequest(`/api/admin/batches/${resolvedParams.id}/reject`, {
-        method: 'POST',
-        body: { reviewNote }
-      })
-      alert('批次已拒绝')
-      mutate()
-      router.push('/admin/batches')
-    } catch (err) {
-      const error = err as Error
-      alert(error.message || '拒绝失败')
-    } finally {
-      setProcessing(false)
-    }
+    openConfirm('确定要拒绝这个批次吗？', async () => {
+      setProcessing(true)
+      try {
+        await apiRequest(`/api/admin/batches/${resolvedParams.id}/reject`, {
+          method: 'POST',
+          body: { reviewNote },
+          withAuth: true
+        })
+        openAlert('批次已拒绝', '操作成功')
+        mutate()
+        router.push('/admin/batches')
+      } catch (err) {
+        const error = err as Error
+        openAlert(error.message || '拒绝失败', '操作失败')
+      } finally {
+        setProcessing(false)
+      }
+    }, '确认拒绝', '拒绝', '取消')
   }
 
-  const getActionText = (action: string) => {
-    const map: Record<string, string> = {
-      Create: '新增',
-      Change: '修改',
-      Delete: '删除'
-    }
-    return map[action] || action
-  }
+
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -242,73 +240,20 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
             </Card>
           </div>
 
-          <div className="space-y-4 mb-6">
-            <h3 className="text-xl font-bold">
-              修改列表 ({batchData.pullRequests.length})
-            </h3>
+          <Tabs aria-label="批次视图" className="mb-4">
+            <Tab key="list" title={`📝 修改列表 (${batchData.pullRequests.length})`}>
+              <div className="space-y-4 pt-4">
 
-            {batchData.pullRequests.map((pr) => (
-              <Card key={pr.id}>
-                <CardHeader className="flex justify-between">
-                  <div className="flex items-center gap-2">
-                    <Chip size="sm" variant="flat">
-                      {getActionText(pr.action)}
-                    </Chip>
-                    <span className="font-semibold">
-                      {pr.word || pr.phrase?.word}
-                    </span>
-                    <span className="text-default-500">→</span>
-                    <code className="text-primary">{pr.code || pr.phrase?.code}</code>
-                    {pr.weight && (
-                      <span className="text-small text-default-400">
-                        (权重: {pr.weight})
-                      </span>
-                    )}
-                  </div>
-                  {pr.hasConflict && (
-                    <Chip color="warning" size="sm" variant="flat">
-                      ⚠️ 冲突
-                    </Chip>
-                  )}
-                </CardHeader>
-                <CardBody>
-                  {pr.remark && (
-                    <div className="mb-3">
-                      <p className="text-small text-default-500">备注: {pr.remark}</p>
-                    </div>
-                  )}
+                <BatchPRList pullRequests={batchData.pullRequests} />
 
-                  {pr.hasConflict && pr.conflictReason && (
-                    <div className="mb-3 p-3 bg-warning-50 dark:bg-warning-100/10 rounded-lg">
-                      <p className="text-small text-warning">{pr.conflictReason}</p>
-                    </div>
-                  )}
-
-                  {pr.conflicts.length > 0 && (
-                    <div className="mb-3">
-                      <p className="text-small font-medium mb-2">冲突详情:</p>
-                      {pr.conflicts.map((conflict, idx) => (
-                        <div key={idx} className="text-small text-default-500 ml-4">
-                          编码 &quot;{conflict.code}&quot; 被 &quot;{conflict.currentWord}&quot; 占用
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  {pr.dependencies.length > 0 && (
-                    <div>
-                      <p className="text-small font-medium mb-2">依赖关系:</p>
-                      {pr.dependencies.map((dep, idx) => (
-                        <div key={idx} className="text-small text-default-500 ml-4">
-                          • 依赖 PR#{dep.dependsOn.id}: {dep.dependsOn.word} - {dep.reason}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </CardBody>
-              </Card>
-            ))}
-          </div>
+              </div>
+            </Tab>
+            <Tab key="preview" title="👁️ 预览执行">
+              <div className="pt-4">
+                <BatchPreview batchId={resolvedParams.id} />
+              </div>
+            </Tab>
+          </Tabs>
 
           {canReview && (
             <Card>

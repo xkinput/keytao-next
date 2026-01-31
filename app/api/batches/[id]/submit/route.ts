@@ -30,9 +30,9 @@ export async function POST(
       return NextResponse.json({ error: '无权限' }, { status: 403 })
     }
 
-    if (batch.status !== 'Draft') {
+    if (batch.status !== 'Draft' && batch.status !== 'Rejected') {
       return NextResponse.json(
-        { error: '只能提交草稿状态的批次' },
+        { error: '只能提交草稿或已拒绝状态的批次' },
         { status: 400 }
       )
     }
@@ -68,7 +68,10 @@ export async function POST(
     // Update batch status
     const updated = await prisma.batch.update({
       where: { id },
-      data: { status: 'Submitted' }
+      data: {
+        status: 'Submitted',
+        reviewNote: null // Clear previous rejection note
+      }
     })
 
     return NextResponse.json({ batch: updated })

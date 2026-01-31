@@ -116,9 +116,9 @@ export async function PATCH(
       return NextResponse.json({ error: '无权限' }, { status: 403 })
     }
 
-    if (pr.batch.status !== 'Draft') {
+    if (pr.batch.status !== 'Draft' && pr.batch.status !== 'Rejected') {
       return NextResponse.json(
-        { error: '只能编辑草稿状态批次中的 PR' },
+        { error: '只能编辑草稿或已拒绝状态批次中的 PR' },
         { status: 400 }
       )
     }
@@ -236,9 +236,9 @@ export async function DELETE(
       return NextResponse.json({ error: '无权限' }, { status: 403 })
     }
 
-    if (pr.batch.status !== 'Draft') {
+    if (pr.batch.status !== 'Draft' && pr.batch.status !== 'Rejected') {
       return NextResponse.json(
-        { error: '只能删除草稿状态批次中的 PR' },
+        { error: '只能删除草稿或已拒绝状态批次中的 PR' },
         { status: 400 }
       )
     }

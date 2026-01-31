@@ -22,12 +22,9 @@ export default function Navbar() {
   const isAdmin = !!adminCheck
 
   const handleLogout = async () => {
-    try {
-      await apiRequest('/api/auth/logout', { method: 'POST' })
-    } finally {
-      clearAuth()
-      router.push('/login')
-    }
+    // Client-only logout: clear local token and redirect
+    clearAuth()
+    router.push('/')
   }
 
   // 管理后台导航

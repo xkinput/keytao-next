@@ -45,7 +45,8 @@ export default function CreateIssueModal({
     try {
       await apiRequest('/api/issues', {
         method: 'POST',
-        body: { title, content }
+        body: { title, content },
+        withAuth: true
       })
 
       setTitle('')

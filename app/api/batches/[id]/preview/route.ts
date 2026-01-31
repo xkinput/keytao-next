@@ -1,0 +1,267 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { prisma } from '@/lib/prisma'
+
+interface PreviewPhrase {
+    word: string
+    code: string
+    type: string
+    weight: number
+    remark?: string
+}
+
+interface DiffItem {
+    type: 'add' | 'remove' | 'modify'
+    phrase?: PreviewPhrase // for add/remove
+    before?: PreviewPhrase // for modify
+    after?: PreviewPhrase // for modify
+}
+
+interface CodeChangeGroup {
+    code: string
+    diffs: DiffItem[]
+}
+
+interface PreviewStats {
+    added: number
+    modified: number
+    deleted: number
+}
+
+// GET /api/batches/:id/preview - Preview batch execution result
+export async function GET(
+    request: NextRequest,
+    { params }: { params: Promise<{ id: string }> }
+) {
+    try {
+        const { id } = await params
+
+        const batch = await prisma.batch.findUnique({
+            where: { id },
+            include: {
+                pullRequests: {
+                    orderBy: { createAt: 'asc' }
+                }
+            }
+        })
+
+        if (!batch) {
+            return NextResponse.json({ error: '批次不存在' }, { status: 404 })
+        }
+
+        // 1. Collect all codes involved
+        const codes = new Set<string>()
+        batch.pullRequests.forEach(pr => {
+            if (pr.code) codes.add(pr.code)
+        })
+
+        const isExecuted = ['Approved', 'Published'].includes(batch.status)
+        const changes: CodeChangeGroup[] = []
+        let addedCount = 0
+        let removedCount = 0
+        let modifiedCount = 0
+
+        if (isExecuted) {
+            // For executed batches, generate diffs directly from PRs history
+            // Group PRs by code
+            const prsByCode = new Map<string, typeof batch.pullRequests>()
+            batch.pullRequests.forEach(pr => {
+                if (!pr.code) return
+                if (!prsByCode.has(pr.code)) {
+                    prsByCode.set(pr.code, [])
+                }
+                prsByCode.get(pr.code)!.push(pr)
+            })
+
+            const sortedCodes = Array.from(codes).sort()
+            for (const code of sortedCodes) {
+                const prs = prsByCode.get(code) || []
+                const diffs: DiffItem[] = []
+
+                for (const pr of prs) {
+                    switch (pr.action) {
+                        case 'Create':
+                            if (pr.word) {
+                                diffs.push({
+                                    type: 'add',
+                                    phrase: {
+                                        word: pr.word,
+                                        code: code,
+                                        type: pr.type || 'Phrase',
+                                        weight: pr.weight || 0,
+                                        remark: pr.remark || undefined
+                                    }
+                                })
+                                addedCount++
+                            }
+                            break
+                        case 'Change':
+                            if (pr.word && pr.oldWord) {
+                                diffs.push({
+                                    type: 'modify',
+                                    before: {
+                                        word: pr.oldWord,
+                                        code: code,
+                                        type: 'Unknown', // We don't verify old type in history mode
+                                        weight: 0, // We don't verify old weight
+                                    },
+                                    after: {
+                                        word: pr.word,
+                                        code: code,
+                                        type: pr.type || 'Phrase',
+                                        weight: pr.weight || 0,
+                                        remark: pr.remark || undefined
+                                    }
+                                })
+                                modifiedCount++
+                            }
+                            break
+                        case 'Delete':
+                            if (pr.word) {
+                                diffs.push({
+                                    type: 'remove',
+                                    phrase: {
+                                        word: pr.word,
+                                        code: code,
+                                        type: pr.type || 'Phrase',
+                                        weight: 0,
+                                        remark: pr.remark || undefined
+                                    }
+                                })
+                                removedCount++
+                            }
+                            break
+                    }
+                }
+                if (diffs.length > 0) {
+                    changes.push({ code, diffs })
+                }
+            }
+
+        } else {
+            // For pending batches, use DB simulation logic
+            // 2. Fetch current state from DB (Before State)
+            const existingPhrases = await prisma.phrase.findMany({
+                where: {
+                    code: { in: Array.from(codes) }
+                }
+            })
+
+            // Use Maps to track state during simulation
+            const currentState = new Map<string, PreviewPhrase[]>()
+            const originalState = new Map<string, PreviewPhrase[]>()
+
+            // Initialize states
+            Array.from(codes).forEach(code => {
+                const phrases = existingPhrases
+                    .filter(p => p.code === code)
+                    .map(p => ({
+                        word: p.word,
+                        code: p.code,
+                        type: p.type,
+                        weight: p.weight,
+                        remark: p.remark || undefined
+                    }))
+
+                currentState.set(code, JSON.parse(JSON.stringify(phrases)))
+                originalState.set(code, JSON.parse(JSON.stringify(phrases)))
+            })
+
+            // 3. Simulate PR execution (After State)
+            for (const pr of batch.pullRequests) {
+                if (!pr.code) continue
+                const codePhrases = currentState.get(pr.code) || []
+
+                switch (pr.action) {
+                    case 'Create':
+                        if (pr.word) {
+                            codePhrases.push({
+                                word: pr.word,
+                                code: pr.code,
+                                type: pr.type || 'Phrase',
+                                weight: pr.weight || 0,
+                                remark: pr.remark || undefined
+                            })
+                        }
+                        break
+
+                    case 'Change':
+                        if (pr.oldWord && pr.word) {
+                            const index = codePhrases.findIndex(p => p.word === pr.oldWord && p.code === pr.code)
+                            if (index !== -1) {
+                                codePhrases[index] = {
+                                    ...codePhrases[index],
+                                    word: pr.word,
+                                    type: pr.type || codePhrases[index].type,
+                                    weight: pr.weight !== null ? pr.weight! : codePhrases[index].weight,
+                                    remark: pr.remark || codePhrases[index].remark
+                                }
+                            }
+                        }
+                        break
+
+                    case 'Delete':
+                        if (pr.word) {
+                            const index = codePhrases.findIndex(p => p.word === pr.word && p.code === pr.code)
+                            if (index !== -1) {
+                                codePhrases.splice(index, 1)
+                            }
+                        }
+                        break
+                }
+                currentState.set(pr.code, codePhrases)
+            }
+
+            // 4. Generate Diff grouped by code
+            const sortedCodes = Array.from(codes).sort()
+
+            for (const code of sortedCodes) {
+                const beforeList = originalState.get(code) || []
+                const afterList = currentState.get(code) || []
+                const diffs: DiffItem[] = []
+
+                const afterWords = new Set(afterList.map(p => p.word))
+                const beforeWords = new Set(beforeList.map(p => p.word))
+
+                // Removed
+                beforeList.forEach(p => {
+                    if (!afterWords.has(p.word)) {
+                        diffs.push({ type: 'remove', phrase: p })
+                        removedCount++
+                    } else {
+                        const newP = afterList.find(ap => ap.word === p.word)
+                        if (newP && (p.type !== newP.type || p.weight !== newP.weight || p.remark !== newP.remark)) {
+                            diffs.push({ type: 'modify', before: p, after: newP })
+                            modifiedCount++
+                        }
+                    }
+                })
+
+                // Added
+                afterList.forEach(p => {
+                    if (!beforeWords.has(p.word)) {
+                        diffs.push({ type: 'add', phrase: p })
+                        addedCount++
+                    }
+                })
+
+                if (diffs.length > 0) {
+                    changes.push({ code, diffs })
+                }
+            }
+        }
+
+        return NextResponse.json({
+            preview: {
+                changes,
+                summary: {
+                    added: addedCount,
+                    modified: modifiedCount,
+                    deleted: removedCount
+                }
+            }
+        })
+    } catch (error) {
+        console.error('Preview batch error:', error)
+        return NextResponse.json({ error: '预览失败' }, { status: 500 })
+    }
+}

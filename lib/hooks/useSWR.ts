@@ -29,6 +29,48 @@ const fetcher = async (url: string, token: string | null, options?: FetcherOptio
 
   const res = await fetch(url, config)
 
+  if (res.status === 401 && withAuth && token) {
+    // Try to refresh token once
+    try {
+      const refreshRes = await fetch('/api/auth/refresh', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+      })
+
+      if (refreshRes.ok) {
+        const refreshData = await refreshRes.json() as { token: string }
+        const newToken = refreshData.token
+        if (newToken) {
+          // update local store token
+          useAuthStore.getState().setAuth(newToken, useAuthStore.getState().user as any)
+
+          // retry original request with new token
+          if (!config.headers) config.headers = {}
+          // ensure headers typed as Record to set Authorization
+          const hdrs = config.headers as Record<string, string>
+          hdrs['Authorization'] = `Bearer ${newToken}`
+          config.headers = hdrs as HeadersInit
+          const retryRes = await fetch(url, config)
+          if (!retryRes.ok) {
+            const error = new Error('An error occurred while fetching the data.') as Error & {
+              info?: unknown
+              status?: number
+            }
+            error.info = await retryRes.json()
+            error.status = retryRes.status
+            throw error
+          }
+          return retryRes.json()
+        }
+      }
+    } catch {
+      // ignore refresh errors and fall through to throw original error
+    }
+  }
+
   if (!res.ok) {
     const error = new Error('An error occurred while fetching the data.') as Error & {
       info?: unknown

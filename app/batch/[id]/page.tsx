@@ -10,12 +10,17 @@ import {
   Spinner,
   Chip,
   useDisclosure,
-  Input
+  Input,
+  Tabs,
+  Tab
 } from '@heroui/react'
 import { useAuthStore } from '@/lib/store/auth'
 import { useAPI, apiRequest } from '@/lib/hooks/useSWR'
 import Navbar from '@/app/components/Navbar'
 import CreatePRModal from '@/app/components/CreatePRModal'
+import BatchPreview from '@/app/components/BatchPreview'
+import BatchPRList from '@/app/components/BatchPRList'
+import { useUIStore } from '@/lib/store/ui'
 
 interface PullRequest {
   id: number
@@ -69,6 +74,7 @@ interface BatchDetail {
     name: string
     nickname: string | null
   }
+  reviewNote?: string | null
   sourceIssue?: {
     id: number
     title: string
@@ -82,11 +88,11 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
   const router = useRouter()
   const { user } = useAuthStore()
   const [submitting, setSubmitting] = useState(false)
-  const [editingPR, setEditingPR] = useState<PullRequest | null>(null)
   const [editingName, setEditingName] = useState(false)
   const [batchName, setBatchName] = useState('')
   const [savingName, setSavingName] = useState(false)
   const { isOpen, onOpen, onClose } = useDisclosure()
+  const { openAlert, openConfirm } = useUIStore()
 
   const { data: batch, error, isLoading, mutate } = useAPI<{ batch: BatchDetail }>(
     `/api/batches/${resolvedParams.id}`
@@ -101,7 +107,7 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
 
   const handleSaveName = async () => {
     if (!batchName.trim()) {
-      alert('批次名称不能为空')
+      openAlert('批次名称不能为空', '验证错误')
       return
     }
 
@@ -109,13 +115,14 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
     try {
       await apiRequest(`/api/batches/${resolvedParams.id}`, {
         method: 'PATCH',
-        body: { description: batchName }
+        body: { description: batchName },
+        withAuth: true
       })
       await mutate()
       setEditingName(false)
     } catch (err) {
       const error = err as Error
-      alert(error.message || '保存失败')
+      openAlert(error.message || '保存失败', '出错了')
     } finally {
       setSavingName(false)
     }
@@ -126,58 +133,36 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
     setEditingName(false)
   }
 
-  const handleEdit = (pr: PullRequest) => {
-    setEditingPR(pr)
-    onOpen()
-  }
-
   const handleCloseModal = () => {
-    setEditingPR(null)
     onClose()
   }
 
-  const handleDelete = async (prId: number) => {
-    if (!confirm('确定要删除这个修改提议吗？')) {
-      return
-    }
 
-    try {
-      await apiRequest(`/api/pull-requests/${prId}`, {
-        method: 'DELETE'
-      })
-      mutate()
-    } catch (err) {
-      const error = err as Error
-      alert(error.message || '删除失败')
-    }
-  }
 
   const handleSubmit = async () => {
     if (!batch) return
 
-    setSubmitting(true)
-    try {
-      await apiRequest(`/api/batches/${resolvedParams.id}/submit`, {
-        method: 'POST'
-      })
-      alert('批次已提交审核')
-      mutate()
-    } catch (err) {
-      const error = err as Error
-      alert(error.message || '提交失败')
-    } finally {
-      setSubmitting(false)
-    }
+    if (!batch) return
+
+    openConfirm('确定要提交审核吗？提交后将无法修改。', async () => {
+      setSubmitting(true)
+      try {
+        await apiRequest(`/api/batches/${resolvedParams.id}/submit`, {
+          method: 'POST',
+          withAuth: true
+        })
+        openAlert('批次已提交审核', '提交成功')
+        mutate()
+      } catch (err) {
+        const error = err as Error
+        openAlert(error.message || '提交失败', '提交失败')
+      } finally {
+        setSubmitting(false)
+      }
+    }, '提交审核', '提交')
   }
 
-  const getActionText = (action: string) => {
-    const map: Record<string, string> = {
-      Create: '新增',
-      Change: '修改',
-      Delete: '删除'
-    }
-    return map[action] || action
-  }
+
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -231,7 +216,7 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
 
   const batchData = batch.batch
   const isOwner = user?.id === batchData.creator.id
-  const canEdit = isOwner && batchData.status === 'Draft'
+  const canEdit = isOwner && (batchData.status === 'Draft' || batchData.status === 'Rejected')
 
   return (
     <>
@@ -310,7 +295,7 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
                   {canEdit && (
                     <div className="flex gap-2">
                       <Button color="primary" onPress={onOpen}>
-                        添加修改
+                        {batchData.pullRequests.length > 0 ? '编辑修改' : '添加修改'}
                       </Button>
                       {batchData.pullRequests.length > 0 && (
                         <Button
@@ -334,137 +319,49 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
                 </CardBody>
               )}
             </Card>
-          </div>
 
-          <div className="space-y-4">
-            <h3 className="text-xl font-bold">
-              修改列表 ({batchData.pullRequests.length})
-            </h3>
-
-            {batchData.pullRequests.length === 0 ? (
-              <Card>
-                <CardBody className="text-center py-12">
-                  <p className="text-default-500 mb-4">还没有添加任何修改</p>
-                  {canEdit && (
-                    <Button color="primary" onPress={onOpen}>
-                      添加第一个修改
-                    </Button>
-                  )}
+            {batchData.status === 'Rejected' && batchData.reviewNote && (
+              <Card className="mt-4 border-danger border-2">
+                <CardHeader className="pb-0">
+                  <h3 className="text-large font-bold text-danger">⚠️ 审核拒绝原因</h3>
+                </CardHeader>
+                <CardBody>
+                  <p className="text-default-600">{batchData.reviewNote}</p>
                 </CardBody>
               </Card>
-            ) : (
-              batchData.pullRequests.map((pr) => (
-                <Card key={pr.id}>
-                  <CardHeader className="flex justify-between">
-                    <div className="flex items-center gap-2">
-                      <Chip size="sm" variant="flat">
-                        {getActionText(pr.action)}
-                      </Chip>
-                      {pr.action === 'Change' && pr.oldWord ? (
-                        <>
-                          <span className="text-default-500 line-through">{pr.oldWord}</span>
-                          <span className="text-default-500">→</span>
-                          <span className="font-semibold">{pr.word}</span>
-                          <span className="text-default-500">@</span>
-                          <code className="text-primary">{pr.code}</code>
-                        </>
-                      ) : (
-                        <>
-                          <span className="font-semibold">
-                            {pr.word || pr.phrase?.word}
-                          </span>
-                          <span className="text-default-500">→</span>
-                          <code className="text-primary">{pr.code || pr.phrase?.code}</code>
-                        </>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {pr.hasConflict && (
-                        <Chip color="warning" size="sm" variant="flat">
-                          ⚠️ 冲突
-                        </Chip>
-                      )}
-                      {canEdit && (
-                        <>
-                          <Button
-                            size="sm"
-                            variant="light"
-                            onPress={() => handleEdit(pr)}
-                          >
-                            编辑
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="light"
-                            color="danger"
-                            onPress={() => handleDelete(pr.id)}
-                          >
-                            删除
-                          </Button>
-                        </>
-                      )}
-                    </div>
-                  </CardHeader>
-                  <CardBody>
-                    {pr.hasConflict && pr.conflictReason && (
-                      <div className="mb-3 p-3 bg-warning-50 dark:bg-warning-100/10 rounded-lg">
-                        <p className="text-small text-warning">{pr.conflictReason}</p>
-                      </div>
-                    )}
-
-                    {pr.conflicts.length > 0 && (
-                      <div className="mb-3">
-                        <p className="text-small font-medium mb-2">冲突详情:</p>
-                        {pr.conflicts.map((conflict, idx) => (
-                          <div key={idx} className="text-small text-default-500 ml-4">
-                            编码 &quot;{conflict.code}&quot; 被 &quot;{conflict.currentWord}&quot; 占用
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    {pr.dependencies.length > 0 && (
-                      <div className="mb-3">
-                        <p className="text-small font-medium mb-2">依赖于:</p>
-                        {pr.dependencies.map((dep, idx) => (
-                          <div key={idx} className="text-small text-default-500 ml-4">
-                            • PR#{dep.dependsOn.id}: {dep.dependsOn.word} ({dep.reason})
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    {pr.dependedBy.length > 0 && (
-                      <div>
-                        <p className="text-small font-medium mb-2">被依赖:</p>
-                        {pr.dependedBy.map((dep, idx) => (
-                          <div key={idx} className="text-small text-default-500 ml-4">
-                            • PR#{dep.dependent.id}: {dep.dependent.word} ({dep.reason})
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </CardBody>
-                </Card>
-              ))
             )}
           </div>
+
+          <Tabs aria-label="批次视图" className="mb-4">
+            <Tab key="list" title={`📝 修改列表 (${batchData.pullRequests.length})`}>
+              <BatchPRList
+                pullRequests={batchData.pullRequests}
+                canEdit={canEdit}
+                onAddFirst={onOpen}
+              />
+            </Tab>
+            <Tab key="preview" title="👁️ 预览执行">
+              <div className="pt-4">
+                <BatchPreview batchId={resolvedParams.id} />
+              </div>
+            </Tab>
+          </Tabs>
         </main>
 
         <CreatePRModal
           isOpen={isOpen}
           onClose={handleCloseModal}
           batchId={resolvedParams.id}
-          editPR={editingPR ? {
-            id: editingPR.id,
-            word: editingPR.word || '',
-            oldWord: editingPR.oldWord || undefined,
-            code: editingPR.code || '',
-            action: editingPR.action,
-            type: editingPR.type || undefined,
-            weight: editingPR.weight || undefined,
-            remark: editingPR.remark || undefined
-          } : undefined}
+          batchPRs={batchData.pullRequests.length > 0 ? batchData.pullRequests.map(pr => ({
+            id: pr.id,
+            word: pr.word || '',
+            oldWord: pr.oldWord || undefined,
+            code: pr.code || '',
+            action: pr.action,
+            type: pr.type || undefined,
+            weight: pr.weight || undefined,
+            remark: pr.remark || undefined
+          })) : undefined}
           onSuccess={mutate}
         />
       </div>

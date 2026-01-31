@@ -12,7 +12,6 @@ import {
   Tabs,
   Tab
 } from '@heroui/react'
-import { useAuthStore } from '@/lib/store/auth'
 import { useAPI } from '@/lib/hooks/useSWR'
 import Navbar from '@/app/components/Navbar'
 
@@ -55,13 +54,12 @@ interface PRResponse {
 }
 
 export default function PullRequestsPage() {
-  const { isAuthenticated } = useAuthStore()
   const [status, setStatus] = useState<string>('all')
   const [page, setPage] = useState(1)
 
   const statusParam = status === 'all' ? '' : `&status=${status}`
   const { data, error, isLoading } = useAPI<PRResponse>(
-    isAuthenticated() ? `/api/pull-requests?page=${page}&pageSize=10${statusParam}` : null
+    `/api/pull-requests?page=${page}&pageSize=10${statusParam}`
   )
 
   const getActionText = (action: string) => {
@@ -84,24 +82,6 @@ export default function PullRequestsPage() {
       default:
         return 'default'
     }
-  }
-
-  if (!isAuthenticated()) {
-    return (
-      <>
-        <Navbar />
-        <div className="min-h-screen flex items-center justify-center bg-background">
-          <Card>
-            <CardBody className="text-center">
-              <p className="text-default-500 mb-4">请先登录</p>
-              <Button as={Link} href="/login" color="primary">
-                去登录
-              </Button>
-            </CardBody>
-          </Card>
-        </div>
-      </>
-    )
   }
 
   if (isLoading) {

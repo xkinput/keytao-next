@@ -5,11 +5,6 @@ import { prisma } from '@/lib/prisma'
 // GET /api/batches - List batches
 export async function GET(request: NextRequest) {
   try {
-    const session = await getSession()
-    if (!session) {
-      return NextResponse.json({ error: '未登录' }, { status: 401 })
-    }
-
     const searchParams = request.nextUrl.searchParams
     const status = searchParams.get('status')
     const page = parseInt(searchParams.get('page') || '1')

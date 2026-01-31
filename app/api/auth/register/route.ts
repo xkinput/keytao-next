@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { hashSync, genSaltSync } from 'bcrypt'
-import { signToken, setSession } from '@/lib/auth'
+import { signToken } from '@/lib/auth'
 
 export async function POST(request: NextRequest) {
   try {
@@ -15,7 +15,6 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Check if user exists
     const existingUser = await prisma.user.findFirst({
       where: {
         OR: [
@@ -32,7 +31,6 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Get NORMAL role
     const normalRole = await prisma.role.findUnique({
       where: { value: 'R:NORMAL' }
     })
@@ -44,10 +42,8 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Hash password
     const hashedPassword = hashSync(password, genSaltSync(12))
 
-    // Create user
     const user = await prisma.user.create({
       data: {
         name,
@@ -63,14 +59,10 @@ export async function POST(request: NextRequest) {
       include: { roles: true }
     })
 
-    // Generate token
     const token = await signToken({
       id: user.id,
       name: user.name!
     })
-
-    // Set session
-    await setSession(token)
 
     return NextResponse.json({
       user: {

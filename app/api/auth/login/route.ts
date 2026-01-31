@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { compareSync } from 'bcrypt'
-import { signToken, setSession } from '@/lib/auth'
+import { signToken } from '@/lib/auth'
 
 export async function POST(request: NextRequest) {
   try {
@@ -15,7 +15,6 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Find user
     const user = await prisma.user.findUnique({
       where: { name },
       include: { roles: true }
@@ -45,14 +44,10 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Generate token
     const token = await signToken({
       id: user.id,
       name: user.name!
     })
-
-    // Set session
-    await setSession(token)
 
     return NextResponse.json({
       user: {

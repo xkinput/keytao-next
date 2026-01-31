@@ -9,8 +9,8 @@ import {
   Button,
   Spinner,
   Chip,
-  Select,
-  SelectItem
+  RadioGroup,
+  Radio
 } from '@heroui/react'
 import { useAPI } from '@/lib/hooks/useSWR'
 import Navbar from '@/app/components/Navbar'
@@ -103,19 +103,18 @@ export default function AdminBatchesPage() {
           <div className="mb-6">
             <h1 className="text-3xl font-bold mb-4">批次审核</h1>
 
-            <div className="flex items-center gap-4 mb-4">
-              <Select
-                label="状态筛选"
-                selectedKeys={[statusFilter]}
-                onChange={(e) => setStatusFilter(e.target.value)}
-                className="max-w-xs"
-              >
-                <SelectItem key="Submitted">待审核</SelectItem>
-                <SelectItem key="Approved">已批准</SelectItem>
-                <SelectItem key="Rejected">已拒绝</SelectItem>
-                <SelectItem key="Published">已发布</SelectItem>
-              </Select>
-            </div>
+            <RadioGroup
+              label="状态筛选"
+              value={statusFilter}
+              onValueChange={setStatusFilter}
+              orientation="horizontal"
+              className="mb-4"
+            >
+              <Radio value="Submitted">待审核</Radio>
+              <Radio value="Approved">已批准</Radio>
+              <Radio value="Rejected">已拒绝</Radio>
+              <Radio value="Published">已发布</Radio>
+            </RadioGroup>
           </div>
 
           {batches.length === 0 ? (
