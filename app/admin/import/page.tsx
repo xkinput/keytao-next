@@ -52,6 +52,20 @@ export default function ImportPage() {
         // Remove YAML frontmatter if exists
         const cleanedText = removeYamlFrontmatter(text)
         setContent(cleanedText)
+
+        // Auto-detect phrase type based on first two lines
+        const lines = cleanedText.split('\n').filter(line => line.trim())
+        if (lines.length >= 2) {
+          const firstWord = lines[0].split('\t')[0]?.trim()
+          const secondWord = lines[1].split('\t')[0]?.trim()
+
+          // Check if both words are single character
+          if (firstWord && secondWord && firstWord.length === 1 && secondWord.length === 1) {
+            setPhraseType('Single')
+          } else {
+            setPhraseType('Phrase')
+          }
+        }
       }
       reader.readAsText(selectedFile)
     }
@@ -173,50 +187,51 @@ export default function ImportPage() {
             <CardBody className="gap-4">
               {!importing && successCount === 0 && errors.length === 0 && (
                 <>
-                  <div>
-                    <label className="block text-sm font-medium mb-2">
-                      选择 TXT/YAML 文件（每行格式：词[Tab]编码）
-                    </label>
-                    <input
-                      type="file"
-                      accept=".txt,.yaml,.yml"
-                      onChange={handleFileChange}
-                      className="block w-full text-sm text-default-500
-                        file:mr-4 file:py-2 file:px-4
-                        file:rounded-md file:border-0
-                        file:text-sm file:font-semibold
-                        file:bg-primary file:text-primary-foreground
-                        hover:file:bg-primary-600"
-                    />
-                    {file && (
-                      <p className="mt-2 text-sm text-default-500">
-                        已选择: {file.name} ({(file.size / 1024).toFixed(2)} KB)
-                      </p>
-                    )}
+                  <div className="flex gap-4">
+                    <div className="flex-1">
+                      <label className="block text-sm font-medium mb-2">
+                        选择 TXT/YAML 文件（每行格式：词[Tab]编码）
+                      </label>
+                      <input
+                        type="file"
+                        accept=".txt,.yaml,.yml"
+                        onChange={handleFileChange}
+                        className="block w-full text-sm text-default-500
+                          file:mr-4 file:py-2 file:px-4
+                          file:rounded-md file:border-0
+                          file:text-sm file:font-semibold
+                          file:bg-primary file:text-primary-foreground
+                          hover:file:bg-primary-600"
+                      />
+                      {file && (
+                        <p className="mt-2 text-sm text-default-500">
+                          已选择: {file.name} ({(file.size / 1024).toFixed(2)} KB)
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="w-48">
+                      <label className="block text-sm font-medium mb-2">
+                        词条类型
+                      </label>
+                      <Select
+                        selectedKeys={[phraseType]}
+                        onChange={(e) => setPhraseType(e.target.value as PhraseType)}
+                        label="选择类型"
+                        placeholder="请选择词条类型"
+                      >
+                        {PHRASE_TYPES.map((type) => (
+                          <SelectItem key={type.value}>
+                            {type.label}
+                          </SelectItem>
+                        ))}
+                      </Select>
+                    </div>
                   </div>
 
                   <div>
                     <label className="block text-sm font-medium mb-2">
-                      词条类型
-                    </label>
-                    <Select
-                      selectedKeys={[phraseType]}
-                      onChange={(e) => setPhraseType(e.target.value as PhraseType)}
-                      label="选择类型"
-                      placeholder="请选择词条类型"
-                      className="max-w-xs"
-                    >
-                      {PHRASE_TYPES.map((type) => (
-                        <SelectItem key={type.value}>
-                          {type.label}
-                        </SelectItem>
-                      ))}
-                    </Select>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium mb-2">
-                      或直接粘贴内容（支持 YAML 格式）
+                      或直接粘贴内容
                     </label>
                     <Textarea
                       placeholder="每行一条，格式：词条[Tab]编码&#10;支持 YAML 前缀，系统会自动去除"
@@ -243,11 +258,10 @@ export default function ImportPage() {
                 <div className="space-y-2">
                   <Progress
                     value={progress}
+                    showValueLabel
+                    valueLabel={`已处理 ${currentLine} / 共 ${totalLines} 词`}
                     className="max-w-md"
                   />
-                  <p className="text-sm text-default-600">
-                    正在导入第 {currentLine} / {totalLines} 条
-                  </p>
                   <div className="flex items-center gap-4 mt-2">
                     <Chip color="success" variant="flat" size="sm">
                       成功: {successCount}
