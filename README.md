@@ -22,6 +22,8 @@ Node.js v20.19+, v22.12+, or v24.0+
 pnpm install
 ```
 
+> **NixOS 用户提示：** 项目已配置 `flake.nix` 和 `.envrc`。请先运行 `direnv allow` 或 `nix develop` 进入开发环境，这会自动设置 Prisma 引擎路径。
+
 ### 2. 配置数据库
 
 本项目使用 Postgresql 数据库，需要本地已安装 Postgresql 数据库
@@ -40,12 +42,18 @@ pnpm install
 DATABASE_URL="postgresql://user:password@localhost:5432/keytao?schema=public"
 ```
 
-### 3. 运行数据库迁移
+### 3. 运行数据库迁移和生成客户端
 
-执行迁移：
+执行迁移（会自动生成 Prisma Client）：
 
 ```bash
 pnpm run db:migrate
+```
+
+如果遇到问题，手动生成 Prisma Client：
+
+```bash
+pnpm run db:generate
 ```
 
 ### 4. 初始化权限、角色和用户
@@ -68,6 +76,33 @@ pnpm run dev
 ```
 
 访问 [http://localhost:3000](http://localhost:3000)
+
+### 6. 查看数据库数据（可选）
+
+使用 Prisma Studio 可视化查看和编辑数据库：
+
+```bash
+pnpm run db:studio
+```
+
+访问 [http://localhost:5555](http://localhost:5555) 即可查看数据库中的所有表和数据。
+
+## 常见问题
+
+### NixOS 上 Prisma 报错
+
+如果遇到 `404 Not Found` 或找不到引擎文件：
+
+1. 确保已运行 `direnv allow` 或 `nix develop`
+2. 检查环境变量是否正确设置：`echo $PRISMA_QUERY_ENGINE_BINARY`
+
+### 找不到 `.prisma/client/default` 模块
+
+运行生成命令：
+
+```bash
+pnpm run db:generate
+```
 
 ## 数据库模型
 
