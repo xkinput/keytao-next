@@ -4,6 +4,8 @@ KeyTao(键道) 输入方案词库更新管理系统
 
 ## 技术栈
 
+Node.js v20.19+, v22.12+, or v24.0+
+
 - **Next.js 16** - React 框架
 - **Prisma 7** - 数据库 ORM
 - **PostgreSQL** - 数据库
@@ -22,25 +24,25 @@ pnpm install
 
 ### 2. 配置数据库
 
-编辑 `.env` 文件，配置数据库连接：
+本项目使用 Postgresql 数据库，需要本地已安装 Postgresql 数据库
+
+复制 `.env.example` 为 `.env.local` 并编辑 `.env.local `文件，配置数据库连接：
+
+请先创建一个keytao的数据库，并修改user和password为你的数据库用户名和密码
+
+> 创建数据库命令
+>
+> ```
+> createdb -U user -h localhost keytao
+> ```
 
 ```env
-DATABASE_URL="postgresql://user:password@localhost:5432/database_name"
+DATABASE_URL="postgresql://user:password@localhost:5432/keytao?schema=public"
 ```
 
-或使用 Prisma 本地开发数据库：
+### 3. 运行数据库迁移
 
-```bash
-pnpm exec prisma dev
-```
-
-### 3. 推送数据库 Schema
-
-```bash
-pnpm run db:push
-```
-
-或创建迁移：
+执行迁移：
 
 ```bash
 pnpm run db:migrate
@@ -49,16 +51,7 @@ pnpm run db:migrate
 ### 4. 初始化权限、角色和用户
 
 ```bash
-# 初始化权限
-pnpm run init:permission
-
-# 初始化角色
-pnpm run init:role
-
-# 初始化默认管理员用户
-pnpm run init:user
-
-# 或一次性初始化全部
+# 一次性初始化全部
 pnpm run init:all
 ```
 
@@ -78,32 +71,7 @@ pnpm run dev
 
 ## 数据库模型
 
-### User (用户)
-
-- 基本信息：name, nickname, phone, email, password
-- 状态：ENABLE, DISABLE, BANNED
-- 注册类型：USERNAME, WECHAT, EMAIL
-- 关联角色：多对多关系
-
-### Role (角色)
-
-- 预设角色：
-  - `R:ROOT` - 初始管理员
-  - `R:MANAGER` - 管理员
-  - `R:NORMAL` - 普通用户
-
-### Permission (权限)
-
-- 权限资源定义
-- 关联权限操作
-
-### PermissionAction (权限操作)
-
-- 预设操作：create, read, update, delete, query
-
-### CasbinRule (Casbin 规则)
-
-- RBAC 权限规则存储
+见 prisma/schema.prisma
 
 ## 可用脚本
 
