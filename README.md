@@ -26,7 +26,7 @@ pnpm install
 
 本项目使用 Postgresql 数据库，需要本地已安装 Postgresql 数据库
 
-复制 `.env.example` 为 `.env.local` 并编辑 `.env.local `文件，配置数据库连接：
+复制 `.env.example` 为 `.env` 并编辑它，配置数据库连接：
 
 请先创建一个keytao的数据库，并修改user和password为你的数据库用户名和密码
 
