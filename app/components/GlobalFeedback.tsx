@@ -31,15 +31,15 @@ export default function GlobalFeedback() {
     }
 
     return (
-        <Modal isOpen={isOpen} onClose={handleCancel} hideCloseButton={false}>
+        <Modal isOpen={isOpen} onClose={handleCancel} hideCloseButton={false} size="2xl" scrollBehavior="inside">
             <ModalContent>
                 {() => (
                     <>
                         <ModalHeader className="flex flex-col gap-1">
                             {title}
                         </ModalHeader>
-                        <ModalBody>
-                            <p>{message}</p>
+                        <ModalBody className="max-h-[60vh] overflow-y-auto">
+                            <p className="whitespace-pre-line text-sm">{message}</p>
                         </ModalBody>
                         <ModalFooter>
                             {type === 'confirm' && (
