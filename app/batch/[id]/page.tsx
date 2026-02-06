@@ -86,7 +86,7 @@ interface BatchDetail {
 export default function BatchDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const resolvedParams = use(params)
   const router = useRouter()
-  const { user } = useAuthStore()
+  const { user, token, isAuthenticated } = useAuthStore()
   const [submitting, setSubmitting] = useState(false)
   const [editingName, setEditingName] = useState(false)
   const [batchName, setBatchName] = useState('')
@@ -97,6 +97,12 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
   const { data: batch, error, isLoading, mutate } = useAPI<{ batch: BatchDetail }>(
     `/api/batches/${resolvedParams.id}`
   )
+
+  // Check if user is admin
+  const { data: adminCheck } = useAPI(
+    isAuthenticated() && token ? '/api/admin/stats' : null
+  )
+  const isAdmin = !!adminCheck
 
   // Initialize batch name when data loads
   useEffect(() => {
@@ -142,8 +148,6 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
   const handleSubmit = async () => {
     if (!batch) return
 
-    if (!batch) return
-
     openConfirm('确定要提交审核吗？提交后将无法修改。', async () => {
       setSubmitting(true)
       try {
@@ -152,10 +156,30 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
           withAuth: true
         })
         openAlert('批次已提交审核', '提交成功')
-        mutate()
+        await mutate()
       } catch (err) {
-        const error = err as Error
-        openAlert(error.message || '提交失败', '提交失败')
+        console.error('Submit batch error:', err)
+        const error = err as Error & {
+          info?: {
+            error?: string
+            conflicts?: Array<{
+              hasConflict: boolean
+              code: string
+              impact?: string
+              currentPhrase?: { word: string }
+            }>
+          }
+          status?: number
+        }
+
+        // Construct detailed error message with conflicts
+        throw new Error(
+          error.info?.conflicts && error.info.conflicts.length > 0
+            ? `${error.message}\n\n冲突详情：\n${error.info.conflicts
+              .map((c, i) => `${i + 1}. ${c.impact || '未知冲突'}`)
+              .join('\n')}`
+            : error.message
+        )
       } finally {
         setSubmitting(false)
       }
@@ -292,22 +316,33 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
                       {new Date(batchData.createAt).toLocaleString('zh-CN')}
                     </p>
                   </div>
-                  {canEdit && (
-                    <div className="flex gap-2">
-                      <Button color="primary" onPress={onOpen}>
-                        {batchData.pullRequests.length > 0 ? '编辑修改' : '添加修改'}
-                      </Button>
-                      {batchData.pullRequests.length > 0 && (
-                        <Button
-                          color="success"
-                          onPress={handleSubmit}
-                          isLoading={submitting}
-                        >
-                          提交审核
+                  <div className="flex gap-2">
+                    {canEdit && (
+                      <>
+                        <Button color="primary" onPress={onOpen}>
+                          {batchData.pullRequests.length > 0 ? '编辑修改' : '添加修改'}
                         </Button>
-                      )}
-                    </div>
-                  )}
+                        {batchData.pullRequests.length > 0 && (
+                          <Button
+                            color="success"
+                            onPress={handleSubmit}
+                            isLoading={submitting}
+                          >
+                            提交审核
+                          </Button>
+                        )}
+                      </>
+                    )}
+                    {batchData.status === 'Submitted' && isAdmin && (
+                      <Button
+                        color="secondary"
+                        variant="flat"
+                        onPress={() => router.push(`/admin/batches/${resolvedParams.id}`)}
+                      >
+                        去审核
+                      </Button>
+                    )}
+                  </div>
                 </div>
               </CardHeader>
               {batchData.sourceIssue && (
@@ -362,7 +397,7 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
             weight: pr.weight || undefined,
             remark: pr.remark || undefined
           })) : undefined}
-          onSuccess={mutate}
+          onSuccess={() => void mutate()}
         />
       </div>
     </>

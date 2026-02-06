@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import {
   Card,
@@ -13,6 +13,7 @@ import {
   Tab
 } from '@heroui/react'
 import { useAPI } from '@/lib/hooks/useSWR'
+import { usePageFilterStore } from '@/lib/store/pageFilter'
 import Navbar from '@/app/components/Navbar'
 
 interface PullRequest {
@@ -54,8 +55,19 @@ interface PRResponse {
 }
 
 export default function PullRequestsPage() {
-  const [status, setStatus] = useState<string>('all')
-  const [page, setPage] = useState(1)
+  const { getFilter, setFilter, getPage, setPage: setStorePage } = usePageFilterStore()
+  const [status, setStatus] = useState<string>(() => getFilter('/pull-requests', 'all'))
+  const [page, setPage] = useState(() => getPage('/pull-requests', 1))
+
+  // Sync status changes to store (resets page to 1)
+  useEffect(() => {
+    setFilter('/pull-requests', status)
+  }, [status, setFilter])
+
+  // Sync page changes to store
+  useEffect(() => {
+    setStorePage('/pull-requests', page)
+  }, [page, setStorePage])
 
   const statusParam = status === 'all' ? '' : `&status=${status}`
   const { data, error, isLoading } = useAPI<PRResponse>(
@@ -151,7 +163,7 @@ export default function PullRequestsPage() {
                     <code className="text-primary">{pr.code || pr.phrase?.code}</code>
                   </div>
                   <div className="flex items-center gap-2">
-                    {pr.hasConflict && (
+                    {(pr.conflictInfo?.hasConflict ?? pr.hasConflict) && (
                       <Chip color="warning" size="sm" variant="flat">
                         ⚠️ 冲突
                       </Chip>

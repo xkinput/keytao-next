@@ -28,6 +28,15 @@ interface PullRequest {
   remark: string | null
   hasConflict: boolean
   conflictReason: string | null
+  conflictInfo?: {
+    hasConflict: boolean
+    impact?: string
+    suggestions?: Array<{
+      action: string
+      word?: string
+      reason: string
+    }>
+  }
   phrase?: {
     id: number
     word: string
@@ -185,7 +194,7 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
 
   const batchData = batch.batch
   const canReview = batchData.status === 'Submitted'
-  const hasConflicts = batchData.pullRequests.some(pr => pr.hasConflict)
+  const hasConflicts = batchData.pullRequests.some(pr => pr.conflictInfo?.hasConflict ?? pr.hasConflict)
 
   return (
     <>

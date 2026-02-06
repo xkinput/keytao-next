@@ -91,21 +91,10 @@ export async function POST(request: NextRequest) {
 
     // Calculate weight for Create action with duplicate codes
     let finalWeight = weight
-    if (action === 'Create' && type && weight === undefined) {
-      // Count existing phrases with this code
-      const existingCount = await prisma.phrase.count({
-        where: { code }
-      })
-
-      // If there are existing phrases with this code, adjust weight
-      if (existingCount > 0) {
-        const baseWeight = getDefaultWeight(type as PhraseType)
-        // Each additional phrase on same code gets base + count
-        finalWeight = baseWeight + existingCount
-      } else {
-        // First phrase with this code, use default weight
-        finalWeight = getDefaultWeight(type as PhraseType)
-      }
+    if (action === 'Create') {
+      // For Create action, don't store weight - it will be calculated dynamically
+      // when the batch is executed based on batch context
+      finalWeight = undefined
     }
 
     // Create PR

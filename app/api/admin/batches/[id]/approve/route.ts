@@ -42,6 +42,30 @@ export async function POST(
       )
     }
 
+    // Calculate dynamic weights before execution
+    const { checkBatchConflictsWithWeight } = await import('@/lib/services/batchConflictService')
+
+    const prItems = batch.pullRequests.map(pr => ({
+      id: String(pr.id),
+      action: pr.action as 'Create' | 'Change' | 'Delete',
+      word: pr.word || '',
+      oldWord: pr.oldWord || undefined,
+      code: pr.code || '',
+      type: pr.type || 'Phrase',
+      weight: pr.weight || undefined,
+    }))
+
+    const conflictResults = await checkBatchConflictsWithWeight(prItems)
+
+    // Create a map of PR ID to calculated weight
+    const weightMap = new Map<number, number>()
+    conflictResults.forEach(result => {
+      const prId = parseInt(result.id)
+      if (!isNaN(prId) && result.calculatedWeight !== undefined) {
+        weightMap.set(prId, result.calculatedWeight)
+      }
+    })
+
     // Apply all PRs in a transaction
     const result = await prisma.$transaction(async (tx) => {
       // Process each PR
@@ -50,12 +74,15 @@ export async function POST(
           case 'Create':
             // Create new phrase
             if (pr.word && pr.code) {
+              // Use dynamically calculated weight if available, fallback to pr.weight
+              const finalWeight = weightMap.get(pr.id) ?? pr.weight ?? 0
+
               await tx.phrase.create({
                 data: {
                   word: pr.word,
                   code: pr.code,
                   type: pr.type || 'Phrase',
-                  weight: pr.weight || 0,
+                  weight: finalWeight,
                   remark: pr.remark,
                   userId: pr.userId,
                   status: 'Finish'
@@ -76,25 +103,30 @@ export async function POST(
               })
 
               if (oldPhrase) {
+                // Use dynamically calculated weight if available
+                const finalWeight = weightMap.get(pr.id)
+
                 // Update the word (and optionally type/weight/remark)
                 await tx.phrase.update({
                   where: { id: oldPhrase.id },
                   data: {
                     word: pr.word,
                     type: pr.type || undefined,
-                    weight: pr.weight !== null ? pr.weight : undefined,
+                    weight: finalWeight !== undefined ? finalWeight : (pr.weight !== null ? pr.weight : undefined),
                     remark: pr.remark || undefined
                   }
                 })
               }
             } else if (pr.phraseId) {
               // Fallback to old behavior using phraseId
+              const finalWeight = weightMap.get(pr.id)
+
               await tx.phrase.update({
                 where: { id: pr.phraseId },
                 data: {
                   word: pr.word || undefined,
                   type: pr.type || undefined,
-                  weight: pr.weight !== null ? pr.weight : undefined,
+                  weight: finalWeight !== undefined ? finalWeight : (pr.weight !== null ? pr.weight : undefined),
                   remark: pr.remark || undefined
                 }
               })

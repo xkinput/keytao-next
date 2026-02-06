@@ -15,10 +15,24 @@ export default function GlobalFeedback() {
             setLoading(true)
             try {
                 await onConfirm()
+                closeFeedback()
+            } catch (error) {
+                // Keep modal open and show error
+                const err = error as Error
+                setProcessing(false)
+                setLoading(false)
+
+                // Close confirm modal and show error alert
+                closeFeedback()
+
+                // Wait for modal to close
+                setTimeout(() => {
+                    const { openAlert } = useUIStore.getState()
+                    openAlert(err.message || '操作失败', '错误')
+                }, 150)
             } finally {
                 setProcessing(false)
                 setLoading(false)
-                closeFeedback()
             }
         } else {
             closeFeedback()

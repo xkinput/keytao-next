@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import {
   Card,
@@ -14,6 +14,7 @@ import {
 } from '@heroui/react'
 import { useAuthStore } from '@/lib/store/auth'
 import { useAPI } from '@/lib/hooks/useSWR'
+import { usePageFilterStore } from '@/lib/store/pageFilter'
 import Navbar from '@/app/components/Navbar'
 
 interface Batch {
@@ -34,6 +35,15 @@ interface Batch {
     id: number
     status: string
     hasConflict: boolean
+    conflictInfo?: {
+      hasConflict: boolean
+      impact?: string
+      suggestions?: Array<{
+        action: string
+        word?: string
+        reason: string
+      }>
+    }
   }>
   _count: {
     pullRequests: number
@@ -52,8 +62,19 @@ interface BatchesResponse {
 
 export default function BatchesPage() {
   const { isAuthenticated } = useAuthStore()
-  const [status, setStatus] = useState<string>('all')
-  const [page, setPage] = useState(1)
+  const { getFilter, setFilter, getPage, setPage: setStorePage } = usePageFilterStore()
+  const [status, setStatus] = useState<string>(() => getFilter('/', 'all'))
+  const [page, setPage] = useState(() => getPage('/', 1))
+
+  // Sync status changes to store (resets page to 1)
+  useEffect(() => {
+    setFilter('/', status)
+  }, [status, setFilter])
+
+  // Sync page changes to store
+  useEffect(() => {
+    setStorePage('/', page)
+  }, [page, setStorePage])
 
   const { data, isLoading } = useAPI<BatchesResponse>(
     `/api/batches?page=${page}&pageSize=10${status === 'all' ? '' : `&status=${status}`}`,
@@ -168,7 +189,7 @@ export default function BatchesPage() {
                 <CardBody>
                   <div className="flex items-center gap-4 text-small text-default-500">
                     <span>📝 {batch._count.pullRequests} 个修改</span>
-                    {batch.pullRequests.some((pr) => pr.hasConflict) && (
+                    {batch.pullRequests.some(pr => pr.conflictInfo?.hasConflict ?? pr.hasConflict) && (
                       <Chip color="warning" size="sm" variant="flat">
                         ⚠️ 有冲突
                       </Chip>

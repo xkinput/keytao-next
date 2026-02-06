@@ -5,7 +5,8 @@ import {
   createTestBatch,
 } from '@/lib/test/helpers'
 import { prisma } from '@/lib/prisma'
-import { conflictDetector } from '@/lib/services/conflictDetector'
+import { checkBatchConflictsWithWeight } from '@/lib/services/batchConflictService'
+import { PhraseType } from '@/lib/constants/phraseTypes'
 
 describe('Batch Submission and Approval', () => {
   let testUserId: number
@@ -40,19 +41,23 @@ describe('Batch Submission and Approval', () => {
       expect(batchData).toBeDefined()
       expect(batchData!.pullRequests).toHaveLength(1)
 
-      const changes = batchData!.pullRequests.map((pr) => ({
-        action: pr.action,
+      const items = batchData!.pullRequests.map((pr) => ({
+        id: pr.id.toString(),
+        action: pr.action as 'Create' | 'Change' | 'Delete',
         word: pr.word || '',
-        code: pr.code || '',
-        phraseId: pr.phraseId || undefined,
-        weight: pr.weight || undefined,
         oldWord: pr.oldWord || undefined,
+        code: pr.code || '',
+        type: (pr.type || 'Phrase') as PhraseType,
+        weight: pr.weight || undefined,
       }))
 
-      const validation = await conflictDetector.validateBatch(changes)
+      const results = await checkBatchConflictsWithWeight(items)
+      const unresolvedConflicts = results.filter(result => {
+        const isResolved = result.conflict.suggestions?.some(sug => sug.action === 'Resolved')
+        return result.conflict.hasConflict && !isResolved
+      })
 
-      expect(validation.valid).toBe(true)
-      expect(validation.unresolvedConflicts).toHaveLength(0)
+      expect(unresolvedConflicts).toHaveLength(0)
 
       // Submit batch
       const updated = await prisma.batch.update({
@@ -79,21 +84,27 @@ describe('Batch Submission and Approval', () => {
         include: { pullRequests: true },
       })
 
-      const changes = batchData!.pullRequests.map((pr) => ({
-        action: pr.action,
+      expect(batchData).toBeDefined()
+      expect(batchData!.pullRequests).toHaveLength(1)
+
+      const items = batchData!.pullRequests.map((pr) => ({
+        id: pr.id.toString(),
+        action: pr.action as 'Create' | 'Change' | 'Delete',
         word: pr.word || '',
-        code: pr.code || '',
-        phraseId: pr.phraseId || undefined,
-        weight: pr.weight || undefined,
         oldWord: pr.oldWord || undefined,
+        code: pr.code || '',
+        type: (pr.type || 'Phrase') as PhraseType,
+        weight: pr.weight || undefined,
       }))
 
-      const validation = await conflictDetector.validateBatch(changes)
+      const results = await checkBatchConflictsWithWeight(items)
+      const unresolvedConflicts = results.filter(result => {
+        const isResolved = result.conflict.suggestions?.some(sug => sug.action === 'Resolved')
+        return result.conflict.hasConflict && !isResolved
+      })
 
       // The validation should fail because the phrase doesn't exist
-      expect(validation.valid).toBe(false)
-      expect(validation.conflicts.length).toBeGreaterThan(0)
-      expect(validation.unresolvedConflicts.length).toBeGreaterThan(0)
+      expect(unresolvedConflicts.length).toBeGreaterThan(0)
     })
 
     it('should reject submission of empty batch', async () => {
@@ -383,6 +394,146 @@ describe('Batch Submission and Approval', () => {
       })
       expect(newPhrase).toBeDefined()
       expect(newPhrase!.word).toBe('茹果')
+    })
+
+    it('should calculate correct weight for Create when Delete comes after', async () => {
+      // Scenario 2: Create 重码 then Delete 占用词
+      // Seed: S2词 @ sbcode (weight: 100)
+      const phrases = await seedPhrases(testUserId, [
+        { word: 'S2词', code: 'sbcode', type: 'Phrase', weight: 100 },
+      ])
+
+      // Create batch: Create S2重码 first, then Delete S2词
+      const { batch, prs } = await createTestBatch(testUserId, [
+        {
+          action: 'Create',
+          word: 'S2重码',
+          code: 'sbcode',
+          type: 'Phrase',
+          // Weight should be 100 (not 101) because Delete comes after
+        },
+        {
+          action: 'Delete',
+          word: 'S2词',
+          code: 'sbcode',
+          phraseId: phrases[0].id,
+        },
+      ])
+
+      // Verify the Create PR has correct calculated weight
+      const createPR = prs.find(pr => pr.action === 'Create')
+      expect(createPR).toBeDefined()
+
+      // Check conflict detection result (should include weight calculation)
+      const { checkBatchConflicts } = await import('@/lib/test/helpers')
+      const { results } = await checkBatchConflicts([
+        {
+          id: String(createPR!.id),
+          action: 'Create',
+          word: 'S2重码',
+          code: 'sbcode',
+          type: 'Phrase',
+        },
+        {
+          id: String(prs.find(pr => pr.action === 'Delete')!.id),
+          action: 'Delete',
+          word: 'S2词',
+          code: 'sbcode',
+        },
+      ])
+
+      // Weight should be 100: base(100) + 1 existing - 1 deleted = 100
+      expect(results[0].calculatedWeight).toBe(100)
+      expect(results[0].conflict.hasConflict).toBe(false)
+      expect(results[0].conflict.impact).toContain('将在批次内第 2 个操作中')
+
+      // Update to Submitted
+      await prisma.batch.update({
+        where: { id: batch.id },
+        data: { status: 'Submitted' },
+      })
+
+      // Calculate dynamic weights (same as approval endpoint does)
+      const { checkBatchConflictsWithWeight } = await import('@/lib/services/batchConflictService')
+
+      const prItems = prs.map(pr => ({
+        id: String(pr.id),
+        action: pr.action as 'Create' | 'Change' | 'Delete',
+        word: pr.word || '',
+        oldWord: pr.oldWord || undefined,
+        code: pr.code || '',
+        type: pr.type as PhraseType,
+        weight: pr.weight || undefined,
+      }))
+
+      const conflictResults = await checkBatchConflictsWithWeight(prItems)
+
+      // Create weight map
+      const weightMap = new Map<number, number>()
+      conflictResults.forEach(result => {
+        const prId = parseInt(result.id)
+        if (!isNaN(prId) && result.calculatedWeight !== undefined) {
+          weightMap.set(prId, result.calculatedWeight)
+        }
+      })
+
+      // Execute with dynamic weights (same logic as approval endpoint)
+      await prisma.$transaction(async (tx) => {
+        for (const pr of prs) {
+          if (pr.action === 'Delete' && pr.phraseId) {
+            await tx.phrase.delete({
+              where: { id: pr.phraseId },
+            })
+          } else if (pr.action === 'Create' && pr.word && pr.code) {
+            // Use dynamically calculated weight
+            const finalWeight = weightMap.get(pr.id) ?? pr.weight ?? 0
+
+            await tx.phrase.create({
+              data: {
+                word: pr.word,
+                code: pr.code,
+                type: pr.type || 'Phrase',
+                weight: finalWeight,
+                userId: pr.userId,
+                status: 'Finish',
+              },
+            })
+          }
+
+          await tx.pullRequest.update({
+            where: { id: pr.id },
+            data: { status: 'Approved' },
+          })
+        }
+
+        await tx.batch.update({
+          where: { id: batch.id },
+          data: { status: 'Approved' },
+        })
+      })
+
+      // Verify S2词 is deleted
+      const oldPhrase = await prisma.phrase.findUnique({
+        where: { id: phrases[0].id },
+      })
+      expect(oldPhrase).toBeNull()
+
+      // Verify S2重码 is created with correct weight (100, not 101)
+      const newPhrase = await prisma.phrase.findFirst({
+        where: { word: 'S2重码', code: 'sbcode' },
+      })
+      expect(newPhrase).toBeDefined()
+      expect(newPhrase!.word).toBe('S2重码')
+      expect(newPhrase!.code).toBe('sbcode')
+      expect(newPhrase!.weight).toBe(100) // Dynamic weight, not 101
+
+      // Verify only one phrase exists on this code
+      const allPhrases = await prisma.phrase.findMany({
+        where: { code: 'sbcode' },
+      })
+      expect(allPhrases).toHaveLength(1)
+      expect(allPhrases[0].word).toBe('S2重码')
+      expect(allPhrases[0].weight).toBe(100)
     })
   })
 })

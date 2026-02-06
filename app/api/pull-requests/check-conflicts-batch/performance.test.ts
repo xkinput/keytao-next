@@ -140,7 +140,8 @@ describe('Performance & Scalability Tests', () => {
         expect(r.conflict.currentPhrase).toBeDefined()
         // But conflict is resolved by earlier Delete
         expect(r.conflict.hasConflict).toBe(false)
-        expect(r.conflict.impact).toContain('冲突已由批次内修改')
+        expect(r.conflict.impact).toContain('已批次内第')
+        expect(r.conflict.impact).toContain('删除了占用词')
       })
 
       console.log(`✓ 200 operations with conflict resolution processed in ${duration.toFixed(2)}ms`)

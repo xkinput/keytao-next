@@ -7,6 +7,7 @@ import {
     Chip,
     Button
 } from '@heroui/react'
+import CodePhrasesPopover from './CodePhrasesPopover'
 
 interface PullRequest {
     id: number
@@ -18,6 +19,15 @@ interface PullRequest {
     remark: string | null
     hasConflict: boolean
     conflictReason: string | null
+    conflictInfo?: {
+        hasConflict: boolean
+        impact?: string
+        suggestions?: Array<{
+            action: string
+            word?: string
+            reason: string
+        }>
+    }
     phrase?: {
         id: number
         word: string
@@ -57,7 +67,6 @@ export default function BatchPRList({
     canEdit,
     onAddFirst
 }: BatchPRListProps) {
-
     const getActionText = (action: string) => {
         const map: Record<string, string> = {
             Create: '新增',
@@ -97,7 +106,11 @@ export default function BatchPRList({
                                     <span className="text-default-500">→</span>
                                     <span className="font-semibold">{pr.word}</span>
                                     <span className="text-default-500">@</span>
-                                    <code className="text-primary">{pr.code}</code>
+                                    <CodePhrasesPopover code={pr.code}>
+                                        <code className="text-primary cursor-pointer hover:underline">
+                                            {pr.code}
+                                        </code>
+                                    </CodePhrasesPopover>
                                 </>
                             ) : (
                                 <>
@@ -107,25 +120,33 @@ export default function BatchPRList({
                                     {pr.action !== 'Delete' && (
                                         <>
                                             <span className="text-default-500">→</span>
-                                            <code className="text-primary">{pr.code || pr.phrase?.code}</code>
+                                            <CodePhrasesPopover code={pr.code || pr.phrase?.code || null}>
+                                                <code className="text-primary cursor-pointer hover:underline">
+                                                    {pr.code || pr.phrase?.code}
+                                                </code>
+                                            </CodePhrasesPopover>
                                         </>
                                     )}
                                     {pr.action === 'Delete' && (
                                         <>
                                             <span className="text-default-500">@</span>
-                                            <code className="text-primary">{pr.code || pr.phrase?.code}</code>
+                                            <CodePhrasesPopover code={pr.code || pr.phrase?.code || null}>
+                                                <code className="text-primary cursor-pointer hover:underline">
+                                                    {pr.code || pr.phrase?.code}
+                                                </code>
+                                            </CodePhrasesPopover>
                                         </>
                                     )}
                                 </>
                             )}
-                            {pr.weight && (
+                            {pr.weight ? (
                                 <span className="text-small text-default-400">
                                     (权重: {pr.weight})
                                 </span>
-                            )}
+                            ) : null}
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
-                            {pr.hasConflict && (
+                            {(pr.conflictInfo?.hasConflict ?? pr.hasConflict) && (
                                 <Chip color="warning" size="sm" variant="flat">
                                     ⚠️ 冲突
                                 </Chip>
@@ -139,9 +160,11 @@ export default function BatchPRList({
                             </div>
                         )}
 
-                        {pr.hasConflict && pr.conflictReason && (
+                        {(pr.conflictInfo?.hasConflict ?? pr.hasConflict) && (pr.conflictInfo?.impact || pr.conflictReason) && (
                             <div className="mb-3 p-3 bg-warning-50 dark:bg-warning-100/10 rounded-lg">
-                                <p className="text-small text-warning">{pr.conflictReason}</p>
+                                <p className="text-small text-warning">
+                                    {pr.conflictInfo?.impact || pr.conflictReason}
+                                </p>
                             </div>
                         )}
 

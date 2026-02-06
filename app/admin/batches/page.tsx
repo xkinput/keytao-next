@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   Card,
@@ -13,6 +13,7 @@ import {
   Radio
 } from '@heroui/react'
 import { useAPI } from '@/lib/hooks/useSWR'
+import { usePageFilterStore } from '@/lib/store/pageFilter'
 import Navbar from '@/app/components/Navbar'
 
 interface Batch {
@@ -32,7 +33,15 @@ interface Batch {
 
 export default function AdminBatchesPage() {
   const router = useRouter()
-  const [statusFilter, setStatusFilter] = useState<string>('Submitted')
+  const { getFilter, setFilter } = usePageFilterStore()
+  const [statusFilter, setStatusFilter] = useState<string>(() =>
+    getFilter('/admin/batches', 'Submitted')
+  )
+
+  // Sync status changes to store
+  useEffect(() => {
+    setFilter('/admin/batches', statusFilter)
+  }, [statusFilter, setFilter])
 
   const { data, error, isLoading } = useAPI<{ batches: Batch[] }>(
     `/api/admin/batches?status=${statusFilter}`

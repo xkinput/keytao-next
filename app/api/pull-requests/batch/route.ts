@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
-import { conflictDetector } from '@/lib/services/conflictDetector'
+import { checkBatchConflictsWithWeight } from '@/lib/services/batchConflictService'
 import { PullRequestType } from '@prisma/client'
 
 // POST /api/pull-requests/batch - Create multiple PRs in a batch
@@ -22,14 +22,32 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Validate all changes
-    const validation = await conflictDetector.validateBatch(changes)
+    // Validate all changes using unified conflict detection
+    const items = changes.map((change: any, idx: number) => ({
+      id: idx.toString(),
+      action: change.action as 'Create' | 'Change' | 'Delete',
+      word: change.word || '',
+      oldWord: change.oldWord || undefined,
+      code: change.code || '',
+      type: (change.type || 'Phrase') as PhraseType,
+      weight: change.weight || undefined
+    }))
 
-    if (!validation.valid) {
+    const results = await checkBatchConflictsWithWeight(items)
+
+    // Check for unresolved conflicts
+    const unresolvedConflicts = results
+      .filter(result => {
+        const isResolved = result.conflict.suggestions?.some(sug => sug.action === 'Resolved')
+        return result.conflict.hasConflict && !isResolved
+      })
+      .map(result => result.conflict)
+
+    if (unresolvedConflicts.length > 0) {
       return NextResponse.json(
         {
           error: '存在未解决的冲突',
-          conflicts: validation.unresolvedConflicts
+          conflicts: unresolvedConflicts
         },
         { status: 400 }
       )
@@ -68,19 +86,20 @@ export async function POST(request: NextRequest) {
       )
 
       // Build dependencies if conflicts are resolved within batch
-      for (const conflict of validation.conflicts) {
-        if (conflict.currentPhrase) {
+      for (let i = 0; i < results.length; i++) {
+        const result = results[i]
+        const conflict = result.conflict
+
+        if (conflict.currentPhrase && conflict.suggestions?.some(sug => sug.action === 'Resolved')) {
           // Find the PR that moves the conflicting phrase
           const movingPR = prs.find(
-            (pr) => pr.phraseId === conflict.currentPhrase!.id
+            (pr) => pr.word === conflict.currentPhrase!.word && pr.code === conflict.currentPhrase!.code
           )
 
-          // Find the PR that wants to occupy the code
-          const occupyingPR = prs.find(
-            (pr) => pr.code === conflict.code && pr.phraseId !== conflict.currentPhrase!.id
-          )
+          // Find the PR that wants to occupy the code (current PR)
+          const occupyingPR = prs[i]
 
-          if (movingPR && occupyingPR) {
+          if (movingPR && occupyingPR && movingPR.id !== occupyingPR.id) {
             // occupyingPR depends on movingPR (must execute movingPR first)
             await tx.pullRequestDependency.create({
               data: {
@@ -99,7 +118,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       batch: result.batch,
       pullRequests: result.prs,
-      conflictsResolved: validation.conflicts.length
+      conflictsResolved: results.filter(r =>
+        r.conflict.suggestions?.some(sug => sug.action === 'Resolved')
+      ).length
     })
   } catch (error) {
     console.error('Create batch PRs error:', error)

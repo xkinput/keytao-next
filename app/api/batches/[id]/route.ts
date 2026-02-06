@@ -61,7 +61,41 @@ export async function GET(
       return NextResponse.json({ error: '批次不存在' }, { status: 404 })
     }
 
-    return NextResponse.json({ batch })
+    // Calculate dynamic weights and conflicts for all PRs in batch
+    const { checkBatchConflictsWithWeight } = await import('@/lib/services/batchConflictService')
+
+    const prItems = batch.pullRequests.map(pr => ({
+      id: String(pr.id),
+      action: pr.action as 'Create' | 'Change' | 'Delete',
+      word: pr.word || '',
+      oldWord: pr.oldWord || undefined,
+      code: pr.code || '',
+      type: pr.type || 'Phrase',
+      weight: pr.weight || undefined,
+    }))
+
+    let conflictResults: any[] = []
+    if (prItems.length > 0) {
+      conflictResults = await checkBatchConflictsWithWeight(prItems)
+    }
+
+    // Enrich PRs with dynamic weight and conflict information
+    const enrichedPRs = batch.pullRequests.map(pr => {
+      const conflictResult = conflictResults.find(r => r.id === String(pr.id))
+      return {
+        ...pr,
+        // Use calculated weight for display (for Create operations, this is the real weight)
+        weight: conflictResult?.calculatedWeight ?? pr.weight,
+        conflictInfo: conflictResult?.conflict,
+      }
+    })
+
+    return NextResponse.json({
+      batch: {
+        ...batch,
+        pullRequests: enrichedPRs
+      }
+    })
   } catch (error) {
     console.error('Get batch error:', error)
     return NextResponse.json({ error: '获取批次失败' }, { status: 500 })

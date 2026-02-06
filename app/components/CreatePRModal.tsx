@@ -151,6 +151,27 @@ export default function CreatePRModal({
     })
   }
 
+  // Calculate conflict statistics
+  const conflictStats = useMemo(() => {
+    const checkedCount = fields.filter(field => {
+      const meta = metaStates.get(field.id)
+      return meta?.hasChecked
+    }).length
+
+    if (checkedCount === 0) {
+      return { hasChecked: false, conflictCount: 0 }
+    }
+
+    const conflictCount = fields.filter(field => {
+      const meta = metaStates.get(field.id)
+      if (!meta?.hasChecked) return false
+      const isResolved = meta.conflict?.suggestions?.some(sug => sug.action === 'Resolved')
+      return meta.conflict?.hasConflict && !isResolved
+    }).length
+
+    return { hasChecked: true, conflictCount }
+  }, [fields, metaStates])
+
   // Reset when modal opens/closes - only initialize once per modal session
   useEffect(() => {
     if (isOpen && !hasInitializedRef.current) {
@@ -726,12 +747,12 @@ export default function CreatePRModal({
                         />
 
                         {meta.conflict && (
-                          <Card className={meta.conflict.hasConflict ? 'border-warning' :
+                          <Card className={meta.conflict.hasConflict ? 'border-danger' :
                             meta.conflict.currentPhrase && watch(`items.${index}.action`) === 'Create' ? 'border-warning' : 'border-success'}>
                             <CardBody className="max-h-75 overflow-y-auto">
                               {meta.conflict.hasConflict ? (
                                 <div>
-                                  <Chip color="warning" variant="flat" size="sm" className="mb-2">
+                                  <Chip color="danger" variant="flat" size="sm" className="mb-2">
                                     ⚠️ 冲突
                                   </Chip>
                                   <p className="text-small mb-2">{meta.conflict.impact}</p>
@@ -859,15 +880,28 @@ export default function CreatePRModal({
                 })}
               </ModalBody>
               <ModalFooter className="flex-col gap-2">
-                <Button
-                  color="secondary"
-                  variant="flat"
-                  onPress={handleCheckAllConflicts}
-                  isLoading={checkingAll}
-                  fullWidth
-                >
-                  🔍 检测所有冲突
-                </Button>
+                <div className="flex gap-2 w-full items-center">
+                  <Button
+                    color="secondary"
+                    variant="flat"
+                    onPress={handleCheckAllConflicts}
+                    isLoading={checkingAll}
+                    className="flex-1"
+                  >
+                    🔍 检测所有冲突
+                  </Button>
+                  {conflictStats.hasChecked && (
+                    conflictStats.conflictCount === 0 ? (
+                      <Chip color="success" variant="flat" size="sm">
+                        ✓ 无冲突
+                      </Chip>
+                    ) : (
+                      <Chip color="danger" variant="flat" size="sm">
+                        {conflictStats.conflictCount} 个冲突
+                      </Chip>
+                    )
+                  )}
+                </div>
                 <div className="flex gap-2 w-full">
                   {!isEditMode && (
                     <Button

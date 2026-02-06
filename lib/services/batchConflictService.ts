@@ -39,30 +39,67 @@ export async function calculateDynamicWeight(
     return item.weight || 0
   }
 
-  const baseWeight = getDefaultWeight(item.type)
+  // For Create action, check if this word+code already exists in database
+  // If it exists, return its current weight
+  if (item.action === 'Create') {
+    const existingPhrase = await prisma.phrase.findFirst({
+      where: {
+        word: item.word,
+        code: item.code
+      },
+      select: { weight: true }
+    })
 
-  // Get current count from database
-  let count = await prisma.phrase.count({
-    where: { code: item.code }
-  })
-
-  // Simulate effect of previous batch operations
-  for (let i = 0; i < currentIndex; i++) {
-    const prev = allItems[i]
-    if (prev.code !== item.code) continue
-
-    if (prev.action === 'Create') {
-      count++
-    } else if (prev.action === 'Delete') {
-      count--
+    if (existingPhrase) {
+      // Word+code combination already exists, use its weight
+      return existingPhrase.weight
     }
-    // Change on same code doesn't change count
   }
 
-  // Ensure count is never negative
-  count = Math.max(0, count)
+  const baseWeight = getDefaultWeight(item.type)
 
-  return baseWeight + count
+  // Get all existing phrases with their weights for this code
+  const existingPhrases = await prisma.phrase.findMany({
+    where: { code: item.code },
+    select: { word: true, weight: true }
+  })
+
+  // Track occupied weights (simulate batch operations)
+  const occupiedWeights = new Set<number>(existingPhrases.map(p => p.weight))
+  const wordToWeight = new Map<string, number>(existingPhrases.map(p => [p.word, p.weight]))
+
+  // Simulate batch operations:
+  // - Previous Creates: add their calculated weights (progressive)
+  // - ALL Deletes: remove their weights
+  // - Changes: no effect
+  for (let i = 0; i < allItems.length; i++) {
+    if (i === currentIndex) continue
+
+    const other = allItems[i]
+    if (other.code !== item.code) continue
+
+    if (other.action === 'Create' && i < currentIndex) {
+      // Previous Create: if it's a new word, it will occupy baseWeight + currentSize
+      if (!wordToWeight.has(other.word)) {
+        // Calculate what weight this previous Create will get
+        const prevMaxWeight = occupiedWeights.size > 0 ? Math.max(...occupiedWeights) : baseWeight - 1
+        occupiedWeights.add(prevMaxWeight + 1)
+      }
+    } else if (other.action === 'Delete') {
+      // Delete frees up its weight
+      const weight = wordToWeight.get(other.word)
+      if (weight !== undefined) {
+        occupiedWeights.delete(weight)
+      }
+    }
+  }
+
+  // Append to the end: max weight + 1
+  if (occupiedWeights.size === 0) {
+    return baseWeight
+  }
+
+  return Math.max(...occupiedWeights) + 1
 }
 
 /**
@@ -196,7 +233,7 @@ export async function checkBatchConflictsWithWeight(
     })
   }
 
-  // Step 2: Check if earlier operations resolve current conflicts
+  // Step 2: Check if other operations in batch resolve current conflicts
   // Performance optimization: Build lookup maps to avoid O(n²) complexity
   const deleteMap = new Map<string, { index: number; item: BatchPRItem }>()
   const changeMap = new Map<string, { index: number; item: BatchPRItem }>()
@@ -217,6 +254,7 @@ export async function checkBatchConflictsWithWeight(
   // Check resolutions using maps (O(n) instead of O(n²))
   for (let i = 0; i < results.length; i++) {
     const result = results[i]
+    const currentItem = items[i]
     const phrase = result.conflict.currentPhrase
 
     // Skip if no current phrase (no conflict to resolve)
@@ -228,33 +266,68 @@ export async function checkBatchConflictsWithWeight(
     let resolved = false
     let resolverIndex = -1
     let reason = ''
+    let timing = ''
 
-    // Check if a Delete operation before this item resolves the conflict
+    // Check if a Delete operation resolves the conflict (before OR after)
     const deleteEntry = deleteMap.get(phraseKey)
-    if (deleteEntry && deleteEntry.index < i) {
+    if (deleteEntry && deleteEntry.index !== i) {
       resolved = true
       resolverIndex = deleteEntry.index
-      reason = `删除了重码词 "${deleteEntry.item.word}"`
+      reason = `删除了占用词 "${deleteEntry.item.word}"`
+      timing = resolverIndex < i ? '已' : '将在'
     }
 
-    // Check if a Change operation before this item resolves the conflict
+    // Check if a Change operation resolves the conflict (before OR after)
     if (!resolved) {
       const changeEntry = changeMap.get(phraseKey)
-      if (changeEntry && changeEntry.index < i) {
-        resolved = true
-        resolverIndex = changeEntry.index
-        reason = `将 "${changeEntry.item.oldWord}" 修改为 "${changeEntry.item.word}"`
+      if (changeEntry && changeEntry.index !== i) {
+        // For Create operations with Change on same phrase:
+        // This ALWAYS creates duplicate code (重码), never resolves conflict
+        // Example: DB has "原词"@"code1", Change "原词"→"新词", Create "原词"@"code1"
+        // Result: code1 has both "新词" (changed) and "原词" (created) = 重码
+        if (currentItem.action === 'Create') {
+          // Change modifies the existing phrase to a different word
+          // Create will add a new phrase (even with same word name)
+          // Result: code has multiple words = 重码
+          const finalWord = changeEntry.item.word
+          result.conflict.impact = `编码 "${currentItem.code}" 已被词条 "${finalWord}" 占用，将创建重码（建议权重: ${result.calculatedWeight || '未计算'}）`
+
+          // Update currentPhrase to reflect the batch state (after Change)
+          if (result.conflict.currentPhrase) {
+            result.conflict.currentPhrase = {
+              ...result.conflict.currentPhrase,
+              word: finalWord,
+            }
+          }
+
+          // Update suggestions to reflect batch context
+          result.conflict.suggestions = [
+            {
+              action: 'Cancel',
+              word: currentItem.word,
+              reason: `批次执行后，编码 "${currentItem.code}" 将被 "${finalWord}" 占用，创建此词将形成重码`,
+            },
+          ]
+
+          resolved = false
+        } else {
+          // For Delete or Change operations, Change can resolve conflicts
+          resolved = true
+          resolverIndex = changeEntry.index
+          reason = `将 "${changeEntry.item.oldWord}" 修改为 "${changeEntry.item.word}"`
+          timing = resolverIndex < i ? '已' : '将在'
+        }
       }
     }
 
     if (resolved) {
       result.conflict.hasConflict = false
-      result.conflict.impact = `冲突已由批次内修改 #${resolverIndex + 1} 解决（${reason}），建议权重: ${result.calculatedWeight || '未计算'}`
+      result.conflict.impact = `${timing}批次内第 ${resolverIndex + 1} 个操作中${reason}，建议权重: ${result.calculatedWeight || '未计算'}`
       result.conflict.suggestions = [
         {
           action: 'Resolved',
           word: items[resolverIndex].word,
-          reason,
+          reason: `${timing}第 ${resolverIndex + 1} 个操作中${reason}`,
         },
       ]
     }

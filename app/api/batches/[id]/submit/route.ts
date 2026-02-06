@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
-import { conflictDetector } from '@/lib/services/conflictDetector'
+import { checkBatchConflictsWithWeight } from '@/lib/services/batchConflictService'
+import { PhraseType } from '@/lib/constants/phraseTypes'
 
 // POST /api/batches/:id/submit - Submit batch for review
 export async function POST(
@@ -44,22 +45,32 @@ export async function POST(
       )
     }
 
-    // Validate batch for conflicts
-    const changes = batch.pullRequests.map((pr) => ({
-      action: pr.action,
+    // Validate batch for conflicts using the same logic as check-conflicts-batch
+    const items = batch.pullRequests.map((pr) => ({
+      id: pr.id.toString(),
+      action: pr.action as 'Create' | 'Change' | 'Delete',
       word: pr.word || '',
+      oldWord: pr.oldWord || undefined,
       code: pr.code || '',
-      phraseId: pr.phraseId || undefined,
+      type: (pr.type || 'Phrase') as PhraseType,
       weight: pr.weight || undefined
     }))
 
-    const validation = await conflictDetector.validateBatch(changes)
+    const results = await checkBatchConflictsWithWeight(items)
 
-    if (!validation.valid) {
+    // Check for unresolved conflicts
+    const unresolvedConflicts = results
+      .filter(result => {
+        const isResolved = result.conflict.suggestions?.some(sug => sug.action === 'Resolved')
+        return result.conflict.hasConflict && !isResolved
+      })
+      .map(result => result.conflict)
+
+    if (unresolvedConflicts.length > 0) {
       return NextResponse.json(
         {
           error: '批次中存在未解决的冲突',
-          conflicts: validation.unresolvedConflicts
+          conflicts: unresolvedConflicts
         },
         { status: 400 }
       )

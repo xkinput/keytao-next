@@ -22,6 +22,15 @@ interface PRDetail {
   status: 'Pending' | 'Approved' | 'Rejected'
   hasConflict: boolean
   conflictReason: string | null
+  conflictInfo?: {
+    hasConflict: boolean
+    impact?: string
+    suggestions?: Array<{
+      action: string
+      word?: string
+      reason: string
+    }>
+  }
   remark: string | null
   weight: number | null
   createAt: string
@@ -182,7 +191,7 @@ export default function PRDetailPage({ params }: { params: Promise<{ id: string 
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
-                  {pr.hasConflict && (
+                  {(pr.conflictInfo?.hasConflict ?? pr.hasConflict) && (
                     <Chip color="warning" size="sm" variant="flat">
                       ⚠️ 冲突
                     </Chip>
@@ -240,9 +249,9 @@ export default function PRDetailPage({ params }: { params: Promise<{ id: string 
             <Card className="mb-6">
               <CardHeader className="font-semibold">⚠️ 冲突详情</CardHeader>
               <CardBody>
-                {pr.conflictReason && (
+                {(pr.conflictInfo?.impact || pr.conflictReason) && (
                   <p className="text-small mb-4 p-3 bg-warning-50 dark:bg-warning-100/10 rounded-lg">
-                    {pr.conflictReason}
+                    {pr.conflictInfo?.impact || pr.conflictReason}
                   </p>
                 )}
                 <div className="space-y-2">

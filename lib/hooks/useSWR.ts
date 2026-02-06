@@ -55,11 +55,12 @@ const fetcher = async (url: string, token: string | null, options?: FetcherOptio
           config.headers = hdrs as HeadersInit
           const retryRes = await fetch(url, config)
           if (!retryRes.ok) {
-            const error = new Error('An error occurred while fetching the data.') as Error & {
+            const errorData = await retryRes.json() as { error?: string }
+            const error = new Error(errorData.error || 'An error occurred while fetching the data.') as Error & {
               info?: unknown
               status?: number
             }
-            error.info = await retryRes.json()
+            error.info = errorData
             error.status = retryRes.status
             throw error
           }
@@ -72,11 +73,12 @@ const fetcher = async (url: string, token: string | null, options?: FetcherOptio
   }
 
   if (!res.ok) {
-    const error = new Error('An error occurred while fetching the data.') as Error & {
+    const errorData = await res.json() as { error?: string }
+    const error = new Error(errorData.error || 'An error occurred while fetching the data.') as Error & {
       info?: unknown
       status?: number
     }
-    error.info = await res.json()
+    error.info = errorData
     error.status = res.status
     throw error
   }

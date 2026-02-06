@@ -21,6 +21,15 @@ interface CodeChangeGroup {
     diffs: DiffItem[]
 }
 
+interface RejectedOperation {
+    prId: number
+    action: string
+    word: string
+    code: string
+    oldWord?: string
+    reason: string
+}
+
 // GET /api/batches/:id/preview - Preview batch execution result
 export async function GET(
     request: NextRequest,
@@ -53,10 +62,12 @@ export async function GET(
             return NextResponse.json({
                 preview: {
                     changes: [],
+                    rejected: [],
                     summary: {
                         added: 0,
                         modified: 0,
-                        deleted: 0
+                        deleted: 0,
+                        rejected: 0
                     }
                 }
             })
@@ -64,11 +75,35 @@ export async function GET(
 
         const isExecuted = ['Approved', 'Published'].includes(batch.status)
         const changes: CodeChangeGroup[] = []
+        const rejected: RejectedOperation[] = []
         let addedCount = 0
         let removedCount = 0
         let modifiedCount = 0
 
         if (isExecuted) {
+            // For executed batches, calculate dynamic weights first
+            const { checkBatchConflictsWithWeight } = await import('@/lib/services/batchConflictService')
+            const prItems = batch.pullRequests
+                .filter(pr => pr.word && pr.code)
+                .map(pr => ({
+                    id: String(pr.id),
+                    action: pr.action,
+                    word: pr.word!,
+                    code: pr.code!,
+                    oldWord: pr.oldWord || undefined,
+                    weight: pr.weight || undefined,
+                    type: pr.type || 'Phrase',
+                }))
+
+            const conflictResults = await checkBatchConflictsWithWeight(prItems)
+            const weightMap = new Map<number, number>()
+            conflictResults.forEach(result => {
+                const prId = parseInt(result.id)
+                if (!isNaN(prId) && result.calculatedWeight !== undefined) {
+                    weightMap.set(prId, result.calculatedWeight)
+                }
+            })
+
             // For executed batches, generate diffs directly from PRs history
             // Group PRs by code
             const prsByCode = new Map<string, typeof batch.pullRequests>()
@@ -89,13 +124,15 @@ export async function GET(
                     switch (pr.action) {
                         case 'Create':
                             if (pr.word) {
+                                // Use dynamic weight from weightMap
+                                const finalWeight = weightMap.get(pr.id) ?? pr.weight ?? 0
                                 diffs.push({
                                     type: 'add',
                                     phrase: {
                                         word: pr.word,
                                         code: code,
                                         type: pr.type || 'Phrase',
-                                        weight: pr.weight || 0,
+                                        weight: finalWeight,
                                         remark: pr.remark || undefined
                                     }
                                 })
@@ -104,6 +141,8 @@ export async function GET(
                             break
                         case 'Change':
                             if (pr.word && pr.oldWord) {
+                                // Use dynamic weight from weightMap
+                                const finalWeight = weightMap.get(pr.id) ?? pr.weight ?? 0
                                 diffs.push({
                                     type: 'modify',
                                     before: {
@@ -116,7 +155,7 @@ export async function GET(
                                         word: pr.word,
                                         code: code,
                                         type: pr.type || 'Phrase',
-                                        weight: pr.weight || 0,
+                                        weight: finalWeight,
                                         remark: pr.remark || undefined
                                     }
                                 })
@@ -146,7 +185,39 @@ export async function GET(
             }
 
         } else {
-            // For pending batches, use DB simulation logic
+            // For pending batches, use DB simulation logic with dynamic weight calculation
+            // Calculate dynamic weights first
+            const { checkBatchConflictsWithWeight } = await import('@/lib/services/batchConflictService')
+            const prItems = batch.pullRequests
+                .filter(pr => pr.word && pr.code) // Filter out invalid items
+                .map(pr => ({
+                    id: String(pr.id),
+                    action: pr.action,
+                    word: pr.word!,
+                    code: pr.code!,
+                    oldWord: pr.oldWord || undefined,
+                    weight: pr.weight || undefined,
+                    type: pr.type || 'Phrase', // Default to 'Phrase' if type is null
+                }))
+            const conflictResults = await checkBatchConflictsWithWeight(prItems)
+
+            // Create weight map for dynamic weights
+            const weightMap = new Map<number, number>()
+            // Create conflict map to filter out PRs with unresolved conflicts
+            const conflictMap = new Map<number, boolean>()
+            conflictResults.forEach(result => {
+                const prId = parseInt(result.id)
+                if (!isNaN(prId)) {
+                    if (result.calculatedWeight !== undefined) {
+                        weightMap.set(prId, result.calculatedWeight)
+                    }
+                    // Check if PR has unresolved conflict
+                    const hasUnresolvedConflict = result.conflict.hasConflict &&
+                        !result.conflict.suggestions?.some(s => s.action === 'Resolved')
+                    conflictMap.set(prId, hasUnresolvedConflict)
+                }
+            })
+
             // 2. Fetch current state from DB (Before State)
             const existingPhrases = await prisma.phrase.findMany({
                 where: {
@@ -174,9 +245,30 @@ export async function GET(
                 originalState.set(code, JSON.parse(JSON.stringify(phrases)))
             })
 
-            // 3. Simulate PR execution (After State)
+            // 3. Simulate PR execution (After State) with dynamic weights
+            // Skip PRs with unresolved conflicts but track them
             for (const pr of batch.pullRequests) {
                 if (!pr.code) continue
+
+                // Track PRs with unresolved conflicts
+                if (conflictMap.get(pr.id)) {
+                    // Find conflict info for this PR
+                    const conflictInfo = conflictResults.find(r => parseInt(r.id) === pr.id)
+                    const reason = conflictInfo?.conflict.impact ||
+                        conflictInfo?.conflict.suggestions?.[0]?.reason ||
+                        '存在未解决的冲突'
+
+                    rejected.push({
+                        prId: pr.id,
+                        action: pr.action,
+                        word: pr.word!,
+                        code: pr.code,
+                        oldWord: pr.oldWord || undefined,
+                        reason
+                    })
+                    continue
+                }
+
                 const codePhrases = currentState.get(pr.code) || []
 
                 switch (pr.action) {
@@ -185,12 +277,14 @@ export async function GET(
                             // Check if word+code combination already exists
                             const existingIndex = codePhrases.findIndex(p => p.word === pr.word && p.code === pr.code)
                             if (existingIndex === -1) {
+                                // Use dynamic weight from weightMap
+                                const finalWeight = weightMap.get(pr.id) ?? pr.weight ?? 0
                                 // Only add if word+code combination doesn't exist
                                 codePhrases.push({
                                     word: pr.word,
                                     code: pr.code,
                                     type: pr.type || 'Phrase',
-                                    weight: pr.weight || 0,
+                                    weight: finalWeight,
                                     remark: pr.remark || undefined
                                 })
                             }
@@ -201,11 +295,13 @@ export async function GET(
                         if (pr.oldWord && pr.word) {
                             const index = codePhrases.findIndex(p => p.word === pr.oldWord && p.code === pr.code)
                             if (index !== -1) {
+                                // Use dynamic weight from weightMap
+                                const finalWeight = weightMap.get(pr.id) ?? pr.weight ?? codePhrases[index].weight
                                 codePhrases[index] = {
                                     ...codePhrases[index],
                                     word: pr.word,
                                     type: pr.type || codePhrases[index].type,
-                                    weight: pr.weight !== null ? pr.weight! : codePhrases[index].weight,
+                                    weight: finalWeight,
                                     remark: pr.remark || codePhrases[index].remark
                                 }
                             }
@@ -266,10 +362,12 @@ export async function GET(
         return NextResponse.json({
             preview: {
                 changes,
+                rejected,
                 summary: {
                     added: addedCount,
                     modified: modifiedCount,
-                    deleted: removedCount
+                    deleted: removedCount,
+                    rejected: rejected.length
                 }
             }
         })

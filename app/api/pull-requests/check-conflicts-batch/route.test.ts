@@ -91,15 +91,15 @@ describe('Batch Conflict Detection', () => {
 
       expect(results).toHaveLength(2)
 
-      // PR1: Has duplicate code warning
+      // PR1: Conflict resolved by later Delete operation
       expect(results[0].conflict.hasConflict).toBe(false)
       expect(results[0].conflict.currentPhrase?.word).toBe('如果')
+      expect(results[0].conflict.impact).toContain('将在批次内第 2 个操作中')
+      expect(results[0].conflict.impact).toContain('删除了占用词')
+      expect(results[0].conflict.suggestions[0].action).toBe('Resolved')
 
       // PR2: Delete should succeed
       expect(results[1].conflict.hasConflict).toBe(false)
-
-      // Note: Batch-level conflict resolution logic is handled by the API route
-      // This test validates individual checks
     })
   })
 
@@ -178,8 +178,15 @@ describe('Batch Conflict Detection', () => {
       // PR1: Change should succeed (old word exists)
       expect(results[0].conflict.hasConflict).toBe(false)
 
-      // PR2: Create would see duplicate after change
-      expect(results[1].conflict.currentPhrase?.word).toBe('如果')
+      // PR2: Create would create duplicate code (重码)
+      // Even though the word name is the same, it creates a NEW phrase
+      // After Change: code has "茹果" (original phrase changed)
+      // After Create: code has "茹果" + "如果" (new phrase) = 重码
+      // currentPhrase should reflect batch state (after Change)
+      expect(results[1].conflict.currentPhrase?.word).toBe('茹果')
+      expect(results[1].conflict.hasConflict).toBe(true)
+      expect(results[1].conflict.impact).toContain('重码')
+      expect(results[1].conflict.impact).toContain('茹果')
     })
   })
 
@@ -337,7 +344,8 @@ describe('Batch Conflict Detection', () => {
         expect(results[0].conflict.hasConflict).toBe(false) // Delete succeeds
         // Create sees DB word but conflict is resolved by Delete
         expect(results[1].conflict.currentPhrase?.word).toBe('如果')
-        expect(results[1].conflict.impact).toContain('冲突已由批次内修改')
+        expect(results[1].conflict.impact).toContain('已批次内第 1 个操作中')
+        expect(results[1].conflict.impact).toContain('删除了占用词')
       })
     })
 
@@ -415,7 +423,7 @@ describe('Batch Conflict Detection', () => {
     })
 
     describe('Scenario 13: Change A→B, then Create A (name reuse)', () => {
-      it('should allow creating with old word name after change', async () => {
+      it('should create duplicate code (重码) when creating with old word name after change', async () => {
         await seedPhrases(testUserId, [
           { word: '原词', code: 'code1', type: 'Phrase', weight: 100 },
         ])
@@ -432,11 +440,14 @@ describe('Batch Conflict Detection', () => {
         // Change should succeed
         expect(results[0].conflict.hasConflict).toBe(false)
 
-        // Create sees DB still has '原词', but Change will modify it
-        expect(results[1].conflict.currentPhrase?.word).toBe('原词')
-        // After change executes, the name '原词' becomes available
-        // Conflict should be marked as resolved
-        expect(results[1].conflict.impact).toContain('冲突已由批次内修改')
+        // Create will conflict with the changed word
+        // After Change executes: code1 has "新词" (changed from 原词)
+        // After Create executes: code1 has "新词" + "原词" (new phrase) = 重码
+        // currentPhrase should reflect batch state (after Change), not DB state
+        expect(results[1].conflict.currentPhrase?.word).toBe('新词')
+        expect(results[1].conflict.hasConflict).toBe(true)
+        expect(results[1].conflict.impact).toContain('重码')
+        expect(results[1].conflict.impact).toContain('新词')
       })
     })
 
@@ -466,9 +477,10 @@ describe('Batch Conflict Detection', () => {
         // Create should see existing words
         expect(results[2].conflict.currentPhrase).toBeDefined()
 
-        // Weight calculation: 3 existing - 1 deleted (no change from Change) = 2
-        // So weight should be base 100 + 2 = 102
-        expect(results[2].conflict.impact).toContain('102')
+        // Weight calculation: After Delete 词一, remaining weights are {101, 102}
+        // Change doesn't affect weight, so still {101, 102}
+        // New word appends to end: max(101,102) + 1 = 103
+        expect(results[2].conflict.impact).toContain('103')
       })
     })
 
@@ -509,8 +521,9 @@ describe('Batch Conflict Detection', () => {
 
         expect(results).toHaveLength(2)
 
-        // Weight should be: 3 existing - 1 deleted = 2, so base 100 + 2 = 102
-        expect(results[1].conflict.impact).toContain('102')
+        // Weight calculation: After Delete 词A, remaining weights are {101, 102}
+        // New word appends to end: max(101,102) + 1 = 103
+        expect(results[1].conflict.impact).toContain('103')
       })
     })
 
@@ -534,8 +547,9 @@ describe('Batch Conflict Detection', () => {
 
         expect(results).toHaveLength(4)
 
-        // Weight should be: 4 existing - 3 deleted = 1, so base 100 + 1 = 101
-        expect(results[3].conflict.impact).toContain('101')
+        // Weight calculation: After Delete 词1,词2,词3, remaining weight is {103}
+        // New word appends to end: max(103) + 1 = 104
+        expect(results[3].conflict.impact).toContain('104')
       })
     })
 

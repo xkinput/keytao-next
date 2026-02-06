@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import {
   Card,
   CardBody,
@@ -12,6 +12,7 @@ import {
 } from '@heroui/react'
 import { useAuthStore } from '@/lib/store/auth'
 import { useAPI } from '@/lib/hooks/useSWR'
+import { usePageFilterStore } from '@/lib/store/pageFilter'
 import Navbar from '@/app/components/Navbar'
 import CreateIssueModal from '@/app/components/CreateIssueModal'
 
@@ -40,7 +41,13 @@ interface IssuesResponse {
 
 export default function HomePage() {
   const { isAuthenticated } = useAuthStore()
-  const [page, setPage] = useState(1)
+  const { getPage, setPage: setStorePage } = usePageFilterStore()
+  const [page, setPage] = useState(() => getPage('/issues', 1))
+
+  // Sync page changes to store
+  useEffect(() => {
+    setStorePage('/issues', page)
+  }, [page, setStorePage])
 
   const { data, error, isLoading, mutate } = useAPI<IssuesResponse>(
     `/api/issues?page=${page}&pageSize=10`
