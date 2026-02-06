@@ -21,12 +21,6 @@ interface CodeChangeGroup {
     diffs: DiffItem[]
 }
 
-interface PreviewStats {
-    added: number
-    modified: number
-    deleted: number
-}
-
 // GET /api/batches/:id/preview - Preview batch execution result
 export async function GET(
     request: NextRequest,
@@ -53,6 +47,20 @@ export async function GET(
         batch.pullRequests.forEach(pr => {
             if (pr.code) codes.add(pr.code)
         })
+
+        // Early return if no codes to process
+        if (codes.size === 0) {
+            return NextResponse.json({
+                preview: {
+                    changes: [],
+                    summary: {
+                        added: 0,
+                        modified: 0,
+                        deleted: 0
+                    }
+                }
+            })
+        }
 
         const isExecuted = ['Approved', 'Published'].includes(batch.status)
         const changes: CodeChangeGroup[] = []
@@ -174,13 +182,18 @@ export async function GET(
                 switch (pr.action) {
                     case 'Create':
                         if (pr.word) {
-                            codePhrases.push({
-                                word: pr.word,
-                                code: pr.code,
-                                type: pr.type || 'Phrase',
-                                weight: pr.weight || 0,
-                                remark: pr.remark || undefined
-                            })
+                            // Check if word+code combination already exists
+                            const existingIndex = codePhrases.findIndex(p => p.word === pr.word && p.code === pr.code)
+                            if (existingIndex === -1) {
+                                // Only add if word+code combination doesn't exist
+                                codePhrases.push({
+                                    word: pr.word,
+                                    code: pr.code,
+                                    type: pr.type || 'Phrase',
+                                    weight: pr.weight || 0,
+                                    remark: pr.remark || undefined
+                                })
+                            }
                         }
                         break
 

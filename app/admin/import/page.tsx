@@ -4,30 +4,13 @@ import { useState } from 'react'
 import { Card, CardBody, CardHeader, Button, Progress, Textarea, Chip, Listbox, ListboxItem, Select, SelectItem } from '@heroui/react'
 import Navbar from '@/app/components/Navbar'
 import { apiRequest } from '@/lib/hooks/useSWR'
-
-type PhraseType = 'Single' | 'Phrase' | 'Sentence' | 'Symbol' | 'Link' | 'Poem' | 'Other'
-
-const PHRASE_TYPES: Array<{ value: PhraseType; label: string }> = [
-  { value: 'Single', label: '单字' },
-  { value: 'Phrase', label: '词组' },
-  { value: 'Sentence', label: '短句' },
-  { value: 'Symbol', label: '符号' },
-  { value: 'Link', label: '链接' },
-  { value: 'Poem', label: '诗句' },
-  { value: 'Other', label: '其他' },
-]
+import { type PhraseType, getPhraseTypeOptions } from '@/lib/constants/phraseTypes'
 
 interface ImportError {
   line: number
   word?: string
   code?: string
   error: string
-}
-
-interface SuccessItem {
-  line: number
-  word: string
-  code: string
 }
 
 export default function ImportPage() {
@@ -39,8 +22,9 @@ export default function ImportPage() {
   const [currentLine, setCurrentLine] = useState(0)
   const [totalLines, setTotalLines] = useState(0)
   const [successCount, setSuccessCount] = useState(0)
-  const [successItems, setSuccessItems] = useState<SuccessItem[]>([])
   const [errors, setErrors] = useState<ImportError[]>([])
+  const [importSpeed, setImportSpeed] = useState(0)
+  const [startTime, setStartTime] = useState(0)
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0]
@@ -88,8 +72,9 @@ export default function ImportPage() {
     setProgress(0)
     setCurrentLine(0)
     setSuccessCount(0)
-    setSuccessItems([])
     setErrors([])
+    setImportSpeed(0)
+    setStartTime(Date.now())
 
     try {
       // Remove YAML frontmatter before processing
@@ -97,9 +82,10 @@ export default function ImportPage() {
       const lines = cleanedContent.split('\n').filter(line => line.trim())
       setTotalLines(lines.length)
 
-      // Process in batches of 1000
-      const batchSize = 1000
+      // Process in batches of 5000 (optimized for performance)
+      const batchSize = 5000
       let processedCount = 0
+      let successTotal = 0
 
       for (let i = 0; i < lines.length; i += batchSize) {
         const batch = lines.slice(i, Math.min(i + batchSize, lines.length))
@@ -124,33 +110,40 @@ export default function ImportPage() {
             }
           )
 
-          // Process results
+          // Process results - batch update for performance
+          let batchSuccessCount = 0
+          const batchErrors: ImportError[] = []
+
           response.results.forEach((result, idx) => {
             const lineNumber = i + idx + 1
 
             if (result.success) {
-              setSuccessCount(prev => prev + 1)
-              if (result.word && result.code) {
-                const word = result.word
-                const code = result.code
-                setSuccessItems(prev => [...prev, {
-                  line: lineNumber,
-                  word,
-                  code
-                }])
-              }
+              batchSuccessCount++
             } else if (result.error) {
-              setErrors(prev => [...prev, {
+              batchErrors.push({
                 line: lineNumber,
                 word: result.word,
                 code: result.code,
                 error: result.error || '未知错误'
-              }])
+              })
             }
-            processedCount++
-            setCurrentLine(processedCount)
-            setProgress((processedCount / lines.length) * 100)
           })
+
+          // Batch state updates (more efficient)
+          successTotal += batchSuccessCount
+          processedCount += response.results.length
+
+          setSuccessCount(successTotal)
+          if (batchErrors.length > 0) {
+            setErrors(prev => [...prev, ...batchErrors])
+          }
+          setCurrentLine(processedCount)
+          setProgress((processedCount / lines.length) * 100)
+
+          // Calculate import speed
+          const elapsed = (Date.now() - startTime) / 1000
+          const speed = Math.round(processedCount / elapsed)
+          setImportSpeed(speed)
         } catch (err: unknown) {
           const error = err as { info?: { error?: string } }
           // If batch fails, mark all items in batch as failed
@@ -220,7 +213,7 @@ export default function ImportPage() {
                         label="选择类型"
                         placeholder="请选择词条类型"
                       >
-                        {PHRASE_TYPES.map((type) => (
+                        {getPhraseTypeOptions().map((type) => (
                           <SelectItem key={type.value}>
                             {type.label}
                           </SelectItem>
@@ -269,6 +262,11 @@ export default function ImportPage() {
                     <Chip color="danger" variant="flat" size="sm">
                       失败: {errors.length}
                     </Chip>
+                    {importSpeed > 0 && (
+                      <Chip color="primary" variant="flat" size="sm">
+                        速度: {importSpeed} 词/秒
+                      </Chip>
+                    )}
                   </div>
                 </div>
               )}
@@ -291,39 +289,13 @@ export default function ImportPage() {
                     </div>
                   )}
 
-                  {successItems.length > 0 && (
-                    <div className="border border-success-200 dark:border-success-800 rounded-lg overflow-hidden">
-                      <div className="px-3 py-1.5 bg-success-50 dark:bg-success-900/20 border-b border-success-200 dark:border-success-800">
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-medium text-success-700 dark:text-success-400">
-                            成功导入
-                          </span>
-                          <span className="text-xs text-success-600 dark:text-success-500">{successCount} 条</span>
-                        </div>
+                  {successCount > 0 && (
+                    <div className="border border-success-200 dark:border-success-800 rounded-lg p-4">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-medium text-success-700 dark:text-success-400">
+                          ✓ 成功导入 {successCount} 条词条
+                        </span>
                       </div>
-                      <Listbox
-                        aria-label="成功导入列表"
-                        items={successItems}
-                        isVirtualized
-                        virtualization={{
-                          maxListboxHeight: 160,
-                          itemHeight: 28
-                        }}
-                        classNames={{
-                          base: "bg-success-50/50 dark:bg-success-900/10",
-                          list: "p-0"
-                        }}
-                        itemClasses={{
-                          base: "px-3 py-1 data-[hover=true]:bg-success-100 dark:data-[hover=true]:bg-success-900/30",
-                          title: "text-xs text-success-700 dark:text-success-400 font-mono"
-                        }}
-                      >
-                        {(item) => (
-                          <ListboxItem key={`success-${item.line}`} textValue={`${item.word} ${item.code}`}>
-                            {item.word} → {item.code}
-                          </ListboxItem>
-                        )}
-                      </Listbox>
                     </div>
                   )}
 
@@ -379,11 +351,12 @@ export default function ImportPage() {
                       setFile(null)
                       setContent('')
                       setSuccessCount(0)
-                      setSuccessItems([])
                       setErrors([])
                       setProgress(0)
                       setCurrentLine(0)
                       setTotalLines(0)
+                      setImportSpeed(0)
+                      setStartTime(0)
                     }}
                   >
                     重新导入

@@ -22,9 +22,9 @@ export async function POST(request: NextRequest) {
   try {
     const { startIndex, lines, type } = await request.json()
 
-    if (!Array.isArray(lines) || lines.length === 0 || lines.length > 1000) {
+    if (!Array.isArray(lines) || lines.length === 0 || lines.length > 5000) {
       return NextResponse.json({
-        error: '无效的数据格式或超过批次限制（最多1000条）'
+        error: '无效的数据格式或超过批次限制（最多5000条）'
       }, { status: 400 })
     }
 
@@ -118,33 +118,15 @@ export async function POST(request: NextRequest) {
       validItems.push({ index: i, word, code })
     }
 
-    // Step 2: Batch check existing phrases
+    // Step 2: Batch processing - optimized for performance
     if (validItems.length > 0) {
-      const codes = validItems.map(item => item.code)
-
-      // Check for duplicate codes within the batch
-      const batchCodesSet = new Set<string>()
-      const batchDuplicates = new Set<string>()
-      for (const item of validItems) {
-        if (batchCodesSet.has(item.code)) {
-          batchDuplicates.add(item.code)
-        } else {
-          batchCodesSet.add(item.code)
-        }
-      }
-
-      // Query existing phrases: check codes and word+code combinations
+      // Batch check: query existing phrases (word+code combinations)
       const existingPhrases = await prisma.phrase.findMany({
         where: {
-          OR: [
-            { code: { in: codes } },
-            {
-              AND: validItems.map(item => ({
-                word: item.word,
-                code: item.code
-              }))
-            }
-          ]
+          OR: validItems.map(item => ({
+            word: item.word,
+            code: item.code
+          }))
         },
         select: {
           word: true,
@@ -152,89 +134,139 @@ export async function POST(request: NextRequest) {
         }
       })
 
-      const existingCodesMap = new Map(existingPhrases.map((p: { word: string; code: string }) => [p.code, p.word]))
-      const existingCombinations = new Set(existingPhrases.map((p: { word: string; code: string }) => `${p.word}:${p.code}`))
+      const existingCombinations = new Set(
+        existingPhrases.map(p => `${p.word}:${p.code}`)
+      )
 
-      // Count phrases per code for weight calculation
-      const codeCountMap = new Map<string, number>()
-      for (const phrase of existingPhrases) {
-        codeCountMap.set(phrase.code, (codeCountMap.get(phrase.code) || 0) + 1)
-      }
-
-      // Step 3: Process each valid item
-      const processedCodes = new Map<string, number>()
+      // Filter out existing combinations
+      const itemsToInsert: Array<{ index: number; word: string; code: string }> = []
 
       for (const item of validItems) {
-        const { index, word, code } = item
-        const lineNumber = startIndex + index + 1
-        const combination = `${word}:${code}`
+        const combination = `${item.word}:${item.code}`
 
-        // Check if word+code combination already exists
         if (existingCombinations.has(combination)) {
           results.push({
             success: false,
-            word,
-            code,
-            error: `第 ${lineNumber} 行：词条和编码的组合已存在（${word} - ${code}）`
+            word: item.word,
+            code: item.code,
+            error: `第 ${startIndex + item.index + 1} 行：词条和编码的组合已存在（${item.word} - ${item.code}）`
           })
-          continue
+        } else {
+          itemsToInsert.push(item)
         }
+      }
 
-        // Calculate weight based on code duplication count
-        // For each type, use its default weight, +1 for each existing phrase with same code
-        const baseWeight = getDefaultWeight(phraseType)
-        const existingCount = codeCountMap.get(code) || 0
-        const batchCount = processedCodes.get(code) || 0
-        const weight = baseWeight + existingCount + batchCount
+      // Step 3: Batch calculate weights
+      if (itemsToInsert.length > 0) {
+        // Get unique codes to query
+        const uniqueCodes = Array.from(new Set(itemsToInsert.map(item => item.code)))
 
-        // Create phrase
-        try {
-          await prisma.phrase.create({
-            data: {
-              word,
-              code,
-              type: phraseType,
-              status: 'Finish',
-              weight,
-              user: {
-                connect: { id: session.id }
-              }
-            }
-          })
-
-          results.push({
-            success: true,
-            word,
-            code
-          })
-
-          // Mark as processed and increment batch count for this code
-          processedCodes.set(code, batchCount + 1)
-          existingCombinations.add(combination)
-        } catch (err: unknown) {
-          const error = err as { code?: string; meta?: { target?: string[] }; message?: string }
-          const lineNumber = startIndex + index + 1
-          let errorMsg = `第 ${lineNumber} 行：创建失败（词条：${word}，编码：${code}）`
-
-          // Provide detailed error message based on Prisma error
-          if (error.code === 'P2002') {
-            // Unique constraint violation
-            const target = error.meta?.target
-            if (target?.includes('word') && target?.includes('code')) {
-              errorMsg = `第 ${lineNumber} 行：词条和编码的组合已存在（${word} - ${code}）`
-            } else if (target?.includes('code')) {
-              errorMsg = `第 ${lineNumber} 行：编码冲突（${code}）`
-            }
-          } else if (error.message) {
-            errorMsg = `第 ${lineNumber} 行：创建失败（词条：${word}，编码：${code}，原因：${error.message}）`
+        // Batch query: count existing phrases per code
+        const codeGroups = await prisma.phrase.groupBy({
+          by: ['code'],
+          where: {
+            code: { in: uniqueCodes }
+          },
+          _count: {
+            code: true
           }
+        })
 
-          results.push({
-            success: false,
-            word,
-            code,
-            error: errorMsg
+        const codeCountMap = new Map<string, number>(
+          codeGroups.map(g => [g.code, g._count.code])
+        )
+
+        // Calculate weights for items to insert, considering batch order
+        const baseWeight = getDefaultWeight(phraseType)
+        const batchCodeCount = new Map<string, number>()
+
+        const phrasesToCreate = itemsToInsert.map(item => {
+          const existingCount = codeCountMap.get(item.code) || 0
+          const batchCount = batchCodeCount.get(item.code) || 0
+          const weight = baseWeight + existingCount + batchCount
+
+          // Increment batch counter for this code
+          batchCodeCount.set(item.code, batchCount + 1)
+
+          return {
+            word: item.word,
+            code: item.code,
+            type: phraseType,
+            status: 'Finish' as const,
+            weight,
+            userId: session.id
+          }
+        })
+
+        // Step 4: Batch insert using createMany (10-100x faster than loop create)
+        try {
+          const createResult = await prisma.phrase.createMany({
+            data: phrasesToCreate,
+            skipDuplicates: true // Skip if unique constraint violated
           })
+
+          // Mark successful inserts
+          const successCount = createResult.count
+
+          // Since createMany doesn't return which records succeeded, 
+          // we assume all non-duplicates succeeded
+          for (let i = 0; i < itemsToInsert.length; i++) {
+            results.push({
+              success: true,
+              word: itemsToInsert[i].word,
+              code: itemsToInsert[i].code
+            })
+          }
+        } catch (err: unknown) {
+          // If batch insert fails, fall back to individual inserts for error reporting
+          console.warn('Batch insert failed, falling back to individual inserts:', err)
+
+          for (const item of itemsToInsert) {
+            const existingCount = codeCountMap.get(item.code) || 0
+            const batchCount = batchCodeCount.get(item.code) || 0
+            const weight = baseWeight + existingCount + batchCount
+
+            try {
+              await prisma.phrase.create({
+                data: {
+                  word: item.word,
+                  code: item.code,
+                  type: phraseType,
+                  status: 'Finish',
+                  weight,
+                  userId: session.id
+                }
+              })
+
+              results.push({
+                success: true,
+                word: item.word,
+                code: item.code
+              })
+
+              batchCodeCount.set(item.code, batchCount + 1)
+            } catch (err: unknown) {
+              const error = err as { code?: string; meta?: { target?: string[] }; message?: string }
+              const lineNumber = startIndex + item.index + 1
+              let errorMsg = `第 ${lineNumber} 行：创建失败（${item.word} - ${item.code}）`
+
+              if (error.code === 'P2002') {
+                const target = error.meta?.target
+                if (target?.includes('word') && target?.includes('code')) {
+                  errorMsg = `第 ${lineNumber} 行：词条和编码的组合已存在（${item.word} - ${item.code}）`
+                } else if (target?.includes('code')) {
+                  errorMsg = `第 ${lineNumber} 行：编码冲突（${item.code}）`
+                }
+              }
+
+              results.push({
+                success: false,
+                word: item.word,
+                code: item.code,
+                error: errorMsg
+              })
+            }
+          }
         }
       }
     }

@@ -25,7 +25,7 @@ export interface ConflictInfo {
 }
 
 export interface CodeSuggestion {
-  action: 'Move' | 'Adjust' | 'Cancel'
+  action: 'Move' | 'Adjust' | 'Cancel' | 'Resolved'
   word: string
   fromCode?: string
   toCode?: string
@@ -155,6 +155,37 @@ export class ConflictDetector {
     }
 
     // For Create action, check if code is already occupied
+    // First: Check if exact word+code combination already exists
+    const exactMatch = await prisma.phrase.findFirst({
+      where: {
+        word: change.word,
+        code: change.code,
+        NOT: change.phraseId ? { id: change.phraseId } : undefined
+      }
+    })
+
+    if (exactMatch) {
+      // Exact word+code combination already exists - this is NOT allowed
+      return {
+        hasConflict: true,
+        code: change.code,
+        currentPhrase: {
+          id: exactMatch.id,
+          word: exactMatch.word,
+          code: exactMatch.code,
+          weight: exactMatch.weight,
+          userId: exactMatch.userId
+        },
+        impact: `词条 "${change.word}" 与编码 "${change.code}" 的组合已存在，不能重复添加`,
+        suggestions: [{
+          action: 'Cancel',
+          word: change.word,
+          reason: '该词条和编码的组合已在字典中存在'
+        }]
+      }
+    }
+
+    // Second: Check if code exists with different word (重码)
     const existing = await prisma.phrase.findFirst({
       where: {
         code: change.code,
