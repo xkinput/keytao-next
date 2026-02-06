@@ -40,7 +40,7 @@ export async function calculateDynamicWeight(
   }
 
   // For Create action, check if this word+code already exists in database
-  // If it exists, return its current weight
+  // But first check if it will be modified by a Change operation in the batch
   if (item.action === 'Create') {
     const existingPhrase = await prisma.phrase.findFirst({
       where: {
@@ -51,8 +51,23 @@ export async function calculateDynamicWeight(
     })
 
     if (existingPhrase) {
-      // Word+code combination already exists, use its weight
-      return existingPhrase.weight
+      // Check if any Change operation will modify this phrase
+      let willBeChanged = false
+      for (let i = 0; i < currentIndex; i++) {
+        const other = allItems[i]
+        if (other.action === 'Change' &&
+          other.oldWord === item.word &&
+          other.code === item.code) {
+          willBeChanged = true
+          break
+        }
+      }
+
+      // If no Change will modify it, use existing weight
+      if (!willBeChanged) {
+        return existingPhrase.weight
+      }
+      // Otherwise, continue to calculate new weight
     }
   }
 
@@ -71,7 +86,7 @@ export async function calculateDynamicWeight(
   // Simulate batch operations:
   // - Previous Creates: add their calculated weights (progressive)
   // - ALL Deletes: remove their weights
-  // - Changes: no effect
+  // - ALL Changes: update word→weight mapping (weight stays occupied, word changes)
   for (let i = 0; i < allItems.length; i++) {
     if (i === currentIndex) continue
 
@@ -84,12 +99,23 @@ export async function calculateDynamicWeight(
         // Calculate what weight this previous Create will get
         const prevMaxWeight = occupiedWeights.size > 0 ? Math.max(...occupiedWeights) : baseWeight - 1
         occupiedWeights.add(prevMaxWeight + 1)
+        // Update mapping for next iteration
+        wordToWeight.set(other.word, prevMaxWeight + 1)
       }
     } else if (other.action === 'Delete') {
       // Delete frees up its weight
       const weight = wordToWeight.get(other.word)
       if (weight !== undefined) {
         occupiedWeights.delete(weight)
+        wordToWeight.delete(other.word)
+      }
+    } else if (other.action === 'Change' && other.oldWord) {
+      // Change updates word→weight mapping (weight stays occupied, word changes)
+      const weight = wordToWeight.get(other.oldWord)
+      if (weight !== undefined) {
+        wordToWeight.delete(other.oldWord)
+        wordToWeight.set(other.word, weight)
+        // occupiedWeights stays the same (weight still occupied, just different word)
       }
     }
   }
@@ -282,15 +308,11 @@ export async function checkBatchConflictsWithWeight(
       const changeEntry = changeMap.get(phraseKey)
       if (changeEntry && changeEntry.index !== i) {
         // For Create operations with Change on same phrase:
-        // This ALWAYS creates duplicate code (重码), never resolves conflict
+        // Change releases the word name, Create reuses it
         // Example: DB has "原词"@"code1", Change "原词"→"新词", Create "原词"@"code1"
-        // Result: code1 has both "新词" (changed) and "原词" (created) = 重码
+        // Result: code1 has both "新词" (changed) and "原词" (created) = 重码 (allowed)
         if (currentItem.action === 'Create') {
-          // Change modifies the existing phrase to a different word
-          // Create will add a new phrase (even with same word name)
-          // Result: code has multiple words = 重码
           const finalWord = changeEntry.item.word
-          result.conflict.impact = `编码 "${currentItem.code}" 已被词条 "${finalWord}" 占用，将创建重码（建议权重: ${result.calculatedWeight || '未计算'}）`
 
           // Update currentPhrase to reflect the batch state (after Change)
           if (result.conflict.currentPhrase) {
@@ -300,16 +322,19 @@ export async function checkBatchConflictsWithWeight(
             }
           }
 
-          // Update suggestions to reflect batch context
+          // Mark as resolved (no conflict, 重码 is allowed)
+          result.conflict.hasConflict = false
+          result.conflict.impact = `编码 "${currentItem.code}" 已被词条 "${finalWord}" 占用，将创建重码（建议权重: ${result.calculatedWeight || '未计算'}）`
           result.conflict.suggestions = [
             {
-              action: 'Cancel',
-              word: currentItem.word,
-              reason: `批次执行后，编码 "${currentItem.code}" 将被 "${finalWord}" 占用，创建此词将形成重码`,
+              action: 'Resolved',
+              word: changeEntry.item.oldWord || '',
+              reason: `已第 ${changeEntry.index + 1} 个操作中将 "${changeEntry.item.oldWord}" 修改为 "${finalWord}"，释放了词名`,
             },
           ]
 
-          resolved = false
+          // Skip further resolution checks for this item
+          continue
         } else {
           // For Delete or Change operations, Change can resolve conflicts
           resolved = true

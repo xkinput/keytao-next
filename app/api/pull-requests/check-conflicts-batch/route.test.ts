@@ -181,12 +181,15 @@ describe('Batch Conflict Detection', () => {
       // PR2: Create would create duplicate code (重码)
       // Even though the word name is the same, it creates a NEW phrase
       // After Change: code has "茹果" (original phrase changed)
-      // After Create: code has "茹果" + "如果" (new phrase) = 重码
+      // After Create: code has "茹果" + "如果" (new phrase) = 重码 (allowed)
       // currentPhrase should reflect batch state (after Change)
       expect(results[1].conflict.currentPhrase?.word).toBe('茹果')
-      expect(results[1].conflict.hasConflict).toBe(true)
+      expect(results[1].conflict.hasConflict).toBe(false) // 重码 is allowed
       expect(results[1].conflict.impact).toContain('重码')
       expect(results[1].conflict.impact).toContain('茹果')
+      // Verify calculatedWeight: should be 101, not 100
+      // Because Change operation will modify the existing phrase at weight 100
+      expect(results[1].calculatedWeight).toBe(101)
     })
   })
 
@@ -440,12 +443,12 @@ describe('Batch Conflict Detection', () => {
         // Change should succeed
         expect(results[0].conflict.hasConflict).toBe(false)
 
-        // Create will conflict with the changed word
+        // Create will result in 重码 with the changed word
         // After Change executes: code1 has "新词" (changed from 原词)
-        // After Create executes: code1 has "新词" + "原词" (new phrase) = 重码
+        // After Create executes: code1 has "新词" + "原词" (new phrase) = 重码 (allowed)
         // currentPhrase should reflect batch state (after Change), not DB state
         expect(results[1].conflict.currentPhrase?.word).toBe('新词')
-        expect(results[1].conflict.hasConflict).toBe(true)
+        expect(results[1].conflict.hasConflict).toBe(false) // 重码 is allowed
         expect(results[1].conflict.impact).toContain('重码')
         expect(results[1].conflict.impact).toContain('新词')
       })

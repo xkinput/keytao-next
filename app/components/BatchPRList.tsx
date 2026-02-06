@@ -17,7 +17,7 @@ interface PullRequest {
     action: string
     weight: number | null
     remark: string | null
-    hasConflict: boolean
+    hasConflict?: boolean
     conflictReason: string | null
     conflictInfo?: {
         hasConflict: boolean
@@ -160,22 +160,11 @@ export default function BatchPRList({
                             </div>
                         )}
 
-                        {(pr.conflictInfo?.hasConflict ?? pr.hasConflict) && (pr.conflictInfo?.impact || pr.conflictReason) && (
+                        {(pr.conflictInfo?.impact || pr.conflictReason) && (
                             <div className="mb-3 p-3 bg-warning-50 dark:bg-warning-100/10 rounded-lg">
                                 <p className="text-small text-warning">
                                     {pr.conflictInfo?.impact || pr.conflictReason}
                                 </p>
-                            </div>
-                        )}
-
-                        {pr.conflicts.length > 0 && (
-                            <div className="mb-3">
-                                <p className="text-small font-medium mb-2">冲突详情:</p>
-                                {pr.conflicts.map((conflict, idx) => (
-                                    <div key={idx} className="text-small text-default-500 ml-4">
-                                        编码 &quot;{conflict.code}&quot; 被 &quot;{conflict.currentWord}&quot; 占用
-                                    </div>
-                                ))}
                             </div>
                         )}
 
