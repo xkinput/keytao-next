@@ -22,6 +22,7 @@ import {
 } from '@heroui/react'
 import { apiRequest } from '@/lib/hooks/useSWR'
 import { getPhraseTypeOptions, getDefaultWeight, type PhraseType } from '@/lib/constants/phraseTypes'
+import { CODE_PATTERN } from '@/lib/constants/codeValidation'
 import { useUIStore } from '@/lib/store/ui'
 
 interface CreatePRModalProps {
@@ -590,8 +591,8 @@ export default function CreatePRModal({
                                         rules={{
                                           required: '编码不能为空',
                                           pattern: {
-                                            value: /^[a-zA-Z]+$/,
-                                            message: '编码只能包含字母'
+                                            value: CODE_PATTERN,
+                                            message: '编码格式错误'
                                           }
                                         }}
                                         render={({ field: codeField, fieldState }) => (
@@ -660,8 +661,8 @@ export default function CreatePRModal({
                                       rules={{
                                         required: '编码不能为空',
                                         pattern: {
-                                          value: /^[a-zA-Z]+$/,
-                                          message: '编码只能包含字母'
+                                          value: CODE_PATTERN,
+                                          message: '编码格式错误'
                                         }
                                       }}
                                       render={({ field: codeField, fieldState }) => (

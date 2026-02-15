@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { checkAdminPermission } from '@/lib/adminAuth'
 import { getDefaultWeight, isValidPhraseType, PHRASE_TYPE_CONFIGS } from '@/lib/constants/phraseTypes'
+import { CODE_PATTERN, MAX_CODE_LENGTH } from '@/lib/constants/codeValidation'
 
 interface ImportResult {
   success: boolean
@@ -93,24 +94,24 @@ export async function POST(request: NextRequest) {
         continue
       }
 
-      // Check code length (max 6 letters)
-      if (code.length > 6) {
+      // Check code length
+      if (code.length > MAX_CODE_LENGTH) {
         results.push({
           success: false,
           word,
           code,
-          error: `第 ${currentLine} 行：编码长度超过6个字母（${word} - ${code}）`
+          error: `第 ${currentLine} 行：编码长度超过${MAX_CODE_LENGTH}个字符（${word} - ${code}）`
         })
         continue
       }
 
-      // Check code is pure letters
-      if (!/^[a-zA-Z]+$/.test(code)) {
+      // Check code format
+      if (!CODE_PATTERN.test(code)) {
         results.push({
           success: false,
           word,
           code,
-          error: `第 ${currentLine} 行：编码必须是纯字母（${word} - ${code}）`
+          error: `第 ${currentLine} 行：编码格式错误（${word} - ${code}）`
         })
         continue
       }

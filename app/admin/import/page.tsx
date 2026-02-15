@@ -33,15 +33,16 @@ export default function ImportPage() {
       const reader = new FileReader()
       reader.onload = (event) => {
         const text = event.target?.result as string
-        // Remove YAML frontmatter if exists
+        // Remove YAML frontmatter and filter comment lines
         const cleanedText = removeYamlFrontmatter(text)
-        setContent(cleanedText)
+        const validLines = filterValidLines(cleanedText.split('\n'))
+        const filteredContent = validLines.join('\n')
+        setContent(filteredContent)
 
         // Auto-detect phrase type based on first two lines
-        const lines = cleanedText.split('\n').filter(line => line.trim())
-        if (lines.length >= 2) {
-          const firstWord = lines[0].split('\t')[0]?.trim()
-          const secondWord = lines[1].split('\t')[0]?.trim()
+        if (validLines.length >= 2) {
+          const firstWord = validLines[0].split('\t')[0]?.trim()
+          const secondWord = validLines[1].split('\t')[0]?.trim()
 
           // Check if both words are single character
           if (firstWord && secondWord && firstWord.length === 1 && secondWord.length === 1) {
@@ -56,10 +57,23 @@ export default function ImportPage() {
   }
 
   const removeYamlFrontmatter = (text: string): string => {
-    // Check if text starts with YAML frontmatter (--- ... --- or --- ... ...)
-    // Matches: ---\n[content]\n... or ---\n[content]\n---
-    const yamlPattern = /^---\s*\n[\s\S]*?\n(\.\.\.|\-\-\-)\s*\n/
-    return text.replace(yamlPattern, '')
+    // First, remove all comment lines (starting with #)
+    const withoutComments = text
+      .split('\n')
+      .filter(line => !line.trim().startsWith('#'))
+      .join('\n')
+
+    // Then match YAML frontmatter: starts with --- and ends with ... or ---
+    const yamlPattern = /^---[\s\S]*?(\.\.\.|---)[^\r\n]*[\r\n]*/
+    return withoutComments.replace(yamlPattern, '')
+  }
+
+  const filterValidLines = (lines: string[]): string[] => {
+    return lines.filter(line => {
+      const trimmed = line.trim()
+      // Filter out empty lines and comment lines (starting with #)
+      return trimmed && !trimmed.startsWith('#')
+    })
   }
 
   const handleImport = async () => {
@@ -77,9 +91,9 @@ export default function ImportPage() {
     setStartTime(Date.now())
 
     try {
-      // Remove YAML frontmatter before processing
+      // Remove YAML frontmatter and filter out comment lines
       const cleanedContent = removeYamlFrontmatter(content)
-      const lines = cleanedContent.split('\n').filter(line => line.trim())
+      const lines = filterValidLines(cleanedContent.split('\n'))
       setTotalLines(lines.length)
 
       // Process in batches of 5000 (optimized for performance)
@@ -227,7 +241,7 @@ export default function ImportPage() {
                       或直接粘贴内容
                     </label>
                     <Textarea
-                      placeholder="每行一条，格式：词条[Tab]编码&#10;支持 YAML 前缀，系统会自动去除"
+                      placeholder="每行一条，格式：词条[Tab]编码&#10;# 开头的注释行和空行会被自动过滤"
                       value={content}
                       onValueChange={setContent}
                       minRows={10}
@@ -382,11 +396,12 @@ export default function ImportPage() {
                 <div>
                   <p className="font-semibold text-default-900 mb-1">YAML 格式支持</p>
                   <p>• 支持带 YAML 前缀的文件，系统会自动去除前缀区域</p>
+                  <p>• <span className="font-semibold text-success">支持注释行</span>：以 # 开头的行会被自动忽略</p>
                 </div>
 
                 <div>
                   <p className="font-semibold text-default-900 mb-1">验证规则</p>
-                  <p>• <span className="font-semibold text-warning">编码必须是纯字母，最长6个字母</span></p>
+                  <p>• <span className="font-semibold text-warning">编码可为字母、分号+字母、单分号(;)或双分号(;;)，最长6字符</span></p>
                   <p>• 词条和编码都不能为空</p>
                   <p>• 空行会被自动忽略</p>
                   <p>• <span className="font-semibold text-primary">编码不能重复</span>（同一编码只能对应一个词条）</p>

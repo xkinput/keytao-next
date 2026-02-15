@@ -143,7 +143,7 @@ export default function PhrasesPage() {
               <SelectItem key="Phrase">词组 (默认权重: 100)</SelectItem>
               <SelectItem key="Sentence">句子 (默认权重: 1000)</SelectItem>
               <SelectItem key="Symbol">符号 (默认权重: 10)</SelectItem>
-              <SelectItem key="Link">连接 (默认权重: 10000)</SelectItem>
+              <SelectItem key="Link">链接 (默认权重: 10000)</SelectItem>
               <SelectItem key="Poem">诗词 (默认权重: 10000)</SelectItem>
               <SelectItem key="Other">其他 (默认权重: 10000)</SelectItem>
             </Select>
