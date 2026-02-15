@@ -11,6 +11,7 @@ import {
   Input,
   Switch
 } from '@heroui/react'
+import { RefreshCw } from 'lucide-react'
 import { useAuthStore } from '@/lib/store/auth'
 import { useAPI, apiRequest } from '@/lib/hooks/useSWR'
 import { usePageFilterStore } from '@/lib/store/pageFilter'
@@ -167,13 +168,23 @@ export default function BatchesPage() {
               <p className="text-sm text-default-500">当前为访客，仅可查看，登录后可创建与编辑。</p>
             )}
           </div>
-          <Button
-            color="primary"
-            onPress={handleCreateBatch}
-            isLoading={isCreating}
-          >
-            新建
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              isIconOnly
+              variant="flat"
+              size="sm"
+              onPress={() => mutate()}
+            >
+              <RefreshCw className="w-4 h-4" />
+            </Button>
+            <Button
+              color="primary"
+              onPress={handleCreateBatch}
+              isLoading={isCreating}
+            >
+              新建
+            </Button>
+          </div>
         </div>
 
         {/* Filters and Search */}

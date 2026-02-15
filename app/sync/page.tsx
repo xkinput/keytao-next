@@ -23,6 +23,7 @@ import {
   Link,
   Skeleton,
 } from '@heroui/react'
+import { RefreshCw } from 'lucide-react'
 import { useAPI } from '@/lib/hooks/useSWR'
 import { useAuthStore } from '@/lib/store/auth'
 import { format } from 'date-fns'
@@ -179,6 +180,14 @@ export default function SyncPage() {
                   </Chip>
                 </div>
               )}
+              <Button
+                isIconOnly
+                variant="flat"
+                size="sm"
+                onPress={() => mutate()}
+              >
+                <RefreshCw className="w-4 h-4" />
+              </Button>
               {isAdmin && (
                 <Button
                   color="primary"

@@ -11,6 +11,7 @@ import {
   Tabs,
   Tab
 } from '@heroui/react'
+import { RefreshCw } from 'lucide-react'
 import { useAPI } from '@/lib/hooks/useSWR'
 import { usePageFilterStore } from '@/lib/store/pageFilter'
 import PullRequestCardSkeleton from '@/app/components/PullRequestCardSkeleton'
@@ -78,7 +79,7 @@ export default function PullRequestsPage() {
   }, [setStorePage])
 
   const statusParam = status === 'all' ? '' : `&status=${status}`
-  const { data, error, isLoading } = useAPI<PRResponse>(
+  const { data, error, isLoading, mutate } = useAPI<PRResponse>(
     `/api/pull-requests?page=${page}&pageSize=10${statusParam}`
   )
 
@@ -103,6 +104,14 @@ export default function PullRequestsPage() {
               共 {data?.pagination.total || 0} 个提议
             </p>
           </div>
+          <Button
+            isIconOnly
+            variant="flat"
+            size="sm"
+            onPress={() => mutate()}
+          >
+            <RefreshCw className="w-4 h-4" />
+          </Button>
         </div>
 
         <Tabs

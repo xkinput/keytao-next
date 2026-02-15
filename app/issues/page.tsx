@@ -9,6 +9,7 @@ import {
   useDisclosure,
   Avatar,
 } from '@heroui/react'
+import { RefreshCw } from 'lucide-react'
 import { useIsAuthenticated } from '@/lib/hooks/useAuth'
 import { useAPI } from '@/lib/hooks/useSWR'
 import { usePageFilterStore } from '@/lib/store/pageFilter'
@@ -103,11 +104,21 @@ export default function HomePage() {
               共 {data?.pagination.total || 0} 个讨论
             </p>
           </div>
-          {isAuthenticated() && (
-            <Button color="primary" onPress={onOpen}>
-              新建讨论
+          <div className="flex items-center gap-2">
+            <Button
+              isIconOnly
+              variant="flat"
+              size="sm"
+              onPress={() => mutate()}
+            >
+              <RefreshCw className="w-4 h-4" />
             </Button>
-          )}
+            {isAuthenticated() && (
+              <Button color="primary" onPress={onOpen}>
+                新建讨论
+              </Button>
+            )}
+          </div>
         </div>
 
         <div className="grid gap-4 transition-opacity duration-300" style={{ opacity: showSkeleton ? 0.6 : 1 }}>

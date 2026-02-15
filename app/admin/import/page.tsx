@@ -80,21 +80,45 @@ export default function ImportPage() {
         const filteredContent = validLines.join('\n')
         setContent(filteredContent)
 
-        // Auto-detect phrase type based on first two lines
-        if (validLines.length >= 2) {
-          const firstWord = validLines[0].split('\t')[0]?.trim()
-          const secondWord = validLines[1].split('\t')[0]?.trim()
-
-          // Check if both words are single character
-          if (firstWord && secondWord && firstWord.length === 1 && secondWord.length === 1) {
-            setPhraseType('Single')
-          } else {
-            setPhraseType('Phrase')
-          }
-        }
+        // Auto-detect phrase type based on filename
+        const detectedType = detectPhraseTypeFromFilename(selectedFile.name)
+        setPhraseType(detectedType)
       }
       reader.readAsText(selectedFile)
     }
+  }
+
+  const detectPhraseTypeFromFilename = (filename: string): PhraseType => {
+    const lowerName = filename.toLowerCase()
+
+    // Check for each phrase type's rime filename pattern
+    if (lowerName.includes('css-single') || lowerName.includes('css_single')) {
+      return 'CSSSingle'
+    }
+    if (lowerName.includes('css') || lowerName.includes('声笔笔')) {
+      return 'CSS'
+    }
+    if (lowerName.includes('single') || lowerName.includes('单字')) {
+      return 'Single'
+    }
+    if (lowerName.includes('phrase') || lowerName.includes('词组')) {
+      return 'Phrase'
+    }
+    if (lowerName.includes('supplement') || lowerName.includes('补充')) {
+      return 'Supplement'
+    }
+    if (lowerName.includes('symbol') || lowerName.includes('符号')) {
+      return 'Symbol'
+    }
+    if (lowerName.includes('link') || lowerName.includes('链接')) {
+      return 'Link'
+    }
+    if (lowerName.includes('english') || lowerName.includes('英文')) {
+      return 'English'
+    }
+
+    // Default to Phrase if no match
+    return 'Phrase'
   }
 
   const removeYamlFrontmatter = (text: string): string => {

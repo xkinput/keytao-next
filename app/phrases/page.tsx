@@ -12,8 +12,10 @@ import {
   Input,
   Pagination,
   Select,
-  SelectItem
+  SelectItem,
+  Button
 } from '@heroui/react'
+import { RefreshCw } from 'lucide-react'
 import { useAPI } from '@/lib/hooks/useSWR'
 import { getPhraseTypeLabel, getPhraseTypeOptions, type PhraseType } from '@/lib/constants/phraseTypes'
 import { PHRASE_STATUS_MAP, PHRASE_STATUS_COLOR_MAP } from '@/lib/constants/status'
@@ -57,7 +59,7 @@ export default function PhrasesPage() {
     setPage(newPage)
   }, [])
 
-  const { data, isLoading, isValidating } = useAPI<{ phrases: Phrase[]; total: number }>(
+  const { data, isLoading, isValidating, mutate } = useAPI<{ phrases: Phrase[]; total: number }>(
     `/api/phrases?page=${page}&pageSize=20&search=${debouncedSearch}${typeFilter ? `&type=${typeFilter}` : ''}`,
     { keepPreviousData: true }
   )
@@ -86,7 +88,18 @@ export default function PhrasesPage() {
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="flex justify-between items-center mb-6">
           <h1 className="text-3xl font-bold">词库管理</h1>
-          <p className="text-default-500">共 {total} 条词条</p>
+          <div className="flex items-center gap-2">
+            <p className="text-default-500">共 {total} 条词条</p>
+            <Button
+              isIconOnly
+              variant="flat"
+              size="sm"
+              onPress={() => mutate()}
+              isLoading={isValidating}
+            >
+              <RefreshCw className="w-4 h-4" />
+            </Button>
+          </div>
         </div>
 
         <div className="mb-4 flex gap-4">

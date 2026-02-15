@@ -11,6 +11,7 @@ import {
   RadioGroup,
   Radio
 } from '@heroui/react'
+import { RefreshCw } from 'lucide-react'
 import { useAPI } from '@/lib/hooks/useSWR'
 import { usePageFilterStore } from '@/lib/store/pageFilter'
 import AdminBatchCardSkeleton from '@/app/components/AdminBatchCardSkeleton'
@@ -44,7 +45,7 @@ export default function AdminBatchesPage() {
     setFilter('/admin/batches', newStatus)
   }, [setFilter])
 
-  const { data, error, isLoading } = useAPI<{ batches: Batch[] }>(
+  const { data, error, isLoading, mutate } = useAPI<{ batches: Batch[] }>(
     `/api/admin/batches?status=${statusFilter}`
   )
 
@@ -55,7 +56,17 @@ export default function AdminBatchesPage() {
     <div className="min-h-screen">
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="mb-6">
-          <h1 className="text-3xl font-bold mb-4">批次审核</h1>
+          <div className="flex justify-between items-center mb-4">
+            <h1 className="text-3xl font-bold">批次审核</h1>
+            <Button
+              isIconOnly
+              variant="flat"
+              size="sm"
+              onPress={() => mutate()}
+            >
+              <RefreshCw className="w-4 h-4" />
+            </Button>
+          </div>
 
           <RadioGroup
             label="状态筛选"
