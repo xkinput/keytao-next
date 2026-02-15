@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { checkAdminPermission } from '@/lib/adminAuth'
+import { checkRootAdminPermission } from '@/lib/adminAuth'
 import { getDefaultWeight, isValidPhraseType, PHRASE_TYPE_CONFIGS } from '@/lib/constants/phraseTypes'
 import { CODE_PATTERN, MAX_CODE_LENGTH } from '@/lib/constants/codeValidation'
 
@@ -12,8 +12,8 @@ interface ImportResult {
 }
 
 export async function POST(request: NextRequest) {
-  // 验证管理员权限
-  const authCheck = await checkAdminPermission()
+  // 验证ROOT管理员权限
+  const authCheck = await checkRootAdminPermission()
   if (!authCheck.authorized) {
     return authCheck.response
   }

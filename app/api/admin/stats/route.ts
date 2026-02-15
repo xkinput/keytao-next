@@ -9,6 +9,9 @@ export async function GET() {
     return authCheck.response
   }
 
+  const { user } = authCheck
+  const isRootAdmin = user?.roles.some((role: { value: string }) => role.value === "R:ROOT")
+
   try {
     const [totalPhrases, totalIssues, totalUsers, totalPullRequests, pendingSyncBatches] = await Promise.all([
       prisma.phrase.count(),
@@ -29,6 +32,7 @@ export async function GET() {
       totalUsers,
       totalPullRequests,
       pendingSyncBatches,
+      isRootAdmin,
     })
   } catch (error) {
     console.error('Get stats error:', error)

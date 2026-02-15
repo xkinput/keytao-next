@@ -1,10 +1,12 @@
 'use client'
 
-import { useState } from 'react'
-import { Card, CardBody, CardHeader, Button, Progress, Textarea, Chip, Listbox, ListboxItem, Select, SelectItem } from '@heroui/react'
+import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
+import { Card, CardBody, CardHeader, Button, Progress, Textarea, Chip, Listbox, ListboxItem, Select, SelectItem, Spinner } from '@heroui/react'
 import Navbar from '@/app/components/Navbar'
-import { apiRequest } from '@/lib/hooks/useSWR'
+import { apiRequest, useAPI } from '@/lib/hooks/useSWR'
 import { type PhraseType, getPhraseTypeOptions } from '@/lib/constants/phraseTypes'
+import { useAuthStore } from '@/lib/store/auth'
 
 interface ImportError {
   line: number
@@ -14,6 +16,16 @@ interface ImportError {
 }
 
 export default function ImportPage() {
+  const router = useRouter()
+  const { token, isAuthenticated } = useAuthStore()
+
+  // Check ROOT admin permission
+  const { data: adminCheck, isLoading } = useAPI<{
+    isRootAdmin: boolean
+  }>(
+    isAuthenticated() && token ? '/api/admin/stats' : null
+  )
+
   const [file, setFile] = useState<File | null>(null)
   const [content, setContent] = useState('')
   const [phraseType, setPhraseType] = useState<PhraseType>('Phrase')
@@ -25,6 +37,42 @@ export default function ImportPage() {
   const [errors, setErrors] = useState<ImportError[]>([])
   const [importSpeed, setImportSpeed] = useState(0)
   const [startTime, setStartTime] = useState(0)
+
+  // Redirect if not ROOT admin
+  useEffect(() => {
+    if (!isLoading && adminCheck && !adminCheck.isRootAdmin) {
+      router.push('/admin')
+    }
+  }, [adminCheck, isLoading, router])
+
+  // Show loading while checking permission
+  if (isLoading || !adminCheck) {
+    return (
+      <>
+        <Navbar />
+        <div className="min-h-screen flex items-center justify-center">
+          <Spinner size="lg" label="验证权限中..." />
+        </div>
+      </>
+    )
+  }
+
+  // Show access denied if not ROOT admin
+  if (!adminCheck.isRootAdmin) {
+    return (
+      <>
+        <Navbar />
+        <div className="min-h-screen flex items-center justify-center">
+          <Card className="max-w-md">
+            <CardBody className="text-center py-8">
+              <h2 className="text-xl font-bold text-danger mb-2">权限不足</h2>
+              <p className="text-default-500">此功能仅限初始管理员访问</p>
+            </CardBody>
+          </Card>
+        </div>
+      </>
+    )
+  }
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0]

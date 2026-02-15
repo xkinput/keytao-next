@@ -17,10 +17,18 @@ export default function Navbar() {
   const isAdminArea = pathname.startsWith('/admin')
 
   // 检查是否是管理员
-  const { data: adminCheck } = useAPI(
+  const { data: adminCheck } = useAPI<{
+    totalPhrases: number
+    totalIssues: number
+    totalUsers: number
+    totalPullRequests: number
+    pendingSyncBatches: number
+    isRootAdmin: boolean
+  }>(
     isAuthenticated() && token ? '/api/admin/stats' : null
   )
   const isAdmin = !!adminCheck
+  const isRootAdmin = adminCheck?.isRootAdmin || false
 
   const handleLogout = async () => {
     // Client-only logout: clear local token and redirect
@@ -34,7 +42,7 @@ export default function Navbar() {
     { label: '数据概览', href: '/admin/dashboard' },
     { label: '批次审核', href: '/admin/batches' },
     { label: '用户管理', href: '/admin/users' },
-    { label: '词库导入', href: '/admin/import' },
+    ...(isRootAdmin ? [{ label: '词库导入', href: '/admin/import' }] : []),
   ]
 
   // 普通导航
