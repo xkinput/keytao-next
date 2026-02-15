@@ -418,7 +418,6 @@ export default function InstallPage() {
                   在执行安装操作前，请务必备份您的 Rime 配置目录，以免丢失个人配置和词库数据。
                 </>
               }
-              startContent={<AlertTriangle className="w-5 h-5" />}
             />
 
             {/* Directory Selection Card */}
@@ -443,7 +442,7 @@ export default function InstallPage() {
                   <Button
                     color="primary"
                     size="lg"
-                    onClick={selectDirectory}
+                    onPress={selectDirectory}
                     isLoading={isLoading}
                     isDisabled={isLoading || isInstalling}
                     className="flex-1 sm:flex-none"
@@ -455,7 +454,7 @@ export default function InstallPage() {
                     <Button
                       color="danger"
                       size="lg"
-                      onClick={downloadAndInstall}
+                      onPress={downloadAndInstall}
                       isLoading={isInstalling}
                       isDisabled={isLoading || isInstalling}
                       startContent={!isInstalling && <Download className="w-5 h-5" />}
