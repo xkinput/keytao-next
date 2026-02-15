@@ -15,7 +15,6 @@ import {
   Select,
   SelectItem
 } from '@heroui/react'
-import Navbar from '@/app/components/Navbar'
 import { useAPI } from '@/lib/hooks/useSWR'
 import { getPhraseTypeLabel, getPhraseTypeOptions, type PhraseType } from '@/lib/constants/phraseTypes'
 
@@ -96,104 +95,98 @@ export default function PhrasesPage() {
   // Only show full page loading on first load
   if (isFirstLoad && isLoading) {
     return (
-      <>
-        <Navbar />
-        <div className="min-h-screen flex items-center justify-center">
-          <Spinner size="lg" label="加载中..." />
-        </div>
-      </>
+      <div className="min-h-screen flex items-center justify-center">
+        <Spinner size="lg" label="加载中..." />
+      </div>
     )
   }
 
   return (
-    <>
-      <Navbar />
-      <div className="min-h-screen">
-        <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          <div className="flex justify-between items-center mb-6">
-            <h1 className="text-3xl font-bold">词库管理</h1>
-            <div className="flex items-center gap-2">
-              {(isSearching || isValidating) && <Spinner size="sm" />}
-              <p className="text-default-500">共 {total} 条词条</p>
-            </div>
+    <div className="min-h-screen">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div className="flex justify-between items-center mb-6">
+          <h1 className="text-3xl font-bold">词库管理</h1>
+          <div className="flex items-center gap-2">
+            {(isSearching || isValidating) && <Spinner size="sm" />}
+            <p className="text-default-500">共 {total} 条词条</p>
           </div>
+        </div>
 
-          <div className="mb-4 flex gap-4">
-            <Input
-              placeholder="搜索词条或编码..."
-              value={search}
-              onValueChange={setSearch}
-              onClear={() => setSearch('')}
-              isClearable
-              className="max-w-md"
-              description={isSearching ? "正在输入..." : debouncedSearch ? `搜索: ${debouncedSearch}` : undefined}
+        <div className="mb-4 flex gap-4">
+          <Input
+            placeholder="搜索词条或编码..."
+            value={search}
+            onValueChange={setSearch}
+            onClear={() => setSearch('')}
+            isClearable
+            className="max-w-md"
+            description={isSearching ? "正在输入..." : debouncedSearch ? `搜索: ${debouncedSearch}` : undefined}
+          />
+          <Select
+            placeholder="筛选类型"
+            className="max-w-xs"
+            selectedKeys={typeFilter ? [typeFilter] : []}
+            defaultSelectedKeys={""}
+            onSelectionChange={(keys) => {
+              const selected = Array.from(keys)[0] as string
+              setTypeFilter(selected || '')
+              setPage(1)
+            }}
+          >
+            <SelectItem key="">全部类型</SelectItem>
+            {getPhraseTypeOptions().map((option) => (
+              <SelectItem key={option.value}>
+                {option.label}
+              </SelectItem>
+            )) as any}
+          </Select>
+        </div>
+
+        <Table aria-label="词条列表">
+          <TableHeader>
+            <TableColumn>词</TableColumn>
+            <TableColumn>编码</TableColumn>
+            <TableColumn>类型</TableColumn>
+            <TableColumn>权重</TableColumn>
+            <TableColumn>状态</TableColumn>
+            <TableColumn>备注</TableColumn>
+          </TableHeader>
+          <TableBody
+            emptyContent="暂无数据"
+          >
+            {phrases.map((phrase) => (
+              <TableRow key={phrase.id}>
+                <TableCell className="font-medium">{phrase.word}</TableCell>
+                <TableCell className="font-mono text-sm">{phrase.code}</TableCell>
+                <TableCell>
+                  <Chip color={getTypeColor(phrase.type)} variant="flat" size="sm">
+                    {getPhraseTypeLabel(phrase.type as PhraseType)}
+                  </Chip>
+                </TableCell>
+                <TableCell>{phrase.weight}</TableCell>
+                <TableCell>
+                  <Chip color={getStatusColor(phrase.status)} variant="flat" size="sm">
+                    {getStatusLabel(phrase.status)}
+                  </Chip>
+                </TableCell>
+                <TableCell className="max-w-xs truncate">
+                  {phrase.remark || '-'}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+
+        {total > 20 && (
+          <div className="flex justify-center mt-4">
+            <Pagination
+              total={Math.ceil(total / 20)}
+              page={page}
+              onChange={setPage}
             />
-            <Select
-              placeholder="筛选类型"
-              className="max-w-xs"
-              selectedKeys={typeFilter ? [typeFilter] : []}
-              defaultSelectedKeys={""}
-              onSelectionChange={(keys) => {
-                const selected = Array.from(keys)[0] as string
-                setTypeFilter(selected || '')
-                setPage(1)
-              }}
-            >
-              <SelectItem key="">全部类型</SelectItem>
-              {getPhraseTypeOptions().map((option) => (
-                <SelectItem key={option.value}>
-                  {option.label}
-                </SelectItem>
-              )) as any}
-            </Select>
           </div>
-
-          <Table aria-label="词条列表">
-            <TableHeader>
-              <TableColumn>词</TableColumn>
-              <TableColumn>编码</TableColumn>
-              <TableColumn>类型</TableColumn>
-              <TableColumn>权重</TableColumn>
-              <TableColumn>状态</TableColumn>
-              <TableColumn>备注</TableColumn>
-            </TableHeader>
-            <TableBody
-              emptyContent="暂无数据"
-            >
-              {phrases.map((phrase) => (
-                <TableRow key={phrase.id}>
-                  <TableCell className="font-medium">{phrase.word}</TableCell>
-                  <TableCell className="font-mono text-sm">{phrase.code}</TableCell>
-                  <TableCell>
-                    <Chip color={getTypeColor(phrase.type)} variant="flat" size="sm">
-                      {getPhraseTypeLabel(phrase.type as PhraseType)}
-                    </Chip>
-                  </TableCell>
-                  <TableCell>{phrase.weight}</TableCell>
-                  <TableCell>
-                    <Chip color={getStatusColor(phrase.status)} variant="flat" size="sm">
-                      {getStatusLabel(phrase.status)}
-                    </Chip>
-                  </TableCell>
-                  <TableCell className="max-w-xs truncate">
-                    {phrase.remark || '-'}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-
-          {total > 20 && (
-            <div className="flex justify-center mt-4">
-              <Pagination
-                total={Math.ceil(total / 20)}
-                page={page}
-                onChange={setPage}
-              />
-            </div>
-          )}
-        </main>
-      </div>
-    </>
+        )}
+      </main>
+    </div>
   )
 }

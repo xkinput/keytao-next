@@ -14,7 +14,6 @@ import { useAuthStore } from '@/lib/store/auth'
 import { useAPI } from '@/lib/hooks/useSWR'
 import { usePageFilterStore } from '@/lib/store/pageFilter'
 import { useRouter } from 'next/navigation'
-import Navbar from '@/app/components/Navbar'
 import CreateIssueModal from '@/app/components/CreateIssueModal'
 
 interface Issue {
@@ -117,138 +116,135 @@ export default function HomePage() {
   }
 
   return (
-    <>
-      <Navbar />
-      <div className="min-h-screen">
-        <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          <div className="flex justify-between items-center mb-6">
-            <div>
-              <h2 className="text-2xl font-bold mb-2">讨论</h2>
-              <p className="text-default-500">
-                共 {data?.pagination.total || 0} 个讨论
-              </p>
-            </div>
-            {isAuthenticated() && (
-              <Button color="primary" onPress={onOpen}>
-                新建讨论
-              </Button>
-            )}
+    <div className="min-h-screen">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div className="flex justify-between items-center mb-6">
+          <div>
+            <h2 className="text-2xl font-bold mb-2">讨论</h2>
+            <p className="text-default-500">
+              共 {data?.pagination.total || 0} 个讨论
+            </p>
           </div>
-
-          {error && (
-            <div className="mb-4 p-4 bg-danger-50 dark:bg-danger-100/10 text-danger rounded-lg">
-              获取讨论失败: {error.message}
-            </div>
+          {isAuthenticated() && (
+            <Button color="primary" onPress={onOpen}>
+              新建讨论
+            </Button>
           )}
+        </div>
 
-          <div className="grid gap-4">
-            {data?.issues.map((issue) => (
-              <Card
-                key={issue.id}
-                isPressable
-                onPress={() => router.push(`/issues/${issue.id}`)}
-                className="w-full hover:scale-[1.01] transition-transform"
-                shadow="sm"
-              >
-                <CardBody className="p-4 sm:p-5">
-                  <div className="flex flex-col gap-3">
-                    <div className="flex justify-between items-start gap-4">
-                      <h3 className="text-lg sm:text-xl font-bold text-default-900 leading-tight">
-                        {issue.title}
-                      </h3>
-                      <Chip
-                        color={getStatusColor(issue.status)}
-                        variant="flat"
-                        size="sm"
-                        className="flex-shrink-0"
-                      >
-                        {getStatusText(issue.status)}
-                      </Chip>
-                    </div>
+        {error && (
+          <div className="mb-4 p-4 bg-danger-50 dark:bg-danger-100/10 text-danger rounded-lg">
+            获取讨论失败: {error.message}
+          </div>
+        )}
 
-                    <p className="text-default-500 text-sm line-clamp-2">
-                      {truncateContent(issue.content)}
-                    </p>
+        <div className="grid gap-4">
+          {data?.issues.map((issue) => (
+            <Card
+              key={issue.id}
+              isPressable
+              onPress={() => router.push(`/issues/${issue.id}`)}
+              className="w-full hover:scale-[1.01] transition-transform"
+              shadow="sm"
+            >
+              <CardBody className="p-4 sm:p-5">
+                <div className="flex flex-col gap-3">
+                  <div className="flex justify-between items-start gap-4">
+                    <h3 className="text-lg sm:text-xl font-bold text-default-900 leading-tight">
+                      {issue.title}
+                    </h3>
+                    <Chip
+                      color={getStatusColor(issue.status)}
+                      variant="flat"
+                      size="sm"
+                      className="shrink-0"
+                    >
+                      {getStatusText(issue.status)}
+                    </Chip>
+                  </div>
 
-                    <div className="flex items-center justify-between mt-2">
-                      <div className="flex items-center gap-3">
-                        <div className="flex items-center gap-2">
-                          <Avatar
-                            name={issue.author.nickname || issue.author.name}
-                            size="sm"
-                            className="w-6 h-6 text-tiny"
-                          />
-                          <span className="text-small text-default-500 font-medium">
-                            {issue.author.nickname || issue.author.name}
-                          </span>
-                        </div>
-                        <span className="text-small text-default-400">·</span>
-                        <span className="text-small text-default-400">
-                          {new Date(issue.createAt).toLocaleDateString('zh-CN')}
+                  <p className="text-default-500 text-sm line-clamp-2">
+                    {truncateContent(issue.content)}
+                  </p>
+
+                  <div className="flex items-center justify-between mt-2">
+                    <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-2">
+                        <Avatar
+                          name={issue.author.nickname || issue.author.name}
+                          size="sm"
+                          className="w-6 h-6 text-tiny"
+                        />
+                        <span className="text-small text-default-500 font-medium">
+                          {issue.author.nickname || issue.author.name}
                         </span>
                       </div>
+                      <span className="text-small text-default-400">·</span>
+                      <span className="text-small text-default-400">
+                        {new Date(issue.createAt).toLocaleDateString('zh-CN')}
+                      </span>
+                    </div>
 
-                      <div className="flex items-center gap-1 text-default-400">
-                        <MessageCircleIcon className="w-4 h-4" />
-                        <span className="text-small">{issue._count?.comments || 0}</span>
-                      </div>
+                    <div className="flex items-center gap-1 text-default-400">
+                      <MessageCircleIcon className="w-4 h-4" />
+                      <span className="text-small">{issue._count?.comments || 0}</span>
                     </div>
                   </div>
-                </CardBody>
-              </Card>
-            ))}
+                </div>
+              </CardBody>
+            </Card>
+          ))}
 
-            {data?.issues.length === 0 && !isLoading && (
-              <Card>
-                <CardBody className="text-center py-16">
-                  <div className="flex flex-col items-center justify-center gap-4">
-                    <div className="w-16 h-16 rounded-full bg-default-100 flex items-center justify-center">
-                      <MessageCircleIcon className="w-8 h-8 text-default-400" />
-                    </div>
-                    <div>
-                      <h3 className="text-lg font-semibold text-default-700">暂无讨论</h3>
-                      <p className="text-default-500">
-                        还没有人发起讨论，来做第一个发言的人吧
-                      </p>
-                    </div>
-                    {isAuthenticated() && (
-                      <Button color="primary" onPress={onOpen} className="mt-2">
-                        发起讨论
-                      </Button>
-                    )}
+          {data?.issues.length === 0 && !isLoading && (
+            <Card>
+              <CardBody className="text-center py-16">
+                <div className="flex flex-col items-center justify-center gap-4">
+                  <div className="w-16 h-16 rounded-full bg-default-100 flex items-center justify-center">
+                    <MessageCircleIcon className="w-8 h-8 text-default-400" />
                   </div>
-                </CardBody>
-              </Card>
-            )}
-          </div>
-
-          {data?.pagination && data.pagination.totalPages > 1 && (
-            <div className="mt-6 flex justify-center gap-2">
-              <Button
-                isDisabled={data.pagination.page === 1}
-                onPress={() => setPage(data.pagination.page - 1)}
-              >
-                上一页
-              </Button>
-              <span className="flex items-center px-4">
-                {data.pagination.page} / {data.pagination.totalPages}
-              </span>
-              <Button
-                isDisabled={data.pagination.page === data.pagination.totalPages}
-                onPress={() => setPage(data.pagination.page + 1)}
-              >
-                下一页
-              </Button>
-            </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-default-700">暂无讨论</h3>
+                    <p className="text-default-500">
+                      还没有人发起讨论，来做第一个发言的人吧
+                    </p>
+                  </div>
+                  {isAuthenticated() && (
+                    <Button color="primary" onPress={onOpen} className="mt-2">
+                      发起讨论
+                    </Button>
+                  )}
+                </div>
+              </CardBody>
+            </Card>
           )}
-        </main>
+        </div>
 
-        <CreateIssueModal
-          isOpen={isOpen}
-          onClose={onClose}
-          onSuccess={mutate}
-        />
-      </div>
-    </>
+        {data?.pagination && data.pagination.totalPages > 1 && (
+          <div className="mt-6 flex justify-center gap-2">
+            <Button
+              isDisabled={data.pagination.page === 1}
+              onPress={() => setPage(data.pagination.page - 1)}
+            >
+              上一页
+            </Button>
+            <span className="flex items-center px-4">
+              {data.pagination.page} / {data.pagination.totalPages}
+            </span>
+            <Button
+              isDisabled={data.pagination.page === data.pagination.totalPages}
+              onPress={() => setPage(data.pagination.page + 1)}
+            >
+              下一页
+            </Button>
+          </div>
+        )}
+      </main>
+
+      <CreateIssueModal
+        isOpen={isOpen}
+        onClose={onClose}
+        onSuccess={mutate}
+      />
+    </div>
   )
 }

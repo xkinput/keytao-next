@@ -15,7 +15,6 @@ import {
 } from '@heroui/react'
 import BatchPreview from '@/app/components/BatchPreview'
 import { useAPI, apiRequest } from '@/lib/hooks/useSWR'
-import Navbar from '@/app/components/Navbar'
 import BatchPRList from '@/app/components/BatchPRList'
 import { useUIStore } from '@/lib/store/ui'
 
@@ -161,34 +160,28 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
 
   if (isLoading) {
     return (
-      <>
-        <Navbar />
-        <div className="min-h-screen flex items-center justify-center">
-          <Spinner size="lg" label="加载中..." />
-        </div>
-      </>
+      <div className="min-h-screen flex items-center justify-center">
+        <Spinner size="lg" label="加载中..." />
+      </div>
     )
   }
 
   if (error || !batch) {
     return (
-      <>
-        <Navbar />
-        <div className="min-h-screen flex items-center justify-center p-8">
-          <Card className="max-w-md">
-            <CardBody className="text-center">
-              <p className="text-danger mb-4">加载失败</p>
-              <p className="text-default-500">{error?.message || '批次不存在'}</p>
-              <Button
-                className="mt-4"
-                onPress={() => router.push('/admin/batches')}
-              >
-                返回列表
-              </Button>
-            </CardBody>
-          </Card>
-        </div>
-      </>
+      <div className="min-h-screen flex items-center justify-center p-8">
+        <Card className="max-w-md">
+          <CardBody className="text-center">
+            <p className="text-danger mb-4">加载失败</p>
+            <p className="text-default-500">{error?.message || '批次不存在'}</p>
+            <Button
+              className="mt-4"
+              onPress={() => router.push('/admin/batches')}
+            >
+              返回列表
+            </Button>
+          </CardBody>
+        </Card>
+      </div>
     )
   }
 
@@ -197,131 +190,128 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
   const hasConflicts = batchData.pullRequests.some(pr => pr.conflictInfo?.hasConflict ?? pr.hasConflict)
 
   return (
-    <>
-      <Navbar />
-      <div className="min-h-screen">
-        <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          <div className="mb-6">
-            <Button
-              variant="light"
-              onPress={() => router.push('/admin/batches')}
-              className="mb-4"
-            >
-              ← 返回列表
-            </Button>
+    <div className="min-h-screen">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div className="mb-6">
+          <Button
+            variant="light"
+            onPress={() => router.push('/admin/batches')}
+            className="mb-4"
+          >
+            ← 返回列表
+          </Button>
 
-            <Card>
-              <CardHeader>
-                <div className="flex justify-between items-start w-full">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-2">
-                      <h2 className="text-2xl font-bold">
-                        {batchData.description || '未命名批次'}
-                      </h2>
-                      <Chip
-                        color={getStatusColor(batchData.status)}
-                        variant="flat"
-                      >
-                        {getStatusText(batchData.status)}
+          <Card>
+            <CardHeader>
+              <div className="flex justify-between items-start w-full">
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 mb-2">
+                    <h2 className="text-2xl font-bold">
+                      {batchData.description || '未命名批次'}
+                    </h2>
+                    <Chip
+                      color={getStatusColor(batchData.status)}
+                      variant="flat"
+                    >
+                      {getStatusText(batchData.status)}
+                    </Chip>
+                    {hasConflicts && (
+                      <Chip color="warning" variant="flat">
+                        ⚠️ 包含冲突
                       </Chip>
-                      {hasConflicts && (
-                        <Chip color="warning" variant="flat">
-                          ⚠️ 包含冲突
-                        </Chip>
-                      )}
-                    </div>
-                    <div className="space-y-1 text-small text-default-500">
-                      <p>
-                        创建者: {batchData.creator.nickname || batchData.creator.name}
-                      </p>
-                      <p>
-                        创建时间: {new Date(batchData.createAt).toLocaleString('zh-CN')}
-                      </p>
-                      {batchData.sourceIssue && (
-                        <p>
-                          关联 Issue: #{batchData.sourceIssue.id} {batchData.sourceIssue.title}
-                        </p>
-                      )}
-                    </div>
+                    )}
                   </div>
-                </div>
-              </CardHeader>
-            </Card>
-          </div>
-
-          <Tabs aria-label="批次视图" className="mb-4">
-            <Tab key="list" title={`📝 修改列表 (${batchData.pullRequests.length})`}>
-              <div className="space-y-4 pt-4">
-
-                <BatchPRList pullRequests={batchData.pullRequests} />
-
-              </div>
-            </Tab>
-            <Tab key="preview" title="👁️ 预览执行">
-              <div className="pt-4">
-                <BatchPreview batchId={resolvedParams.id} />
-              </div>
-            </Tab>
-          </Tabs>
-
-          {canReview && (
-            <Card>
-              <CardHeader>
-                <h3 className="text-xl font-bold">审核操作</h3>
-              </CardHeader>
-              <CardBody>
-                <Textarea
-                  label="审核意见"
-                  placeholder={hasConflicts ? "批次包含冲突，拒绝时必须填写原因" : "可选，说明审核决定"}
-                  value={reviewNote}
-                  onValueChange={setReviewNote}
-                  minRows={3}
-                  className="mb-4"
-                />
-
-                {hasConflicts && (
-                  <div className="mb-4 p-3 bg-warning-50 dark:bg-warning-100/10 rounded-lg">
-                    <p className="text-small text-warning">
-                      ⚠️ 警告: 该批次包含冲突的修改，建议仔细审核或拒绝
+                  <div className="space-y-1 text-small text-default-500">
+                    <p>
+                      创建者: {batchData.creator.nickname || batchData.creator.name}
                     </p>
+                    <p>
+                      创建时间: {new Date(batchData.createAt).toLocaleString('zh-CN')}
+                    </p>
+                    {batchData.sourceIssue && (
+                      <p>
+                        关联 Issue: #{batchData.sourceIssue.id} {batchData.sourceIssue.title}
+                      </p>
+                    )}
                   </div>
-                )}
-
-                <div className="flex gap-3">
-                  <Button
-                    color="success"
-                    onPress={handleApprove}
-                    isLoading={processing}
-                    isDisabled={processing}
-                  >
-                    批准
-                  </Button>
-                  <Button
-                    color="danger"
-                    variant="flat"
-                    onPress={handleReject}
-                    isLoading={processing}
-                    isDisabled={processing}
-                  >
-                    拒绝
-                  </Button>
                 </div>
-              </CardBody>
-            </Card>
-          )}
+              </div>
+            </CardHeader>
+          </Card>
+        </div>
 
-          {batchData.reviewNote && (
-            <Card className="mt-4">
-              <CardHeader>
-                <h3 className="text-lg font-semibold">审核意见</h3>
-              </CardHeader>
-              <CardBody>
-                <p className="text-default-600">{batchData.reviewNote}</p>
-              </CardBody>
-            </Card>
-          )}
-        </main>
-      </div>
-    </>
+        <Tabs aria-label="批次视图" className="mb-4">
+          <Tab key="list" title={`📝 修改列表 (${batchData.pullRequests.length})`}>
+            <div className="space-y-4 pt-4">
+
+              <BatchPRList pullRequests={batchData.pullRequests} />
+
+            </div>
+          </Tab>
+          <Tab key="preview" title="👁️ 预览执行">
+            <div className="pt-4">
+              <BatchPreview batchId={resolvedParams.id} />
+            </div>
+          </Tab>
+        </Tabs>
+
+        {canReview && (
+          <Card>
+            <CardHeader>
+              <h3 className="text-xl font-bold">审核操作</h3>
+            </CardHeader>
+            <CardBody>
+              <Textarea
+                label="审核意见"
+                placeholder={hasConflicts ? "批次包含冲突，拒绝时必须填写原因" : "可选，说明审核决定"}
+                value={reviewNote}
+                onValueChange={setReviewNote}
+                minRows={3}
+                className="mb-4"
+              />
+
+              {hasConflicts && (
+                <div className="mb-4 p-3 bg-warning-50 dark:bg-warning-100/10 rounded-lg">
+                  <p className="text-small text-warning">
+                    ⚠️ 警告: 该批次包含冲突的修改，建议仔细审核或拒绝
+                  </p>
+                </div>
+              )}
+
+              <div className="flex gap-3">
+                <Button
+                  color="success"
+                  onPress={handleApprove}
+                  isLoading={processing}
+                  isDisabled={processing}
+                >
+                  批准
+                </Button>
+                <Button
+                  color="danger"
+                  variant="flat"
+                  onPress={handleReject}
+                  isLoading={processing}
+                  isDisabled={processing}
+                >
+                  拒绝
+                </Button>
+              </div>
+            </CardBody>
+          </Card>
+        )}
+
+        {batchData.reviewNote && (
+          <Card className="mt-4">
+            <CardHeader>
+              <h3 className="text-lg font-semibold">审核意见</h3>
+            </CardHeader>
+            <CardBody>
+              <p className="text-default-600">{batchData.reviewNote}</p>
+            </CardBody>
+          </Card>
+        )}
+      </main>
+    </div>
   )
 }

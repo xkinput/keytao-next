@@ -23,7 +23,6 @@ import {
   ModalFooter,
   Link,
 } from '@heroui/react'
-import Navbar from '@/app/components/Navbar'
 import { useAPI } from '@/lib/hooks/useSWR'
 import { useAuthStore } from '@/lib/store/auth'
 import { format } from 'date-fns'
@@ -151,18 +150,14 @@ export default function SyncPage() {
 
   if (isLoading) {
     return (
-      <>
-        <Navbar />
-        <div className="min-h-screen flex items-center justify-center">
-          <Spinner size="lg" label="加载中..." />
-        </div>
-      </>
+      <div className="min-h-screen flex items-center justify-center">
+        <Spinner size="lg" label="加载中..." />
+      </div>
     )
   }
 
   return (
-    <>
-      <Navbar />
+    <div className="min-h-screen">
       <div className="min-h-screen">
         <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           <div className="flex justify-between items-center mb-8">
@@ -428,6 +423,6 @@ export default function SyncPage() {
           </Modal>
         </main>
       </div>
-    </>
+    </div>
   )
 }

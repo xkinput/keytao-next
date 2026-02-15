@@ -3,7 +3,6 @@
 import { useState, useEffect } from 'react'
 import { Button, Card, CardBody, Code, Divider, Listbox, ListboxItem, Progress, Alert } from '@heroui/react'
 import { Folder, File, Apple, Monitor, Check, Download, AlertTriangle, RefreshCw } from 'lucide-react'
-import Navbar from '@/app/components/Navbar'
 import JSZip from 'jszip'
 
 type OSType = 'windows' | 'macos' | 'linux' | 'unknown'
@@ -359,254 +358,251 @@ export default function InstallPage() {
   }
 
   return (
-    <>
-      <Navbar />
-      <div className="min-h-[calc(100vh-4rem)] bg-linear-to-br from-background to-default-100 p-8">
-        <div className="max-w-5xl mx-auto">
-          <div className="mb-6">
-            <h1 className="text-3xl font-bold">KeyTao 输入法方案安装</h1>
-            <p className="text-default-500 mt-2">自动下载并安装最新版本的 KeyTao 输入法方案到您的 Rime 配置目录</p>
-          </div>
+    <div className="min-h-[calc(100vh-4rem)] bg-linear-to-br from-background to-default-100 p-8">
+      <div className="max-w-5xl mx-auto">
+        <div className="mb-6">
+          <h1 className="text-3xl font-bold">KeyTao 输入法方案安装</h1>
+          <p className="text-default-500 mt-2">自动下载并安装最新版本的 KeyTao 输入法方案到您的 Rime 配置目录</p>
+        </div>
 
-          <div className="grid gap-6">
-            {/* System Info Card */}
-            <Card>
-              <CardBody>
-                <h2 className="text-xl font-semibold mb-4">系统信息</h2>
-                <div className="grid sm:grid-cols-2 gap-4">
-                  <div className="flex items-center gap-3">
-                    {getOSIcon()}
-                    <div>
-                      <p className="text-sm text-default-600">操作系统</p>
-                      <p className="text-lg font-semibold">{getOSName()}</p>
-                    </div>
-                  </div>
+        <div className="grid gap-6">
+          {/* System Info Card */}
+          <Card>
+            <CardBody>
+              <h2 className="text-xl font-semibold mb-4">系统信息</h2>
+              <div className="grid sm:grid-cols-2 gap-4">
+                <div className="flex items-center gap-3">
+                  {getOSIcon()}
                   <div>
-                    <p className="text-sm text-default-600">浏览器支持</p>
-                    <p className="text-sm font-medium text-default-800">{browserInfo}</p>
+                    <p className="text-sm text-default-600">操作系统</p>
+                    <p className="text-lg font-semibold">{getOSName()}</p>
                   </div>
                 </div>
-                <Divider className="my-4" />
                 <div>
-                  <p className="text-sm text-default-600 mb-2">Rime 默认配置目录</p>
-                  <Code className="w-full" size="sm">{defaultPath}</Code>
+                  <p className="text-sm text-default-600">浏览器支持</p>
+                  <p className="text-sm font-medium text-default-800">{browserInfo}</p>
                 </div>
-              </CardBody>
-            </Card>
+              </div>
+              <Divider className="my-4" />
+              <div>
+                <p className="text-sm text-default-600 mb-2">Rime 默认配置目录</p>
+                <Code className="w-full" size="sm">{defaultPath}</Code>
+              </div>
+            </CardBody>
+          </Card>
 
-            {/* macOS Warning */}
-            {osType === 'macos' && (
-              <Alert
-                color="warning"
-                title="macOS 系统限制"
-                description={
-                  <>
-                    由于浏览器安全限制，<Code size="sm">~/Library</Code> 目录无法通过网页访问。
-                    <strong>请选择其他目录</strong>（如 <Code size="sm">~/Documents/RimeSync</Code>）作为同步目录。
-                  </>
-                }
-              />
-            )}
-
-            {/* Installation Warning */}
+          {/* macOS Warning */}
+          {osType === 'macos' && (
             <Alert
-              color="danger"
-              title="重要提示"
+              color="warning"
+              title="macOS 系统限制"
               description={
                 <>
-                  点击安装将会<span className="font-semibold underline">覆盖选择目录中的所有同名文件</span>！
-                  在执行安装操作前，请务必备份您的 Rime 配置目录，以免丢失个人配置和词库数据。
+                  由于浏览器安全限制，<Code size="sm">~/Library</Code> 目录无法通过网页访问。
+                  <strong>请选择其他目录</strong>（如 <Code size="sm">~/Documents/RimeSync</Code>）作为同步目录。
                 </>
               }
             />
+          )}
 
-            {/* Directory Selection Card */}
-            <Card>
-              <CardBody>
-                <h2 className="text-xl font-semibold mb-4">选择安装目录</h2>
-                <p className="text-sm text-default-600 mb-4">
-                  选择一个目录，KeyTao 输入法方案将被安装到该目录
-                </p>
+          {/* Installation Warning */}
+          <Alert
+            color="danger"
+            title="重要提示"
+            description={
+              <>
+                点击安装将会<span className="font-semibold underline">覆盖选择目录中的所有同名文件</span>！
+                在执行安装操作前，请务必备份您的 Rime 配置目录，以免丢失个人配置和词库数据。
+              </>
+            }
+          />
 
-                {releaseInfo && (
-                  <Alert
-                    color="success"
-                    title={`最新版本: ${releaseInfo.version}`}
-                    description={`发布时间: ${new Date(releaseInfo.publishedAt).toLocaleString('zh-CN')}`}
-                    icon={<Download className="w-5 h-5" />}
-                    className="mb-3"
-                  />
-                )}
+          {/* Directory Selection Card */}
+          <Card>
+            <CardBody>
+              <h2 className="text-xl font-semibold mb-4">选择安装目录</h2>
+              <p className="text-sm text-default-600 mb-4">
+                选择一个目录，KeyTao 输入法方案将被安装到该目录
+              </p>
 
-                <div className="flex gap-2 mb-4">
+              {releaseInfo && (
+                <Alert
+                  color="success"
+                  title={`最新版本: ${releaseInfo.version}`}
+                  description={`发布时间: ${new Date(releaseInfo.publishedAt).toLocaleString('zh-CN')}`}
+                  icon={<Download className="w-5 h-5" />}
+                  className="mb-3"
+                />
+              )}
+
+              <div className="flex gap-2 mb-4">
+                <Button
+                  color="primary"
+                  size="lg"
+                  onPress={selectDirectory}
+                  isLoading={isLoading}
+                  isDisabled={isLoading || isInstalling}
+                  className="flex-1 sm:flex-none"
+                >
+                  {selectedDirectory ? '重新选择目录' : '选择安装目录'}
+                </Button>
+
+                {selectedDirectory && releaseInfo && (
                   <Button
-                    color="primary"
+                    color="danger"
                     size="lg"
-                    onPress={selectDirectory}
-                    isLoading={isLoading}
+                    onPress={downloadAndInstall}
+                    isLoading={isInstalling}
                     isDisabled={isLoading || isInstalling}
+                    startContent={!isInstalling && <Download className="w-5 h-5" />}
                     className="flex-1 sm:flex-none"
                   >
-                    {selectedDirectory ? '重新选择目录' : '选择安装目录'}
+                    {isInstalling ? '安装中...' : '立即安装'}
                   </Button>
-
-                  {selectedDirectory && releaseInfo && (
-                    <Button
-                      color="danger"
-                      size="lg"
-                      onPress={downloadAndInstall}
-                      isLoading={isInstalling}
-                      isDisabled={isLoading || isInstalling}
-                      startContent={!isInstalling && <Download className="w-5 h-5" />}
-                      className="flex-1 sm:flex-none"
-                    >
-                      {isInstalling ? '安装中...' : '立即安装'}
-                    </Button>
-                  )}
-                </div>
-
-                {isInstalling && (
-                  <Card className="bg-primary-50 border-primary-200 mb-3">
-                    <CardBody className="py-2">
-                      <p className="text-xs font-semibold text-primary-800 mb-1.5">{installStatus}</p>
-                      <Progress
-                        value={installProgress}
-                        color="primary"
-                        size="sm"
-                        className="mb-1"
-                      />
-                      <p className="text-xs text-primary-600">{Math.round(installProgress)}%</p>
-                    </CardBody>
-                  </Card>
                 )}
+              </div>
 
-                {selectedDirectory && (
-                  <Card className="bg-default-50 border-default-200 mb-4">
-                    <CardBody>
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="flex items-center gap-2">
-                          <Check className="w-5 h-5 text-success" />
-                          <p className="text-sm font-semibold">
-                            已选择同步目录: {selectedDirectory.name}
-                          </p>
-                        </div>
-                        <Button
-                          isIconOnly
-                          size="sm"
-                          variant="light"
-                          onClick={refreshDirectory}
-                          isLoading={isLoading}
-                          isDisabled={isLoading || isInstalling}
-                          title="刷新目录内容"
-                        >
-                          <RefreshCw className="w-4 h-4" />
-                        </Button>
-                      </div>
-                      <div>
-                        <p className="text-xs text-default-600 mb-2">
-                          {`${files.length} 个项目`}
+              {isInstalling && (
+                <Card className="bg-primary-50 border-primary-200 mb-3">
+                  <CardBody className="py-2">
+                    <p className="text-xs font-semibold text-primary-800 mb-1.5">{installStatus}</p>
+                    <Progress
+                      value={installProgress}
+                      color="primary"
+                      size="sm"
+                      className="mb-1"
+                    />
+                    <p className="text-xs text-primary-600">{Math.round(installProgress)}%</p>
+                  </CardBody>
+                </Card>
+              )}
+
+              {selectedDirectory && (
+                <Card className="bg-default-50 border-default-200 mb-4">
+                  <CardBody>
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <Check className="w-5 h-5 text-success" />
+                        <p className="text-sm font-semibold">
+                          已选择同步目录: {selectedDirectory.name}
                         </p>
-                        {files.length > 0 ? (
-                          <>
-                            <div className="max-h-48 overflow-y-auto border border-default-200 rounded-lg">
-                              <Listbox aria-label="Directory contents" variant="flat">
-                                {files.slice(0, 30).map((item, index) => (
-                                  <ListboxItem
-                                    key={`${item.name}-${index}`}
-                                    startContent={getFileIcon(item)}
-                                    description={item.kind === 'directory' ? '文件夹' : '文件'}
-                                    className="text-xs"
-                                  >
-                                    {item.name}
-                                  </ListboxItem>
-                                ))}
-                              </Listbox>
-                            </div>
-                            {files.length > 30 && (
-                              <p className="text-xs text-default-400 mt-2">还有 {files.length - 30} 个项目...</p>
-                            )}
-                          </>
-                        ) : (
-                          <div className="border border-default-200 rounded-lg p-4 text-center">
-                            <p className="text-sm text-default-400">该目录当前为空</p>
-                          </div>
-                        )}
                       </div>
-                    </CardBody>
-                  </Card>
-                )}
-
-                {error && (
-                  <Alert
-                    color="danger"
-                    title="错误"
-                    description={<div className="whitespace-pre-line">{error}</div>}
-                  />
-                )}
-              </CardBody>
-            </Card>
-
-            {/* Instructions Card */}
-            <Card className="bg-primary-50 border-primary-200">
-              <CardBody className="py-3">
-                <h2 className="text-lg font-semibold mb-3 text-primary-900">📋 使用说明</h2>
-                <div className="space-y-3 text-xs">
-                  <div>
-                    <p className="font-semibold text-primary-800 mb-1.5">安装步骤：</p>
-                    <ol className="list-decimal list-inside space-y-1 text-primary-700 ml-2">
-                      <li>点击 <strong>选择安装目录</strong> 按钮，选择您的 Rime 配置目录
-                      </li>
-                      <li><span className="text-danger-600 font-bold">备份您的配置！</span>确保不会丢失个人数据</li>
-                      <li>点击 <strong>立即安装</strong> 按钮，系统将自动下载并解压最新版本</li>
-                      <li>等待安装完成后，在 Rime 输入法中点击 <strong>重新部署</strong></li>
-                      <li>部署完成后即可使用 KeyTao 输入法方案</li>
-                    </ol>
-                  </div>
-
-                  <Alert
-                    color="warning"
-                    title="注意事项"
-                    description={
-                      <ul className="list-disc list-inside space-y-0.5 ml-2 text-xs">
-                        <li>安装会覆盖目标目录中的同名文件</li>
-                        <li>请务必提前备份您的个人配置和词库</li>
-                        <li>如遇到权限问题，请选择有完整读写权限的目录</li>
-                      </ul>
-                    }
-                  />
-
-                  <div>
-                    <p className="font-semibold text-primary-800 mb-1.5">各平台 Rime 配置目录：</p>
-                    <ul className="list-disc list-inside space-y-0.5 text-primary-700 ml-2">
-                      {osType === 'macos' && (
+                      <Button
+                        isIconOnly
+                        size="sm"
+                        variant="light"
+                        onClick={refreshDirectory}
+                        isLoading={isLoading}
+                        isDisabled={isLoading || isInstalling}
+                        title="刷新目录内容"
+                      >
+                        <RefreshCw className="w-4 h-4" />
+                      </Button>
+                    </div>
+                    <div>
+                      <p className="text-xs text-default-600 mb-2">
+                        {`${files.length} 个项目`}
+                      </p>
+                      {files.length > 0 ? (
                         <>
-                          <li><Code size="sm">~/Library/Rime/</Code> - 鼠须管标准目录（浏览器无法访问）</li>
-                          <li><Code size="sm">~/Documents/Rime</Code> - 推荐使用的替代目录</li>
-                          <li><Code size="sm">~/Desktop/Rime</Code> - 桌面目录（方便测试）</li>
+                          <div className="max-h-48 overflow-y-auto border border-default-200 rounded-lg">
+                            <Listbox aria-label="Directory contents" variant="flat">
+                              {files.slice(0, 30).map((item, index) => (
+                                <ListboxItem
+                                  key={`${item.name}-${index}`}
+                                  startContent={getFileIcon(item)}
+                                  description={item.kind === 'directory' ? '文件夹' : '文件'}
+                                  className="text-xs"
+                                >
+                                  {item.name}
+                                </ListboxItem>
+                              ))}
+                            </Listbox>
+                          </div>
+                          {files.length > 30 && (
+                            <p className="text-xs text-default-400 mt-2">还有 {files.length - 30} 个项目...</p>
+                          )}
                         </>
+                      ) : (
+                        <div className="border border-default-200 rounded-lg p-4 text-center">
+                          <p className="text-sm text-default-400">该目录当前为空</p>
+                        </div>
                       )}
-                      {osType === 'windows' && (
-                        <>
-                          <li><Code size="sm">%APPDATA%\Rime</Code> - 小狼毫标准目录</li>
-                          <li><Code size="sm">C:\Users\用户名\Documents\Rime</Code> - 替代目录</li>
-                        </>
-                      )}
-                      {osType === 'linux' && (
-                        <>
-                          <li><Code size="sm">~/.config/ibus/rime/</Code> - iBus-Rime</li>
-                          <li><Code size="sm">~/.config/fcitx/rime/</Code> - Fcitx-Rime</li>
-                          <li><Code size="sm">~/.local/share/fcitx5/rime/</Code> - Fcitx5-Rime</li>
-                        </>
-                      )}
-                    </ul>
-                  </div>
+                    </div>
+                  </CardBody>
+                </Card>
+              )}
+
+              {error && (
+                <Alert
+                  color="danger"
+                  title="错误"
+                  description={<div className="whitespace-pre-line">{error}</div>}
+                />
+              )}
+            </CardBody>
+          </Card>
+
+          {/* Instructions Card */}
+          <Card className="bg-primary-50 border-primary-200">
+            <CardBody className="py-3">
+              <h2 className="text-lg font-semibold mb-3 text-primary-900">📋 使用说明</h2>
+              <div className="space-y-3 text-xs">
+                <div>
+                  <p className="font-semibold text-primary-800 mb-1.5">安装步骤：</p>
+                  <ol className="list-decimal list-inside space-y-1 text-primary-700 ml-2">
+                    <li>点击 <strong>选择安装目录</strong> 按钮，选择您的 Rime 配置目录
+                    </li>
+                    <li><span className="text-danger-600 font-bold">备份您的配置！</span>确保不会丢失个人数据</li>
+                    <li>点击 <strong>立即安装</strong> 按钮，系统将自动下载并解压最新版本</li>
+                    <li>等待安装完成后，在 Rime 输入法中点击 <strong>重新部署</strong></li>
+                    <li>部署完成后即可使用 KeyTao 输入法方案</li>
+                  </ol>
                 </div>
-              </CardBody>
-            </Card>
-          </div>
+
+                <Alert
+                  color="warning"
+                  title="注意事项"
+                  description={
+                    <ul className="list-disc list-inside space-y-0.5 ml-2 text-xs">
+                      <li>安装会覆盖目标目录中的同名文件</li>
+                      <li>请务必提前备份您的个人配置和词库</li>
+                      <li>如遇到权限问题，请选择有完整读写权限的目录</li>
+                    </ul>
+                  }
+                />
+
+                <div>
+                  <p className="font-semibold text-primary-800 mb-1.5">各平台 Rime 配置目录：</p>
+                  <ul className="list-disc list-inside space-y-0.5 text-primary-700 ml-2">
+                    {osType === 'macos' && (
+                      <>
+                        <li><Code size="sm">~/Library/Rime/</Code> - 鼠须管标准目录（浏览器无法访问）</li>
+                        <li><Code size="sm">~/Documents/Rime</Code> - 推荐使用的替代目录</li>
+                        <li><Code size="sm">~/Desktop/Rime</Code> - 桌面目录（方便测试）</li>
+                      </>
+                    )}
+                    {osType === 'windows' && (
+                      <>
+                        <li><Code size="sm">%APPDATA%\Rime</Code> - 小狼毫标准目录</li>
+                        <li><Code size="sm">C:\Users\用户名\Documents\Rime</Code> - 替代目录</li>
+                      </>
+                    )}
+                    {osType === 'linux' && (
+                      <>
+                        <li><Code size="sm">~/.config/ibus/rime/</Code> - iBus-Rime</li>
+                        <li><Code size="sm">~/.config/fcitx/rime/</Code> - Fcitx-Rime</li>
+                        <li><Code size="sm">~/.local/share/fcitx5/rime/</Code> - Fcitx5-Rime</li>
+                      </>
+                    )}
+                  </ul>
+                </div>
+              </div>
+            </CardBody>
+          </Card>
         </div>
       </div>
-    </>
+    </div>
   )
 }
 

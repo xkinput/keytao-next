@@ -15,7 +15,6 @@ import {
   Select,
   SelectItem
 } from '@heroui/react'
-import Navbar from '@/app/components/Navbar'
 import { useAPI } from '@/lib/hooks/useSWR'
 import { getPhraseTypeLabel, getPhraseTypeOptions, type PhraseType } from '@/lib/constants/phraseTypes'
 
@@ -96,18 +95,14 @@ export default function PhrasesPage() {
   // Only show full page loading on first load
   if (isFirstLoad && isLoading) {
     return (
-      <>
-        <Navbar />
-        <div className="min-h-screen flex items-center justify-center">
-          <Spinner size="lg" label="加载中..." />
-        </div>
-      </>
+      <div className="min-h-screen flex items-center justify-center">
+        <Spinner size="lg" label="加载中..." />
+      </div>
     )
   }
 
   return (
-    <>
-      <Navbar />
+    <div className="min-h-screen">
       <div className="min-h-screen bg-background">
         <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           <div className="flex justify-between items-center mb-6">
@@ -196,6 +191,6 @@ export default function PhrasesPage() {
           )}
         </main>
       </div>
-    </>
+    </div>
   )
 }
