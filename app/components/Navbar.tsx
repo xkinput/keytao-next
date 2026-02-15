@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useCallback, memo, useState, useRef } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import { Button, Dropdown, DropdownTrigger, DropdownMenu, DropdownItem, DropdownSection } from '@heroui/react'
-import { Menu, User, Database, Shield, ChevronDown, Edit, Download } from 'lucide-react'
+import { Menu, User, Database, Shield, ChevronDown, Edit, Download, BookOpen } from 'lucide-react'
 import { useAuthStore } from '@/lib/store/auth'
 import { useAPI } from '@/lib/hooks/useSWR'
 import Logo from './Logo'
@@ -15,6 +15,16 @@ function Navbar() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
   const [openDropdown, setOpenDropdown] = useState<string | null>(null)
   const closeTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+
+  // Get documentation URL based on current host
+  const docsUrl = useMemo(() => {
+    if (typeof window === 'undefined') return 'https://keytao-docs.vercel.app/'
+
+    const host = window.location.host
+    return host.includes('rea.ink')
+      ? 'https://keytao-docs.rea.ink/'
+      : 'https://keytao-docs.vercel.app/'
+  }, [])
 
   // Only subscribe to needed fields to avoid unnecessary re-renders
   const user = useAuthStore(state => state.user)
@@ -69,7 +79,7 @@ function Navbar() {
   }, [router])
 
   // Categorized navigation menu
-  type MenuItem = { label: string; href: string; requireRootAdmin?: boolean }
+  type MenuItem = { label: string; href: string; requireRootAdmin?: boolean; isExternal?: boolean }
   type MenuCategory = {
     key: string
     label: string
@@ -107,6 +117,14 @@ function Navbar() {
       ]
     },
     {
+      key: 'docs',
+      label: '文档',
+      icon: BookOpen,
+      items: [
+        { label: '文档', href: docsUrl, isExternal: true },
+      ]
+    },
+    {
       key: 'admin',
       label: '管理',
       icon: Shield,
@@ -118,7 +136,7 @@ function Navbar() {
         { label: '词库导入', href: '/admin/import', requireRootAdmin: true },
       ]
     }
-  ], [])
+  ], [docsUrl])
 
   // Filter menu categories based on permissions
   const visibleMenuCategories = useMemo(() => {
@@ -135,11 +153,6 @@ function Navbar() {
       })
       .filter((c): c is MenuCategory => c !== null)
   }, [menuCategories, isAdmin, isRootAdmin])
-
-  const handleMobileNavClick = useCallback((href: string) => {
-    setIsMobileMenuOpen(false)
-    router.push(href)
-  }, [router])
 
   const handleMouseEnter = useCallback((key: string) => {
     if (closeTimeoutRef.current) {
@@ -165,7 +178,8 @@ function Navbar() {
             <div className="hidden md:flex gap-1 items-center">
               {visibleMenuCategories.map((category) => {
                 const IconComponent = category.icon
-                const firstHref = category.items[0]?.href
+                const firstItem = category.items[0]
+                const firstHref = firstItem?.href
                 const isSingleItem = category.items.length === 1
 
                 // Single item category - render as direct button
@@ -179,7 +193,11 @@ function Navbar() {
                       className={pathname === firstHref ? 'bg-primary text-primary-foreground' : 'text-default-700'}
                       onPress={() => {
                         if (firstHref) {
-                          router.push(firstHref)
+                          if (firstItem?.isExternal) {
+                            window.open(firstHref, '_blank', 'noopener,noreferrer')
+                          } else {
+                            router.push(firstHref)
+                          }
                         }
                       }}
                     >
@@ -201,7 +219,11 @@ function Navbar() {
                           closeTimeoutRef.current = null
                         }
                         setOpenDropdown(null)
-                        router.push(firstHref)
+                        if (firstItem?.isExternal) {
+                          window.open(firstHref, '_blank', 'noopener,noreferrer')
+                        } else {
+                          router.push(firstHref)
+                        }
                       }
                     }}
                     className="cursor-pointer"
@@ -229,7 +251,13 @@ function Navbar() {
                             closeTimeoutRef.current = null
                           }
                           setOpenDropdown(null)
-                          router.push(key as string)
+
+                          const item = category.items.find(i => i.href === key)
+                          if (item?.isExternal) {
+                            window.open(key as string, '_blank', 'noopener,noreferrer')
+                          } else {
+                            router.push(key as string)
+                          }
                         }}
                       >
                         {category.items.map((item) => (
@@ -265,7 +293,16 @@ function Navbar() {
                 </DropdownTrigger>
                 <DropdownMenu
                   aria-label="Navigation menu"
-                  onAction={(key) => handleMobileNavClick(key as string)}
+                  onAction={(key) => {
+                    setIsMobileMenuOpen(false)
+                    const href = key as string
+                    // Check if it's an external link
+                    if (href.startsWith('http://') || href.startsWith('https://')) {
+                      window.open(href, '_blank', 'noopener,noreferrer')
+                    } else {
+                      router.push(href)
+                    }
+                  }}
                   className="w-full"
                   itemClasses={{
                     base: "gap-4",
