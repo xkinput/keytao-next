@@ -10,7 +10,9 @@ import {
   Spinner,
   Chip,
   Tabs,
-  Tab
+  Tab,
+  Input,
+  Switch
 } from '@heroui/react'
 import { useAuthStore } from '@/lib/store/auth'
 import { useAPI } from '@/lib/hooks/useSWR'
@@ -65,11 +67,22 @@ export default function BatchesPage() {
   const { getFilter, setFilter, getPage, setPage: setStorePage } = usePageFilterStore()
   const [status, setStatus] = useState<string>(() => getFilter('/', 'all'))
   const [page, setPage] = useState(() => getPage('/', 1))
+  const [onlyMine, setOnlyMine] = useState(false)
+  const [search, setSearch] = useState('')
+  const [searchInput, setSearchInput] = useState('')
 
   // Sync status changes to store (resets page to 1)
   useEffect(() => {
     setFilter('/', status)
   }, [status, setFilter])
+
+  // Reset page to 1 when status, onlyMine or search changes
+  useEffect(() => {
+    if (page !== 1) {
+      setPage(1)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status, onlyMine, search])
 
   // Sync page changes to store
   useEffect(() => {
@@ -77,11 +90,21 @@ export default function BatchesPage() {
   }, [page, setStorePage])
 
   const { data, isLoading } = useAPI<BatchesResponse>(
-    `/api/batches?page=${page}&pageSize=10${status === 'all' ? '' : `&status=${status}`}`,
-    { withAuth: false, keepPreviousData: true }
+    `/api/batches?page=${page}&pageSize=10${status === 'all' ? '' : `&status=${status}`}${onlyMine ? '&onlyMine=true' : ''}${search ? `&search=${encodeURIComponent(search)}` : ''}`,
+    { withAuth: onlyMine, keepPreviousData: true }
   )
 
-  const filteredBatches = (data?.batches || []).filter((b) => (status === 'all' ? true : b.status === status))
+  const handleSearch = () => {
+    setSearch(searchInput)
+  }
+
+  const handleSearchKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      handleSearch()
+    }
+  }
+
+  const filteredBatches = data?.batches || []
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -131,7 +154,13 @@ export default function BatchesPage() {
             <div>
               <h2 className="text-2xl font-bold mb-2">改词</h2>
               <p className="text-default-500">
-                共 {data?.pagination?.total || 0} 个
+                {search ? (
+                  <>搜索 &ldquo;{search}&rdquo; 的结果：{data?.pagination?.total || 0} 个</>
+                ) : onlyMine ? (
+                  <>我的批次：{data?.pagination?.total || 0} 个</>
+                ) : (
+                  <>共 {data?.pagination?.total || 0} 个</>
+                )}
               </p>
               {!isAuthenticated() && (
                 <p className="text-sm text-default-500">当前为访客，仅可查看，登录后可创建与编辑。</p>
@@ -146,17 +175,57 @@ export default function BatchesPage() {
             </Button>
           </div>
 
-          <Tabs
-            selectedKey={status}
-            onSelectionChange={(key) => setStatus(key as string)}
-            className="mb-6"
-          >
-            <Tab key="all" title="全部" />
-            <Tab key="Draft" title="草稿" />
-            <Tab key="Submitted" title="待审核" />
-            <Tab key="Approved" title="已通过" />
-            <Tab key="Published" title="已发布" />
-          </Tabs>
+          {/* Filters and Search */}
+          <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-6">
+            <Tabs
+              selectedKey={status}
+              onSelectionChange={(key) => setStatus(key as string)}
+              color="primary"
+              variant="underlined"
+              classNames={{
+                tabList: "gap-4 w-full relative rounded-none p-0 border-b border-divider",
+                cursor: "w-full bg-primary",
+                tab: "max-w-fit px-0 h-12",
+                tabContent: "group-data-[selected=true]:text-primary"
+              }}
+            >
+              <Tab key="all" title="全部" />
+              <Tab key="Draft" title="草稿" />
+              <Tab key="Submitted" title="待审核" />
+              <Tab key="Approved" title="已通过" />
+              <Tab key="Published" title="已发布" />
+            </Tabs>
+
+            <div className="flex flex-col sm:flex-row items-center gap-3 w-full lg:w-auto">
+              <div className="flex gap-2 w-full sm:w-auto">
+                <Input
+                  placeholder="搜索编码或词组(回车)..."
+                  value={searchInput}
+                  onValueChange={setSearchInput}
+                  onKeyDown={handleSearchKeyPress}
+                  size="sm"
+                  className="w-full sm:w-64"
+                  isClearable
+                  onClear={() => {
+                    setSearch('')
+                    setSearchInput('')
+                  }}
+                />
+              </div>
+
+              {isAuthenticated() && (
+                <div className="flex items-center gap-2 sm:pl-2 sm:border-l sm:border-default-200">
+                  <Switch
+                    isSelected={onlyMine}
+                    onValueChange={setOnlyMine}
+                    size="sm"
+                  >
+                    <span className="text-small text-default-600">仅我的</span>
+                  </Switch>
+                </div>
+              )}
+            </div>
+          </div>
 
           <div className="grid gap-4">
             {filteredBatches.map((batch) => (
@@ -202,7 +271,9 @@ export default function BatchesPage() {
             {filteredBatches.length === 0 && (
               <Card>
                 <CardBody className="text-center py-12">
-                  <p className="text-default-500">暂无批次</p>
+                  <p className="text-default-500">
+                    {search ? '未找到匹配的批次' : onlyMine ? '你还没有创建任何批次' : '暂无批次'}
+                  </p>
                 </CardBody>
               </Card>
             )}

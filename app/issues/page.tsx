@@ -4,15 +4,16 @@ import { useState, useEffect } from 'react'
 import {
   Card,
   CardBody,
-  CardHeader,
   Button,
   Spinner,
   Chip,
-  useDisclosure
+  useDisclosure,
+  Avatar,
 } from '@heroui/react'
 import { useAuthStore } from '@/lib/store/auth'
 import { useAPI } from '@/lib/hooks/useSWR'
 import { usePageFilterStore } from '@/lib/store/pageFilter'
+import { useRouter } from 'next/navigation'
 import Navbar from '@/app/components/Navbar'
 import CreateIssueModal from '@/app/components/CreateIssueModal'
 
@@ -20,12 +21,15 @@ interface Issue {
   id: number
   title: string
   content: string
-  status: 'OPEN' | 'CLOSED' | 'IN_PROGRESS'
+  status: boolean
   createAt: string
   author: {
     id: number
     name: string
     nickname: string | null
+  }
+  _count: {
+    comments: number
   }
 }
 
@@ -39,10 +43,35 @@ interface IssuesResponse {
   }
 }
 
+const truncateContent = (content: string, maxLength: number = 200) => {
+  if (content.length <= maxLength) return content
+  return content.slice(0, maxLength) + '...'
+}
+
+function MessageCircleIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="1em"
+      height="1em"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      {...props}
+    >
+      <path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z" />
+    </svg>
+  )
+}
+
 export default function HomePage() {
   const { isAuthenticated } = useAuthStore()
   const { getPage, setPage: setStorePage } = usePageFilterStore()
   const [page, setPage] = useState(() => getPage('/issues', 1))
+  const router = useRouter()
 
   // Sync page changes to store
   useEffect(() => {
@@ -55,30 +84,12 @@ export default function HomePage() {
 
   const { isOpen, onOpen, onClose } = useDisclosure()
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'OPEN':
-        return 'success'
-      case 'CLOSED':
-        return 'default'
-      case 'IN_PROGRESS':
-        return 'warning'
-      default:
-        return 'default'
-    }
+  const getStatusColor = (status: boolean) => {
+    return status ? 'success' : 'default'
   }
 
-  const getStatusText = (status: string) => {
-    switch (status) {
-      case 'OPEN':
-        return '开放'
-      case 'CLOSED':
-        return '已关闭'
-      case 'IN_PROGRESS':
-        return '进行中'
-      default:
-        return status
-    }
+  const getStatusText = (status: boolean) => {
+    return status ? '开放' : '已关闭'
   }
 
   if (isLoading) {
@@ -132,31 +143,80 @@ export default function HomePage() {
 
           <div className="grid gap-4">
             {data?.issues.map((issue) => (
-              <Card key={issue.id}>
-                <CardHeader className="flex justify-between items-start">
-                  <div className="flex-1">
-                    <h3 className="text-lg font-semibold">{issue.title}</h3>
-                    <p className="text-small text-default-500">
-                      由 {issue.author.nickname || issue.author.name} 创建于{' '}
-                      {new Date(issue.createAt).toLocaleString('zh-CN')}
+              <Card
+                key={issue.id}
+                isPressable
+                onPress={() => router.push(`/issues/${issue.id}`)}
+                className="w-full hover:scale-[1.01] transition-transform"
+                shadow="sm"
+              >
+                <CardBody className="p-4 sm:p-5">
+                  <div className="flex flex-col gap-3">
+                    <div className="flex justify-between items-start gap-4">
+                      <h3 className="text-lg sm:text-xl font-bold text-default-900 leading-tight">
+                        {issue.title}
+                      </h3>
+                      <Chip
+                        color={getStatusColor(issue.status)}
+                        variant="flat"
+                        size="sm"
+                        className="flex-shrink-0"
+                      >
+                        {getStatusText(issue.status)}
+                      </Chip>
+                    </div>
+
+                    <p className="text-default-500 text-sm line-clamp-2">
+                      {truncateContent(issue.content)}
                     </p>
+
+                    <div className="flex items-center justify-between mt-2">
+                      <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-2">
+                          <Avatar
+                            name={issue.author.nickname || issue.author.name}
+                            size="sm"
+                            className="w-6 h-6 text-tiny"
+                          />
+                          <span className="text-small text-default-500 font-medium">
+                            {issue.author.nickname || issue.author.name}
+                          </span>
+                        </div>
+                        <span className="text-small text-default-400">·</span>
+                        <span className="text-small text-default-400">
+                          {new Date(issue.createAt).toLocaleDateString('zh-CN')}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-1 text-default-400">
+                        <MessageCircleIcon className="w-4 h-4" />
+                        <span className="text-small">{issue._count?.comments || 0}</span>
+                      </div>
+                    </div>
                   </div>
-                  <Chip color={getStatusColor(issue.status)} variant="flat">
-                    {getStatusText(issue.status)}
-                  </Chip>
-                </CardHeader>
-                <CardBody>
-                  <p className="text-default-700 whitespace-pre-wrap">
-                    {issue.content}
-                  </p>
                 </CardBody>
               </Card>
             ))}
 
             {data?.issues.length === 0 && !isLoading && (
               <Card>
-                <CardBody className="text-center py-12">
-                  <p className="text-default-500">暂无讨论</p>
+                <CardBody className="text-center py-16">
+                  <div className="flex flex-col items-center justify-center gap-4">
+                    <div className="w-16 h-16 rounded-full bg-default-100 flex items-center justify-center">
+                      <MessageCircleIcon className="w-8 h-8 text-default-400" />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-semibold text-default-700">暂无讨论</h3>
+                      <p className="text-default-500">
+                        还没有人发起讨论，来做第一个发言的人吧
+                      </p>
+                    </div>
+                    {isAuthenticated() && (
+                      <Button color="primary" onPress={onOpen} className="mt-2">
+                        发起讨论
+                      </Button>
+                    )}
+                  </div>
                 </CardBody>
               </Card>
             )}

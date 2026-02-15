@@ -9,10 +9,27 @@ export async function GET(request: NextRequest) {
     const status = searchParams.get('status')
     const page = parseInt(searchParams.get('page') || '1')
     const pageSize = parseInt(searchParams.get('pageSize') || '10')
+    const onlyMine = searchParams.get('onlyMine') === 'true'
+    const search = searchParams.get('search')
+
+    const session = await getSession()
 
     const where: any = {}
     if (status) {
       where.status = status
+    }
+    if (onlyMine && session) {
+      where.creatorId = session.id
+    }
+    if (search && search.trim()) {
+      where.pullRequests = {
+        some: {
+          OR: [
+            { word: { contains: search.trim(), mode: 'insensitive' } },
+            { code: { contains: search.trim(), mode: 'insensitive' } }
+          ]
+        }
+      }
     }
 
     const [batches, total] = await Promise.all([

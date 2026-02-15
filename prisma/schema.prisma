@@ -23,13 +23,6 @@ enum SignUpType {
   EMAIL
 }
 
-// Issue status enum
-enum IssueStatus {
-  OPEN
-  CLOSED
-  IN_PROGRESS
-}
-
 /// 词条类型
 enum PhraseType {
   /// 单字
@@ -108,6 +101,7 @@ model User {
   // Relations
   roles                Role[]        @relation("UserRoles")
   issues               Issue[]       @relation("UserIssues")
+  comments             Comment[]     @relation("UserComments")
   phrases              Phrase[]      @relation("UserPhrases")
   pullRequests         PullRequest[] @relation("UserPullRequests")
   likedPullRequests    PullRequest[] @relation("PullRequestLikes")
@@ -167,19 +161,36 @@ model CasbinRule {
 
 // Issue model
 model Issue {
-  id       Int         @id @default(autoincrement())
+  id       Int      @id @default(autoincrement())
   title    String
-  content  String      @db.Text
-  status   IssueStatus @default(OPEN)
-  createAt DateTime    @default(now())
-  updateAt DateTime    @updatedAt
+  content  String   @db.Text
+  status   Boolean  @default(true)
+  createAt DateTime @default(now())
+  updateAt DateTime @updatedAt
 
   // Relations
-  author   User    @relation("UserIssues", fields: [authorId], references: [id], onDelete: Cascade)
+  author   User      @relation("UserIssues", fields: [authorId], references: [id], onDelete: Cascade)
   authorId Int
-  batches  Batch[] @relation("IssueBatches")
+  batches  Batch[]   @relation("IssueBatches")
+  comments Comment[] @relation("IssueComments")
 
   @@map("issues")
+}
+
+/// Issue评论
+model Comment {
+  id       Int      @id @default(autoincrement())
+  content  String   @db.Text
+  createAt DateTime @default(now())
+  updateAt DateTime @updatedAt
+
+  // Relations
+  issue    Issue @relation("IssueComments", fields: [issueId], references: [id], onDelete: Cascade)
+  issueId  Int
+  author   User  @relation("UserComments", fields: [authorId], references: [id], onDelete: Cascade)
+  authorId Int
+
+  @@map("comments")
 }
 
 /// 词条
@@ -265,7 +276,7 @@ model PullRequest {
   /// 点踩用户
   dislikedBy   User[]                  @relation("PullRequestDislikes")
   /// 所属批次
-  batch        Batch?                  @relation(fields: [batchId], references: [id])
+  batch        Batch?                  @relation(fields: [batchId], references: [id], onDelete: Cascade)
   batchId      String?
   /// 依赖关系
   dependencies PullRequestDependency[] @relation("DependentPR")

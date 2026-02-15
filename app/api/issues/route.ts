@@ -21,6 +21,11 @@ export async function GET(request: NextRequest) {
               name: true,
               nickname: true
             }
+          },
+          comments: {
+            select: {
+              id: true
+            }
           }
         },
         orderBy: { createAt: 'desc' },
@@ -30,8 +35,17 @@ export async function GET(request: NextRequest) {
       prisma.issue.count({ where })
     ])
 
+    // Transform to add comment count
+    const issuesWithCount = issues.map(issue => ({
+      ...issue,
+      _count: {
+        comments: issue.comments.length
+      },
+      comments: undefined // Remove comments from response
+    }))
+
     return NextResponse.json({
-      issues,
+      issues: issuesWithCount,
       pagination: {
         page,
         pageSize,
@@ -73,7 +87,7 @@ export async function POST(request: NextRequest) {
       data: {
         title,
         content,
-        status: 'OPEN',
+        status: true, // true = 开放, false = 已关闭
         authorId: session.id
       },
       include: {
