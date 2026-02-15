@@ -1,12 +1,23 @@
 // Phrase type definitions and utilities
+// Aligned with KeyTao rime dictionary structure
 
-export type PhraseType = 'Single' | 'Phrase' | 'Sentence' | 'Symbol' | 'Link' | 'Poem' | 'Supplement' | 'Other'
+export type PhraseType =
+  | 'Single'       // 单字
+  | 'Phrase'       // 词组
+  | 'Supplement'   // 补充
+  | 'Symbol'       // 符号
+  | 'Link'         // 链接
+  | 'CSS'          // 声笔笔两字词（Consonant Stroke Stroke）
+  | 'CSSSingle'    // 声笔笔单字（Consonant Stroke Stroke Single）
+  | 'English'      // 英文
 
 export interface PhraseTypeConfig {
   type: PhraseType
   label: string
   defaultWeight: number
   description?: string
+  /** 对应的 Rime 词典文件名（不含前缀和 .dict.yaml 后缀） */
+  rimeFileName?: string
 }
 
 export const PHRASE_TYPE_CONFIGS: Record<PhraseType, PhraseTypeConfig> = {
@@ -14,49 +25,57 @@ export const PHRASE_TYPE_CONFIGS: Record<PhraseType, PhraseTypeConfig> = {
     type: 'Single',
     label: '单字',
     defaultWeight: 10,
-    description: '单个汉字'
+    description: '单个汉字（包括常用字和超级字词）',
+    rimeFileName: 'single'
   },
   Phrase: {
     type: 'Phrase',
     label: '词组',
     defaultWeight: 100,
-    description: '常用词组'
-  },
-  Sentence: {
-    type: 'Sentence',
-    label: '短句',
-    defaultWeight: 1000,
-    description: '短句或长词组'
-  },
-  Symbol: {
-    type: 'Symbol',
-    label: '符号',
-    defaultWeight: 10,
-    description: '特殊符号'
-  },
-  Link: {
-    type: 'Link',
-    label: '链接',
-    defaultWeight: 10000,
-    description: '网址链接'
-  },
-  Poem: {
-    type: 'Poem',
-    label: '诗句',
-    defaultWeight: 10000,
-    description: '诗词名句'
+    description: '常用词组',
+    rimeFileName: 'phrase'
   },
   Supplement: {
     type: 'Supplement',
     label: '补充',
     defaultWeight: 100,
-    description: '补充词条'
+    description: '补充词条',
+    rimeFileName: 'supplement'
   },
-  Other: {
-    type: 'Other',
-    label: '其他',
+  Symbol: {
+    type: 'Symbol',
+    label: '符号',
+    defaultWeight: 10,
+    description: '特殊符号',
+    rimeFileName: 'symbol'
+  },
+  Link: {
+    type: 'Link',
+    label: '链接',
     defaultWeight: 10000,
-    description: '其他类型'
+    description: '网址链接',
+    rimeFileName: 'link'
+  },
+  CSS: {
+    type: 'CSS',
+    label: '声笔笔',
+    defaultWeight: 100,
+    description: '声笔笔两字词（Code-Shape-Shape）',
+    rimeFileName: 'css'
+  },
+  CSSSingle: {
+    type: 'CSSSingle',
+    label: '声笔笔单字',
+    defaultWeight: 10,
+    description: '声笔笔单字编码',
+    rimeFileName: 'css-single'
+  },
+  English: {
+    type: 'English',
+    label: '英文',
+    defaultWeight: 100,
+    description: '英文单词和短语',
+    rimeFileName: 'english'
   }
 }
 

@@ -29,18 +29,18 @@ enum PhraseType {
   Single
   /// 词组
   Phrase
-  /// 短句
-  Sentence
+  /// 补充词条
+  Supplement
   /// 符号
   Symbol
   /// 链接
   Link
-  /// 诗句
-  Poem
-  /// 补充
-  Supplement
-  /// 其他
-  Other
+  /// 声笔笔两字词
+  CSS
+  /// 声笔笔单字
+  CSSSingle
+  /// 英文
+  English
 }
 
 /// 词条状态
@@ -85,6 +85,18 @@ enum BatchStatus {
   Rejected
   /// 已发布
   Published
+}
+
+/// 同步任务状态
+enum SyncTaskStatus {
+  /// 等待开始
+  Pending
+  /// 执行中
+  Running
+  /// 完成
+  Completed
+  /// 失败
+  Failed
 }
 
 // User model
@@ -305,6 +317,8 @@ model Batch {
   pullRequests PullRequest[]
   sourceIssue  Issue?        @relation("IssueBatches", fields: [issueId], references: [id])
   issueId      Int?
+  syncTask     SyncTask?     @relation("SyncTaskBatches", fields: [syncTaskId], references: [id])
+  syncTaskId   String?
 
   @@map("batches")
 }
@@ -339,4 +353,32 @@ model CodeConflict {
   pullRequestId Int
 
   @@map("code_conflicts")
+}
+
+/// Github同步任务
+model SyncTask {
+  id          String    @id @default(uuid())
+  createAt    DateTime  @default(now())
+  updateAt    DateTime  @updatedAt
+  startedAt   DateTime?
+  completedAt DateTime?
+
+  status   SyncTaskStatus @default(Pending)
+  progress Int            @default(0) // 0-100
+  message  String? // 当前步骤描述
+  error    String?        @db.Text
+
+  // Github PR信息
+  githubPrUrl    String?
+  githubPrNumber Int?
+  githubBranch   String?
+
+  // 统计信息
+  totalItems     Int @default(0)
+  processedItems Int @default(0)
+
+  // Relations
+  batches Batch[] @relation("SyncTaskBatches")
+
+  @@map("sync_tasks")
 }
