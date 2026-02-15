@@ -16,7 +16,7 @@ import {
 } from '@heroui/react'
 import { useAPI } from '@/lib/hooks/useSWR'
 import { getPhraseTypeLabel, getPhraseTypeOptions, type PhraseType } from '@/lib/constants/phraseTypes'
-import PhraseTableRowSkeleton from '@/app/components/PhraseTableRowSkeleton'
+import { PHRASE_STATUS_MAP, PHRASE_STATUS_COLOR_MAP } from '@/lib/constants/status'
 
 interface Phrase {
   id: number
@@ -27,16 +27,6 @@ interface Phrase {
   weight: number
   remark: string | null
   createAt: string
-}
-
-// Status label mapping
-const getStatusLabel = (status: string) => {
-  const labels: Record<string, string> = {
-    Finish: '已完成',
-    Draft: '草稿',
-    Reject: '已拒绝'
-  }
-  return labels[status] || status
 }
 
 export default function PhrasesPage() {
@@ -89,19 +79,6 @@ export default function PhrasesPage() {
       Other: 'default'
     }
     return colors[type] || 'default'
-  }
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'Finish':
-        return 'success'
-      case 'Draft':
-        return 'warning'
-      case 'Reject':
-        return 'danger'
-      default:
-        return 'default'
-    }
   }
 
   return (
@@ -176,8 +153,8 @@ export default function PhrasesPage() {
                   </TableCell>
                   <TableCell>{phrase.weight}</TableCell>
                   <TableCell>
-                    <Chip color={getStatusColor(phrase.status)} variant="flat" size="sm">
-                      {getStatusLabel(phrase.status)}
+                    <Chip color={PHRASE_STATUS_COLOR_MAP[phrase.status] || 'default'} variant="flat" size="sm">
+                      {PHRASE_STATUS_MAP[phrase.status] || phrase.status}
                     </Chip>
                   </TableCell>
                   <TableCell className="max-w-xs truncate">

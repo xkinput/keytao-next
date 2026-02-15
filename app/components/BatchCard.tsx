@@ -11,6 +11,7 @@ import {
 } from '@heroui/react'
 import { User, FileEdit, AlertTriangle } from 'lucide-react'
 import BatchActionsDropdown from './BatchActionsDropdown'
+import { BATCH_STATUS_MAP, STATUS_COLOR_MAP } from '@/lib/constants/status'
 
 interface BatchCardProps {
   batch: {
@@ -54,34 +55,6 @@ interface BatchCardProps {
 
 function BatchCard({ batch, refresh }: BatchCardProps) {
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'Draft':
-        return 'default'
-      case 'Submitted':
-        return 'primary'
-      case 'Approved':
-        return 'success'
-      case 'Rejected':
-        return 'danger'
-      case 'Published':
-        return 'secondary'
-      default:
-        return 'default'
-    }
-  }
-
-  const getStatusText = (status: string) => {
-    const map: Record<string, string> = {
-      Draft: '草稿',
-      Submitted: '已提交',
-      Approved: '已通过',
-      Rejected: '已拒绝',
-      Published: '已发布'
-    }
-    return map[status] || status
-  }
-
   const getActionIcon = (action: string) => {
     switch (action) {
       case 'Create': return '+'
@@ -111,12 +84,12 @@ function BatchCard({ batch, refresh }: BatchCardProps) {
             {batch.description || '未命名批次'}
           </h3>
           <Chip
-            color={getStatusColor(batch.status)}
+            color={STATUS_COLOR_MAP[batch.status] || 'default'}
             size="sm"
             variant="flat"
             className="shrink-0"
           >
-            {getStatusText(batch.status)}
+            {BATCH_STATUS_MAP[batch.status] || batch.status}
           </Chip>
           {hasConflicts && (
             <span title="存在冲突" className="shrink-0">

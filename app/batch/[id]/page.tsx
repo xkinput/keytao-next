@@ -22,6 +22,7 @@ import BatchPreview from '@/app/components/BatchPreview'
 import BatchPRList from '@/app/components/BatchPRList'
 import BatchActionsDropdown from '@/app/components/BatchActionsDropdown'
 import { useUIStore } from '@/lib/store/ui'
+import { BATCH_STATUS_MAP, STATUS_COLOR_MAP } from '@/lib/constants/status'
 
 interface PullRequest {
   id: number
@@ -215,25 +216,6 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
     }, '提交审核', '提交')
   }
 
-
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'Draft':
-        return 'default'
-      case 'Submitted':
-        return 'primary'
-      case 'Approved':
-        return 'success'
-      case 'Rejected':
-        return 'danger'
-      case 'Published':
-        return 'secondary'
-      default:
-        return 'default'
-    }
-  }
-
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
@@ -326,10 +308,10 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
                       </>
                     )}
                     <Chip
-                      color={getStatusColor(batchData.status)}
+                      color={STATUS_COLOR_MAP[batchData.status] || 'default'}
                       variant="flat"
                     >
-                      {batchData.status}
+                      {BATCH_STATUS_MAP[batchData.status] || batchData.status}
                     </Chip>
                   </div>
                   <p className="text-small text-default-500">

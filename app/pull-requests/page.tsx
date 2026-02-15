@@ -14,6 +14,7 @@ import {
 import { useAPI } from '@/lib/hooks/useSWR'
 import { usePageFilterStore } from '@/lib/store/pageFilter'
 import PullRequestCardSkeleton from '@/app/components/PullRequestCardSkeleton'
+import { PR_STATUS_MAP, STATUS_COLOR_MAP } from '@/lib/constants/status'
 
 interface PullRequest {
   id: number
@@ -92,19 +93,6 @@ export default function PullRequestsPage() {
     return map[action] || action
   }
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'Pending':
-        return 'primary'
-      case 'Approved':
-        return 'success'
-      case 'Rejected':
-        return 'danger'
-      default:
-        return 'default'
-    }
-  }
-
   return (
     <div className="min-h-screen">
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -162,11 +150,11 @@ export default function PullRequestsPage() {
                         </Chip>
                       )}
                       <Chip
-                        color={getStatusColor(pr.status)}
+                        color={STATUS_COLOR_MAP[pr.status] || 'default'}
                         size="sm"
                         variant="flat"
                       >
-                        {pr.status}
+                        {PR_STATUS_MAP[pr.status] || pr.status}
                       </Chip>
                     </div>
                   </CardHeader>

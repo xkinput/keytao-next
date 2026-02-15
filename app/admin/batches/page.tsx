@@ -14,6 +14,7 @@ import {
 import { useAPI } from '@/lib/hooks/useSWR'
 import { usePageFilterStore } from '@/lib/store/pageFilter'
 import AdminBatchCardSkeleton from '@/app/components/AdminBatchCardSkeleton'
+import { BATCH_STATUS_MAP, STATUS_COLOR_MAP } from '@/lib/constants/status'
 
 interface Batch {
   id: string
@@ -50,34 +51,6 @@ export default function AdminBatchesPage() {
   const showSkeleton = isLoading && !data
   const batches = data?.batches || []
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'Draft':
-        return 'default'
-      case 'Submitted':
-        return 'primary'
-      case 'Approved':
-        return 'success'
-      case 'Rejected':
-        return 'danger'
-      case 'Published':
-        return 'secondary'
-      default:
-        return 'default'
-    }
-  }
-
-  const getStatusText = (status: string) => {
-    const map: Record<string, string> = {
-      Draft: '草稿',
-      Submitted: '待审核',
-      Approved: '已批准',
-      Rejected: '已拒绝',
-      Published: '已发布'
-    }
-    return map[status] || status
-  }
-
   return (
     <div className="min-h-screen">
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -113,7 +86,7 @@ export default function AdminBatchesPage() {
           ) : batches.length === 0 ? (
             <Card>
               <CardBody className="text-center py-12">
-                <p className="text-default-500">暂无{getStatusText(statusFilter)}的批次</p>
+                <p className="text-default-500">暂无{BATCH_STATUS_MAP[statusFilter] || statusFilter}的批次</p>
               </CardBody>
             </Card>
           ) : (
@@ -126,11 +99,11 @@ export default function AdminBatchesPage() {
                         {batch.description || '未命名批次'}
                       </h3>
                       <Chip
-                        color={getStatusColor(batch.status)}
+                        color={STATUS_COLOR_MAP[batch.status] || 'default'}
                         size="sm"
                         variant="flat"
                       >
-                        {getStatusText(batch.status)}
+                        {BATCH_STATUS_MAP[batch.status] || batch.status}
                       </Chip>
                     </div>
                     <div className="flex items-center gap-4 text-small text-default-500">

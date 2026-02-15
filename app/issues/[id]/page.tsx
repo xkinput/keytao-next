@@ -15,6 +15,7 @@ import {
 } from '@heroui/react'
 import { useAuthStore } from '@/lib/store/auth'
 import { useAPI, apiRequest } from '@/lib/hooks/useSWR'
+import { BATCH_STATUS_MAP, STATUS_COLOR_MAP } from '@/lib/constants/status'
 
 interface Comment {
   id: number
@@ -57,22 +58,6 @@ interface IssueResponse {
 const BatchCard = ({ batch }: { batch: Batch }) => {
   const router = useRouter()
 
-  const statusColors: Record<string, 'default' | 'primary' | 'success' | 'warning' | 'danger'> = {
-    Draft: 'default',
-    Submitted: 'primary',
-    Approved: 'success',
-    Rejected: 'danger',
-    Published: 'warning'
-  }
-
-  const statusTexts: Record<string, string> = {
-    Draft: '草稿',
-    Submitted: '已提交',
-    Approved: '已通过',
-    Rejected: '已拒绝',
-    Published: '已发布'
-  }
-
   return (
     <Card
       isPressable
@@ -89,8 +74,8 @@ const BatchCard = ({ batch }: { batch: Batch }) => {
             创建于 {new Date(batch.createAt).toLocaleString('zh-CN')}
           </p>
         </div>
-        <Chip color={statusColors[batch.status] || 'default'} variant="flat">
-          {statusTexts[batch.status] || batch.status}
+        <Chip color={STATUS_COLOR_MAP[batch.status] || 'default'} variant="flat">
+          {BATCH_STATUS_MAP[batch.status] || batch.status}
         </Chip>
       </CardBody>
     </Card>

@@ -12,6 +12,7 @@ import {
 } from '@heroui/react'
 import { useAPI } from '@/lib/hooks/useSWR'
 import Link from 'next/link'
+import { PR_STATUS_MAP, STATUS_COLOR_MAP } from '@/lib/constants/status'
 
 interface PRDetail {
   id: number
@@ -106,19 +107,6 @@ export default function PRDetailPage({ params }: { params: Promise<{ id: string 
     return map[action] || action
   }
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'Pending':
-        return 'primary'
-      case 'Approved':
-        return 'success'
-      case 'Rejected':
-        return 'danger'
-      default:
-        return 'default'
-    }
-  }
-
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
@@ -187,8 +175,8 @@ export default function PRDetailPage({ params }: { params: Promise<{ id: string 
                     ⚠️ 冲突
                   </Chip>
                 )}
-                <Chip color={getStatusColor(pr.status)} variant="flat">
-                  {pr.status}
+                <Chip color={STATUS_COLOR_MAP[pr.status] || 'default'} variant="flat">
+                  {PR_STATUS_MAP[pr.status] || pr.status}
                 </Chip>
               </div>
             </div>

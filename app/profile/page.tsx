@@ -6,6 +6,7 @@ import { Card, CardBody, CardHeader, Button, Input, Divider, Chip } from '@herou
 import { useAPI, apiRequest } from '@/lib/hooks/useSWR'
 import { useAuthStore } from '@/lib/store/auth'
 import { BarChart3, FileText, GitPullRequest, Lock, Calendar, Clock, CheckCircle } from 'lucide-react'
+import { BATCH_STATUS_MAP, STATUS_COLOR_MAP } from '@/lib/constants/status'
 
 interface BatchStatus {
   Draft?: number
@@ -171,18 +172,6 @@ export default function ProfilePage() {
       Pending: 'warning'
     }
     return colors[status] || 'default'
-  }
-
-  const getStatusText = (status: string) => {
-    const texts: Record<string, string> = {
-      Draft: '草稿',
-      Submitted: '已提交',
-      Approved: '已通过',
-      Rejected: '已拒绝',
-      Published: '已发布',
-      Pending: '待审核'
-    }
-    return texts[status] || status
   }
 
   if (!user) {
@@ -365,10 +354,10 @@ export default function ProfilePage() {
                                 </div>
                                 <Chip
                                   size="sm"
-                                  color={getStatusColor(batch.status)}
+                                  color={STATUS_COLOR_MAP[batch.status] || 'default'}
                                   variant="flat"
                                 >
-                                  {getStatusText(batch.status)}
+                                  {BATCH_STATUS_MAP[batch.status] || batch.status}
                                 </Chip>
                               </div>
                             </CardBody>
