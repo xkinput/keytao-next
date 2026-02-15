@@ -116,12 +116,12 @@ export function generateRimeYaml(dict: RimeDict): string {
   lines.push('...');
   lines.push('');
 
-  // Entries (sort by code, then by weight descending)
+  // Entries (sort by code, then by weight ascending - smaller weight first)
   const sortedEntries = [...dict.entries].sort((a, b) => {
     if (a.code !== b.code) {
       return a.code.localeCompare(b.code);
     }
-    return (b.weight || 0) - (a.weight || 0);
+    return (a.weight || 0) - (b.weight || 0);
   });
 
   for (const entry of sortedEntries) {

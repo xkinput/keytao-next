@@ -130,3 +130,41 @@ export async function apiRequest<T = unknown>(
   const token = withAuth ? useAuthStore.getState().token : null
   return fetcher(url, token, options)
 }
+
+export async function apiDownload(
+  url: string,
+  options?: FetcherOptions
+): Promise<Response> {
+  const withAuth = options?.withAuth ?? true
+  const token = withAuth ? useAuthStore.getState().token : null
+
+  const headers: HeadersInit = {}
+
+  if (withAuth && token) {
+    headers['Authorization'] = `Bearer ${token}`
+  }
+
+  const config: RequestInit = {
+    headers,
+    method: options?.method || 'GET',
+  }
+
+  if (options?.body) {
+    config.body = JSON.stringify(options.body)
+  }
+
+  const response = await fetch(url, config)
+
+  if (!response.ok) {
+    const errorData = await response.json() as { error?: string }
+    const error = new Error(errorData.error || 'Download failed') as Error & {
+      info?: unknown
+      status?: number
+    }
+    error.info = errorData
+    error.status = response.status
+    throw error
+  }
+
+  return response
+}

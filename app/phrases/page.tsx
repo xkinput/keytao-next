@@ -15,8 +15,8 @@ import {
   SelectItem,
   Button
 } from '@heroui/react'
-import { RefreshCw } from 'lucide-react'
-import { useAPI } from '@/lib/hooks/useSWR'
+import { RefreshCw, Download } from 'lucide-react'
+import { useAPI, apiDownload } from '@/lib/hooks/useSWR'
 import { getPhraseTypeLabel, getPhraseTypeOptions, type PhraseType } from '@/lib/constants/phraseTypes'
 import { PHRASE_STATUS_MAP, PHRASE_STATUS_COLOR_MAP } from '@/lib/constants/status'
 
@@ -36,6 +36,7 @@ export default function PhrasesPage() {
   const [search, setSearch] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
   const [typeFilter, setTypeFilter] = useState<PhraseType | ''>('Phrase')
+  const [isExporting, setIsExporting] = useState(false)
 
   // Debounce search input
   useEffect(() => {
@@ -57,6 +58,36 @@ export default function PhrasesPage() {
   // Handle page change
   const handlePageChange = useCallback((newPage: number) => {
     setPage(newPage)
+  }, [])
+
+  // Handle export
+  const handleExport = useCallback(async () => {
+    try {
+      setIsExporting(true)
+
+      const response = await apiDownload('/api/phrases/export')
+
+      // Get filename from Content-Disposition header
+      const contentDisposition = response.headers.get('Content-Disposition')
+      const filenameMatch = contentDisposition?.match(/filename="(.+)"/)
+      const filename = filenameMatch ? filenameMatch[1] : 'keytao-phrases.zip'
+
+      // Download file
+      const blob = await response.blob()
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = filename
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      window.URL.revokeObjectURL(url)
+    } catch (error) {
+      console.error('Export error:', error)
+      alert('导出失败，请重试')
+    } finally {
+      setIsExporting(false)
+    }
   }, [])
 
   const { data, isLoading, isValidating, mutate } = useAPI<{ phrases: Phrase[]; total: number }>(
@@ -94,8 +125,19 @@ export default function PhrasesPage() {
               isIconOnly
               variant="flat"
               size="sm"
+              onPress={handleExport}
+              isLoading={isExporting}
+              title="导出为Rime词典"
+            >
+              <Download className="w-4 h-4" />
+            </Button>
+            <Button
+              isIconOnly
+              variant="flat"
+              size="sm"
               onPress={() => mutate()}
               isLoading={isValidating}
+              title="刷新"
             >
               <RefreshCw className="w-4 h-4" />
             </Button>
