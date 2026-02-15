@@ -52,6 +52,7 @@ export default function Navbar() {
     { label: '修改提议', href: '/pull-requests' },
     { label: '词库管理', href: '/phrases' },
     { label: 'GitHub 同步', href: '/sync' },
+    { label: '安装配置', href: '/install' },
   ]
 
   const navItems = isAdminArea ? adminNavItems : publicNavItems
