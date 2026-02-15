@@ -1,11 +1,11 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Button, Card, CardBody, Code, Divider, Listbox, ListboxItem, Progress, Alert, Link } from '@heroui/react'
-import { Folder, File, Apple, Monitor, Check, Download, RefreshCw } from 'lucide-react'
+import { Button, Card, CardBody, Code, Listbox, ListboxItem, Progress, Alert, Link } from '@heroui/react'
+import { Folder, File, Apple, Monitor, Check, Download, RefreshCw, Smartphone, TabletSmartphone } from 'lucide-react'
 import JSZip from 'jszip'
 
-type OSType = 'windows' | 'macos' | 'linux' | 'unknown'
+type OSType = 'windows' | 'macos' | 'linux' | 'android' | 'ios' | 'unknown'
 
 interface FileItem {
   name: string
@@ -34,6 +34,9 @@ interface RimeDownloadInfo {
   commands?: string[]
   nixosNote?: string
   nixosUrl?: string
+  tutorialUrl?: string
+  configPath?: string
+  appStoreNote?: string
 }
 
 export default function InstallPage() {
@@ -63,7 +66,13 @@ export default function InstallPage() {
     let detectedOS: OSType = 'unknown'
     let path = ''
 
-    if (platform.includes('mac') || userAgent.includes('mac')) {
+    if (userAgent.includes('android')) {
+      detectedOS = 'android'
+      path = '/sdcard/rime 或内部存储/rime'
+    } else if (userAgent.includes('iphone') || userAgent.includes('ipad') || userAgent.includes('ipod')) {
+      detectedOS = 'ios'
+      path = 'iRime 应用内部目录'
+    } else if (platform.includes('mac') || userAgent.includes('mac')) {
       detectedOS = 'macos'
       path = '~/Library/Rime'
     } else if (platform.includes('win') || userAgent.includes('win')) {
@@ -108,6 +117,10 @@ export default function InstallPage() {
         return <Monitor className="w-8 h-8" />
       case 'linux':
         return <Monitor className="w-8 h-8" />
+      case 'android':
+        return <Smartphone className="w-8 h-8" />
+      case 'ios':
+        return <TabletSmartphone className="w-8 h-8" />
       default:
         return null
     }
@@ -121,6 +134,10 @@ export default function InstallPage() {
         return 'Windows'
       case 'linux':
         return 'Linux'
+      case 'android':
+        return 'Android'
+      case 'ios':
+        return 'iOS'
       default:
         return '未知系统'
     }
@@ -156,6 +173,25 @@ export default function InstallPage() {
           ],
           nixosNote: '如果您使用 NixOS，可以选择专用的安装方式',
           nixosUrl: 'https://github.com/xkinput/KeyTao/blob/master/INSTALL_NIXOS.md'
+        }
+      case 'android':
+        return {
+          name: '同文输入法（Trime）',
+          description: 'Android 平台的 Rime 输入法',
+          url: 'https://github.com/osfans/trime',
+          installMethod: '从 GitHub 下载 APK 安装包或通过 F-Droid 安装',
+          configPath: '/sdcard/rime 或内部存储的 rime 目录',
+          tutorialUrl: 'https://telegra.ph/Android-安装键道同文输入法图文教程-12-25'
+        }
+      case 'ios':
+        return {
+          name: 'iRime',
+          description: 'iOS 平台的 Rime 输入法',
+          url: 'https://github.com/jimmy54/iRime',
+          installMethod: '从 App Store 下载安装',
+          appStoreNote: '在 App Store 搜索 "iRime" 下载安装',
+          configPath: 'iRime 应用内通过 iCloud 或文件管理导入',
+          tutorialUrl: 'https://telegra.ph/iRime-如何导入输入方案---以键道为例-12-25'
         }
       default:
         return null
@@ -432,11 +468,6 @@ export default function InstallPage() {
                   <p className="text-sm font-medium text-default-800">{browserInfo}</p>
                 </div>
               </div>
-              <Divider className="my-4" />
-              <div>
-                <p className="text-sm text-default-600 mb-2">Rime 默认配置目录</p>
-                <Code className="w-full" size="sm">{defaultPath}</Code>
-              </div>
             </CardBody>
           </Card>
 
@@ -490,6 +521,14 @@ export default function InstallPage() {
                             {rimeInfo.installMethod}
                           </p>
 
+                          {rimeInfo.appStoreNote && (
+                            <Alert
+                              color="success"
+                              description={rimeInfo.appStoreNote}
+                              className="text-xs mb-2"
+                            />
+                          )}
+
                           {rimeInfo.command && (
                             <Code className="w-full" size="sm">
                               {rimeInfo.command}
@@ -506,6 +545,33 @@ export default function InstallPage() {
                             </div>
                           )}
                         </div>
+
+                        {rimeInfo.configPath && (
+                          <div>
+                            <p className="text-sm font-semibold mb-2">
+                              📁 配置目录：
+                            </p>
+                            <Code className="w-full" size="sm">
+                              {rimeInfo.configPath}
+                            </Code>
+                          </div>
+                        )}
+
+                        {rimeInfo.tutorialUrl && (
+                          <div>
+                            <p className="text-sm font-semibold mb-2">
+                              📖 安装教程：
+                            </p>
+                            <Link
+                              href={rimeInfo.tutorialUrl}
+                              isExternal
+                              showAnchorIcon
+                              className="text-sm font-medium"
+                            >
+                              查看详细图文教程
+                            </Link>
+                          </div>
+                        )}
 
                         <Alert
                           color="warning"
@@ -545,9 +611,6 @@ export default function InstallPage() {
           <Card>
             <CardBody>
               <h2 className="text-xl font-semibold mb-4">步骤 2：安装 KeyTao 方案</h2>
-              <p className="text-sm text-default-600 mb-4">
-                选择一个目录，KeyTao 输入法方案将被安装到该目录
-              </p>
 
               {/* macOS Warning */}
               {osType === 'macos' && (
@@ -559,6 +622,40 @@ export default function InstallPage() {
                       由于浏览器安全限制，<Code size="sm">~/Library</Code> 目录无法通过网页访问。
                       <strong>请选择其他目录</strong>（如 <Code size="sm">~/Documents/RimeSync</Code>）作为同步目录。
                     </>
+                  }
+                  className="mb-3"
+                />
+              )}
+
+              {/* Mobile Info */}
+              {(osType === 'android' || osType === 'ios') && (
+                <Alert
+                  color="primary"
+                  title="移动设备提示"
+                  description={
+                    <div className="text-sm">
+                      <p className="mb-2">部分移动浏览器支持文件系统访问，您可以尝试下方的安装功能。</p>
+                      <p>如遇到浏览器不支持的情况，请使用手动安装方式：</p>
+                      <ul className="list-disc list-inside space-y-1 text-xs ml-2 mt-1">
+                        {osType === 'android' && (
+                          <>
+                            <li>确保已安装同文输入法（Trime）</li>
+                            <li>从 <Link href="https://github.com/xkinput/KeyTao/releases" isExternal showAnchorIcon className="text-xs">GitHub Releases</Link> 下载最新方案文件</li>
+                            <li>将文件解压并拷贝到 Rime 配置目录</li>
+                            <li>在输入法设置中点击&ldquo;重新部署&rdquo;</li>
+                            <li>详见 <Link href="https://telegra.ph/Android-安装键道同文输入法图文教程-12-25" isExternal showAnchorIcon className="text-xs">完整安装教程</Link></li>
+                          </>
+                        )}
+                        {osType === 'ios' && (
+                          <>
+                            <li>确保已安装 iRime 输入法</li>
+                            <li>从 <Link href="https://github.com/xkinput/KeyTao/releases" isExternal showAnchorIcon className="text-xs">GitHub Releases</Link> 下载方案文件</li>
+                            <li>通过 iCloud Drive 或文件共享导入方案</li>
+                            <li>详见 <Link href="https://telegra.ph/iRime-如何导入输入方案---以键道为例-12-25" isExternal showAnchorIcon className="text-xs">iRime 导入教程</Link></li>
+                          </>
+                        )}
+                      </ul>
+                    </div>
                   }
                   className="mb-3"
                 />
@@ -586,6 +683,14 @@ export default function InstallPage() {
                   className="mb-3"
                 />
               )}
+
+              <p className="text-sm text-default-600 mb-2">
+                选择一个目录，KeyTao 输入法方案将被安装到该目录
+              </p>
+              <div className="mb-4">
+                <p className="text-xs text-default-500 mb-1">默认 Rime 配置目录：</p>
+                <Code className="w-full" size="sm">{defaultPath}</Code>
+              </div>
 
               <div className="flex gap-2 mb-4">
                 <Button
@@ -757,6 +862,20 @@ export default function InstallPage() {
                         <li><Code size="sm">~/.config/ibus/rime/</Code> - iBus-Rime</li>
                         <li><Code size="sm">~/.config/fcitx/rime/</Code> - Fcitx-Rime</li>
                         <li><Code size="sm">~/.local/share/fcitx5/rime/</Code> - Fcitx5-Rime</li>
+                      </>
+                    )}
+                    {osType === 'android' && (
+                      <>
+                        <li><Code size="sm">/sdcard/rime/</Code> - 同文输入法标准目录</li>
+                        <li><Code size="sm">内部存储/rime/</Code> - 备用目录</li>
+                        <li className="text-xs text-default-500 mt-1">💡 在同文输入法设置中可以查看具体路径</li>
+                      </>
+                    )}
+                    {osType === 'ios' && (
+                      <>
+                        <li><Code size="sm">iRime App</Code> - 通过应用内导入</li>
+                        <li className="text-xs text-default-500 mt-1">💡 可通过 iCloud Drive、文件共享或 iTunes 导入方案文件</li>
+                        <li className="text-xs text-default-500">💡 详见应用内帮助文档</li>
                       </>
                     )}
                   </ul>
