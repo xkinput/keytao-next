@@ -23,10 +23,10 @@ import {
 } from '@heroui/react'
 import toast from 'react-hot-toast'
 import { apiRequest } from '@/lib/hooks/useSWR'
-import { getPhraseTypeOptions, getDefaultWeight, type PhraseType } from '@/lib/constants/phraseTypes'
+import { getPhraseTypeOptions, getDefaultWeight, checkTypeMismatch, detectPhraseType, type PhraseType } from '@/lib/constants/phraseTypes'
 import { CODE_PATTERN } from '@/lib/constants/codeValidation'
 import { useUIStore } from '@/lib/store/ui'
-import { Trash2, FileText, ChevronUp, ChevronDown, Plus, Edit2 } from 'lucide-react'
+import { Trash2, FileText, ChevronUp, ChevronDown, Plus, Edit2, AlertTriangle } from 'lucide-react'
 import CodePhrasesPopover from './CodePhrasesPopover'
 
 interface CreatePRModalProps {
@@ -290,15 +290,8 @@ export default function CreatePRModal({
 
       if (!word || !code) continue
 
-      // Auto-detect type
-      let type: PhraseType = 'Phrase'
-      if (/^[a-zA-Z\s]+$/.test(word)) {
-        // Pure English
-        type = 'English'
-      } else if (word.length === 1) {
-        // Single character
-        type = 'Single'
-      }
+      // Auto-detect type using new detectPhraseType function
+      const type = detectPhraseType(word, code)
 
       // Get default weight for type
       const weight = getDefaultWeight(type)
@@ -900,47 +893,91 @@ export default function CreatePRModal({
                                 )}
 
                                 {currentAction !== 'Delete' && (
-                                  <div className="flex gap-2">
-                                    <Controller
-                                      name={`items.${index}.type`}
-                                      control={control}
-                                      render={({ field: typeField }) => (
-                                        <Select
-                                          label="类型"
-                                          selectedKeys={[typeField.value]}
-                                          onSelectionChange={(keys) => {
-                                            const selected = Array.from(keys)[0] as string
-                                            typeField.onChange(selected)
-                                          }}
-                                          disallowEmptySelection
-                                          className="flex-1"
-                                        >
-                                          {getPhraseTypeOptions().map(option => (
-                                            <SelectItem key={option.value}>
-                                              {option.label}
-                                            </SelectItem>
-                                          ))}
-                                        </Select>
-                                      )}
-                                    />
-                                    <Controller
-                                      name={`items.${index}.weight`}
-                                      control={control}
-                                      render={({ field: weightField }) => {
-                                        const currentType = watch(`items.${index}.type`) as PhraseType
-                                        return (
-                                          <Input
-                                            value={weightField.value}
-                                            label="权重"
-                                            type="number"
-                                            placeholder={`默认: ${getDefaultWeight(currentType)}`}
+                                  <>
+                                    <div className="flex gap-2">
+                                      <Controller
+                                        name={`items.${index}.type`}
+                                        control={control}
+                                        render={({ field: typeField }) => (
+                                          <Select
+                                            label="类型"
+                                            selectedKeys={[typeField.value]}
+                                            onSelectionChange={(keys) => {
+                                              const selected = Array.from(keys)[0] as string
+                                              typeField.onChange(selected)
+                                            }}
+                                            disallowEmptySelection
                                             className="flex-1"
-                                            onValueChange={(v) => weightField.onChange(v)}
-                                          />
-                                        )
-                                      }}
-                                    />
-                                  </div>
+                                          >
+                                            {getPhraseTypeOptions().map(option => (
+                                              <SelectItem key={option.value}>
+                                                {option.label}
+                                              </SelectItem>
+                                            ))}
+                                          </Select>
+                                        )}
+                                      />
+                                      <Controller
+                                        name={`items.${index}.weight`}
+                                        control={control}
+                                        render={({ field: weightField }) => {
+                                          const currentType = watch(`items.${index}.type`) as PhraseType
+                                          return (
+                                            <Input
+                                              value={weightField.value}
+                                              label="权重"
+                                              type="number"
+                                              placeholder={`默认: ${getDefaultWeight(currentType)}`}
+                                              className="flex-1"
+                                              onValueChange={(v) => weightField.onChange(v)}
+                                            />
+                                          )
+                                        }}
+                                      />
+                                    </div>
+
+                                    {/* Type mismatch warning */}
+                                    {(() => {
+                                      const currentWord = watch(`items.${index}.word`)
+                                      const currentCode = watch(`items.${index}.code`)
+                                      const currentType = watch(`items.${index}.type`) as PhraseType
+
+                                      if (!currentWord) return null
+
+                                      const typeMismatch = checkTypeMismatch(currentWord, currentCode, currentType)
+
+                                      if (!typeMismatch.hasTypeMismatch) return null
+
+                                      return (
+                                        <Card className="border-warning bg-warning-50/50 dark:bg-warning-100/5">
+                                          <CardBody className="py-2 px-3">
+                                            <div className="flex items-start gap-2">
+                                              <AlertTriangle className="w-4 h-4 text-warning shrink-0 mt-0.5" />
+                                              <div className="flex-1 min-w-0">
+                                                <p className="text-sm text-warning-700 dark:text-warning-400">
+                                                  该词条类型应为 <span className="font-semibold">{typeMismatch.suggestedTypeLabel}</span>
+                                                </p>
+                                              </div>
+                                              <Button
+                                                size="sm"
+                                                color="warning"
+                                                variant="flat"
+                                                className="shrink-0"
+                                                onPress={() => {
+                                                  if (typeMismatch.suggestedType) {
+                                                    setValue(`items.${index}.type`, typeMismatch.suggestedType)
+                                                    toast.success(`已修改为${typeMismatch.suggestedTypeLabel}`)
+                                                  }
+                                                }}
+                                              >
+                                                修改为{typeMismatch.suggestedTypeLabel}
+                                              </Button>
+                                            </div>
+                                          </CardBody>
+                                        </Card>
+                                      )
+                                    })()}
+                                  </>
                                 )}
                               </>
                             )

@@ -112,3 +112,64 @@ export function getPhraseTypeOptions() {
 export function isValidPhraseType(type: string): type is PhraseType {
   return PHRASE_TYPES.includes(type as PhraseType)
 }
+
+/**
+ * Detect phrase type based on word content and code
+ */
+export function detectPhraseType(word: string, code?: string): PhraseType {
+  if (!word) return 'Phrase'
+
+  // Symbol: special characters, punctuation, or starts with semicolon
+  if (code?.startsWith(';') || /^[\p{P}\p{S}]+$/u.test(word)) {
+    return 'Symbol'
+  }
+
+  // Link: contains http/https or www
+  if (/https?:\/\/|www\./i.test(word)) {
+    return 'Link'
+  }
+
+  // English: pure ASCII letters, spaces, numbers or common punctuation
+  if (/^[a-zA-Z0-9\s\-'.]+$/.test(word) && /[a-zA-Z]/.test(word)) {
+    return 'English'
+  }
+
+  // Single: exactly one CJK character
+  const cjkCount = (word.match(/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/gu) || []).length
+  if (cjkCount === 1 && word.length === 1) {
+    return 'Single'
+  }
+
+  // Default: Phrase for multi-character Chinese words
+  return 'Phrase'
+}
+
+/**
+ * Check if word type matches expected type, return suggestion if mismatch
+ */
+export function checkTypeMismatch(word: string, code: string | undefined, currentType: PhraseType): {
+  hasTypeMismatch: boolean
+  suggestedType?: PhraseType
+  suggestedTypeLabel?: string
+} {
+  if (!word) {
+    return { hasTypeMismatch: false }
+  }
+
+  const detectedType = detectPhraseType(word, code)
+
+  // Skip check for Supplement and CSS types (user intentional choices)
+  if (currentType === 'Supplement' || currentType === 'CSS' || currentType === 'CSSSingle') {
+    return { hasTypeMismatch: false }
+  }
+
+  if (detectedType !== currentType) {
+    return {
+      hasTypeMismatch: true,
+      suggestedType: detectedType,
+      suggestedTypeLabel: getPhraseTypeLabel(detectedType)
+    }
+  }
+
+  return { hasTypeMismatch: false }
+}
