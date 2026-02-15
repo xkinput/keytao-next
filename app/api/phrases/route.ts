@@ -1,15 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { checkAdminPermission } from '@/lib/adminAuth'
 import { isValidPhraseType, type PhraseType } from '@/lib/constants/phraseTypes'
 
 export async function GET(request: NextRequest) {
-  // 验证管理员权限
-  const authCheck = await checkAdminPermission()
-  if (!authCheck.authorized) {
-    return authCheck.response
-  }
-
   try {
     const searchParams = request.nextUrl.searchParams
     const page = parseInt(searchParams.get('page') || '1')

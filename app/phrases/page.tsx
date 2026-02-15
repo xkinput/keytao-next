@@ -68,7 +68,7 @@ export default function PhrasesPage() {
   }, [])
 
   const { data, isLoading, isValidating } = useAPI<{ phrases: Phrase[]; total: number }>(
-    `/api/admin/phrases?page=${page}&pageSize=20&search=${debouncedSearch}${typeFilter ? `&type=${typeFilter}` : ''}`,
+    `/api/phrases?page=${page}&pageSize=20&search=${debouncedSearch}${typeFilter ? `&type=${typeFilter}` : ''}`,
     { keepPreviousData: true }
   )
 
