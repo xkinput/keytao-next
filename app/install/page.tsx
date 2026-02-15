@@ -358,7 +358,7 @@ export default function InstallPage() {
   }
 
   return (
-    <div className="min-h-[calc(100vh-4rem)] bg-linear-to-br from-background to-default-100 p-8">
+    <div className="min-h-[calc(100vh-4rem)] p-8">
       <div className="max-w-5xl mx-auto">
         <div className="mb-6">
           <h1 className="text-3xl font-bold">KeyTao 输入法方案安装</h1>

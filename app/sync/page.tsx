@@ -6,7 +6,6 @@ import {
   CardBody,
   CardHeader,
   Button,
-  Spinner,
   Chip,
   Progress,
   Table,
@@ -22,6 +21,7 @@ import {
   ModalBody,
   ModalFooter,
   Link,
+  Skeleton,
 } from '@heroui/react'
 import { useAPI } from '@/lib/hooks/useSWR'
 import { useAuthStore } from '@/lib/store/auth'
@@ -95,6 +95,8 @@ export default function SyncPage() {
     (task) => task.status === 'Running' || task.status === 'Pending'
   )
 
+  const showSkeleton = isLoading && !tasksData
+
   const handleTriggerSync = async () => {
     setIsTriggering(true)
     setTriggerError(null)
@@ -148,13 +150,15 @@ export default function SyncPage() {
     setTimeout(() => setSelectedTask(null), 300)
   }
 
-  if (isLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <Spinner size="lg" label="加载中..." />
-      </div>
-    )
-  }
+  const syncTableColumns = [
+    '任务 ID',
+    '状态',
+    '进度',
+    '创建时间',
+    '完成时间',
+    '批次数',
+    '操作',
+  ]
 
   return (
     <div className="min-h-screen">
@@ -266,93 +270,106 @@ export default function SyncPage() {
               <h2 className="text-xl font-semibold">同步历史</h2>
             </CardHeader>
             <CardBody>
-              {tasksData && tasksData.tasks && tasksData.tasks.length > 0 ? (
-                <>
-                  <Table aria-label="同步任务历史">
-                    <TableHeader>
-                      <TableColumn>任务 ID</TableColumn>
-                      <TableColumn>状态</TableColumn>
-                      <TableColumn>进度</TableColumn>
-                      <TableColumn>创建时间</TableColumn>
-                      <TableColumn>完成时间</TableColumn>
-                      <TableColumn>批次数</TableColumn>
-                      <TableColumn>操作</TableColumn>
-                    </TableHeader>
-                    <TableBody>
-                      {tasksData.tasks.map((task) => (
-                        <TableRow key={task.id}>
-                          <TableCell>
-                            <code className="text-xs">{task.id.slice(0, 8)}...</code>
+              {showSkeleton ? (
+                <Table aria-label="同步任务历史">
+                  <TableHeader>
+                    {syncTableColumns.map((column, index) => (
+                      <TableColumn key={index}>{column}</TableColumn>
+                    ))}
+                  </TableHeader>
+                  <TableBody>
+                    {Array.from({ length: 5 }).map((_, i) => (
+                      <TableRow key={`skeleton-${i}`}>
+                        {Array.from({ length: 7 }).map((_, j) => (
+                          <TableCell key={j}>
+                            <Skeleton className="h-4 w-full rounded-lg" />
                           </TableCell>
-                          <TableCell>{getStatusChip(task.status)}</TableCell>
-                          <TableCell>
-                            {task.status === 'Running' || task.status === 'Completed' ? (
-                              <span>{task.progress}%</span>
-                            ) : (
-                              '-'
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            <span className="text-xs">{formatDate(task.createAt)}</span>
-                          </TableCell>
-                          <TableCell>
-                            <span className="text-xs">{formatDate(task.completedAt)}</span>
-                          </TableCell>
-                          <TableCell>
-                            {task.batches.length > 0 ? (
-                              <Button
-                                size="sm"
-                                variant="light"
-                                color="primary"
-                                onPress={() => handleOpenBatchModal(task)}
-                              >
-                                {task.batches.length} 个批次
-                              </Button>
-                            ) : (
-                              <span className="text-default-400">0</span>
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            {task.githubPrUrl && (
-                              <Button
-                                size="sm"
-                                variant="light"
-                                color="primary"
-                                as="a"
-                                href={task.githubPrUrl}
-                                target="_blank"
-                              >
-                                查看 PR
-                              </Button>
-                            )}
-                            {task.error && (
-                              <Button
-                                size="sm"
-                                variant="light"
-                                color="danger"
-                                onPress={() => alert(task.error)}
-                              >
-                                查看错误
-                              </Button>
-                            )}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-
-                  {tasksData.pagination.totalPages > 1 && (
-                    <div className="flex justify-center mt-6">
-                      <Pagination
-                        total={tasksData.pagination.totalPages}
-                        page={currentPage}
-                        onChange={setCurrentPage}
-                      />
-                    </div>
-                  )}
-                </>
+                        ))}
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              ) : tasksData && tasksData.tasks && tasksData.tasks.length > 0 ? (
+                <Table aria-label="同步任务历史">
+                  <TableHeader>
+                    {syncTableColumns.map((column, index) => (
+                      <TableColumn key={index}>{column}</TableColumn>
+                    ))}
+                  </TableHeader>
+                  <TableBody>
+                    {tasksData.tasks.map((task) => (
+                      <TableRow key={task.id}>
+                        <TableCell>
+                          <code className="text-xs">{task.id.slice(0, 8)}...</code>
+                        </TableCell>
+                        <TableCell>{getStatusChip(task.status)}</TableCell>
+                        <TableCell>
+                          {task.status === 'Running' || task.status === 'Completed' ? (
+                            <span>{task.progress}%</span>
+                          ) : (
+                            '-'
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <span className="text-xs">{formatDate(task.createAt)}</span>
+                        </TableCell>
+                        <TableCell>
+                          <span className="text-xs">{formatDate(task.completedAt)}</span>
+                        </TableCell>
+                        <TableCell>
+                          {task.batches.length > 0 ? (
+                            <Button
+                              size="sm"
+                              variant="light"
+                              color="primary"
+                              onPress={() => handleOpenBatchModal(task)}
+                            >
+                              {task.batches.length} 个批次
+                            </Button>
+                          ) : (
+                            <span className="text-default-400">0</span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {task.githubPrUrl && (
+                            <Button
+                              size="sm"
+                              variant="light"
+                              color="primary"
+                              as="a"
+                              href={task.githubPrUrl}
+                              target="_blank"
+                            >
+                              查看 PR
+                            </Button>
+                          )}
+                          {task.error && (
+                            <Button
+                              size="sm"
+                              variant="light"
+                              color="danger"
+                              onPress={() => alert(task.error)}
+                            >
+                              查看错误
+                            </Button>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
               ) : (
-                <div className="text-center py-8 text-default-400">暂无同步历史</div>
+                <div className="text-center py-12 text-default-400">暂无同步历史</div>
+              )}
+
+              {tasksData && tasksData.pagination.totalPages > 1 && (
+                <div className="flex justify-center mt-6">
+                  <Pagination
+                    total={tasksData.pagination.totalPages}
+                    page={currentPage}
+                    onChange={setCurrentPage}
+                  />
+                </div>
               )}
             </CardBody>
           </Card>

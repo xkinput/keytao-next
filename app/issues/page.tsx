@@ -5,7 +5,6 @@ import {
   Card,
   CardBody,
   Button,
-  Spinner,
   Chip,
   useDisclosure,
   Avatar,
@@ -15,6 +14,7 @@ import { useAPI } from '@/lib/hooks/useSWR'
 import { usePageFilterStore } from '@/lib/store/pageFilter'
 import { useRouter } from 'next/navigation'
 import CreateIssueModal from '@/app/components/CreateIssueModal'
+import IssueCardSkeleton from '@/app/components/IssueCardSkeleton'
 
 interface Issue {
   id: number
@@ -83,36 +83,14 @@ export default function HomePage() {
 
   const { isOpen, onOpen, onClose } = useDisclosure()
 
+  const showSkeleton = isLoading && !data
+
   const getStatusColor = (status: boolean) => {
     return status ? 'success' : 'default'
   }
 
   const getStatusText = (status: boolean) => {
     return status ? '开放' : '已关闭'
-  }
-
-  if (isLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <Spinner size="lg" label="正在加载数据..." />
-      </div>
-    )
-  }
-
-  if (error && error.status !== 401) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background p-8">
-        <Card className="max-w-md">
-          <CardBody className="text-center">
-            <p className="text-danger mb-4">加载失败</p>
-            <p className="text-default-500 mb-4">{error.message || '发生未知错误'}</p>
-            <Button color="primary" onPress={() => mutate()}>
-              重试
-            </Button>
-          </CardBody>
-        </Card>
-      </div>
-    )
   }
 
   return (
@@ -132,90 +110,102 @@ export default function HomePage() {
           )}
         </div>
 
-        {error && (
-          <div className="mb-4 p-4 bg-danger-50 dark:bg-danger-100/10 text-danger rounded-lg">
-            获取讨论失败: {error.message}
-          </div>
-        )}
-
-        <div className="grid gap-4">
-          {data?.issues.map((issue) => (
-            <Card
-              key={issue.id}
-              isPressable
-              onPress={() => router.push(`/issues/${issue.id}`)}
-              className="w-full hover:scale-[1.01] transition-transform"
-              shadow="sm"
-            >
-              <CardBody className="p-4 sm:p-5">
-                <div className="flex flex-col gap-3">
-                  <div className="flex justify-between items-start gap-4">
-                    <h3 className="text-lg sm:text-xl font-bold text-default-900 leading-tight">
-                      {issue.title}
-                    </h3>
-                    <Chip
-                      color={getStatusColor(issue.status)}
-                      variant="flat"
-                      size="sm"
-                      className="shrink-0"
-                    >
-                      {getStatusText(issue.status)}
-                    </Chip>
-                  </div>
-
-                  <p className="text-default-500 text-sm line-clamp-2">
-                    {truncateContent(issue.content)}
-                  </p>
-
-                  <div className="flex items-center justify-between mt-2">
-                    <div className="flex items-center gap-3">
-                      <div className="flex items-center gap-2">
-                        <Avatar
-                          name={issue.author.nickname || issue.author.name}
-                          size="sm"
-                          className="w-6 h-6 text-tiny"
-                        />
-                        <span className="text-small text-default-500 font-medium">
-                          {issue.author.nickname || issue.author.name}
-                        </span>
-                      </div>
-                      <span className="text-small text-default-400">·</span>
-                      <span className="text-small text-default-400">
-                        {new Date(issue.createAt).toLocaleDateString('zh-CN')}
-                      </span>
-                    </div>
-
-                    <div className="flex items-center gap-1 text-default-400">
-                      <MessageCircleIcon className="w-4 h-4" />
-                      <span className="text-small">{issue._count?.comments || 0}</span>
-                    </div>
-                  </div>
-                </div>
-              </CardBody>
-            </Card>
-          ))}
-
-          {data?.issues.length === 0 && !isLoading && (
+        <div className="grid gap-4 transition-opacity duration-300" style={{ opacity: showSkeleton ? 0.6 : 1 }}>
+          {error ? (
             <Card>
-              <CardBody className="text-center py-16">
-                <div className="flex flex-col items-center justify-center gap-4">
-                  <div className="w-16 h-16 rounded-full bg-default-100 flex items-center justify-center">
-                    <MessageCircleIcon className="w-8 h-8 text-default-400" />
-                  </div>
-                  <div>
-                    <h3 className="text-lg font-semibold text-default-700">暂无讨论</h3>
-                    <p className="text-default-500">
-                      还没有人发起讨论，来做第一个发言的人吧
-                    </p>
-                  </div>
-                  {isAuthenticated() && (
-                    <Button color="primary" onPress={onOpen} className="mt-2">
-                      发起讨论
-                    </Button>
-                  )}
-                </div>
+              <CardBody className="text-center py-12">
+                <p className="text-danger mb-4">加载失败</p>
+                <p className="text-default-500 mb-4">{error.message || '发生未知错误'}</p>
+                <Button color="primary" onPress={() => mutate()}>
+                  重试
+                </Button>
               </CardBody>
             </Card>
+          ) : showSkeleton ? (
+            Array.from({ length: 5 }).map((_, i) => (
+              <IssueCardSkeleton key={i} />
+            ))
+          ) : (
+            <>
+              {data?.issues.map((issue) => (
+                <Card
+                  key={issue.id}
+                  isPressable
+                  onPress={() => router.push(`/issues/${issue.id}`)}
+                  className="w-full hover:scale-[1.01] transition-transform"
+                  shadow="sm"
+                >
+                  <CardBody className="p-4 sm:p-5">
+                    <div className="flex flex-col gap-3">
+                      <div className="flex justify-between items-start gap-4">
+                        <h3 className="text-lg sm:text-xl font-bold text-default-900 leading-tight">
+                          {issue.title}
+                        </h3>
+                        <Chip
+                          color={getStatusColor(issue.status)}
+                          variant="flat"
+                          size="sm"
+                          className="shrink-0"
+                        >
+                          {getStatusText(issue.status)}
+                        </Chip>
+                      </div>
+
+                      <p className="text-default-500 text-sm line-clamp-2">
+                        {truncateContent(issue.content)}
+                      </p>
+
+                      <div className="flex items-center justify-between mt-2">
+                        <div className="flex items-center gap-3">
+                          <div className="flex items-center gap-2">
+                            <Avatar
+                              name={issue.author.nickname || issue.author.name}
+                              size="sm"
+                              className="w-6 h-6 text-tiny"
+                            />
+                            <span className="text-small text-default-500 font-medium">
+                              {issue.author.nickname || issue.author.name}
+                            </span>
+                          </div>
+                          <span className="text-small text-default-400">·</span>
+                          <span className="text-small text-default-400">
+                            {new Date(issue.createAt).toLocaleDateString('zh-CN')}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-1 text-default-400">
+                          <MessageCircleIcon className="w-4 h-4" />
+                          <span className="text-small">{issue._count?.comments || 0}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </CardBody>
+                </Card>
+              ))}
+
+              {data?.issues.length === 0 && !showSkeleton && (
+                <Card>
+                  <CardBody className="text-center py-16">
+                    <div className="flex flex-col items-center justify-center gap-4">
+                      <div className="w-16 h-16 rounded-full bg-default-100 flex items-center justify-center">
+                        <MessageCircleIcon className="w-8 h-8 text-default-400" />
+                      </div>
+                      <div>
+                        <h3 className="text-lg font-semibold text-default-700">暂无讨论</h3>
+                        <p className="text-default-500">
+                          还没有人发起讨论，来做第一个发言的人吧
+                        </p>
+                      </div>
+                      {isAuthenticated() && (
+                        <Button color="primary" onPress={onOpen} className="mt-2">
+                          发起讨论
+                        </Button>
+                      )}
+                    </div>
+                  </CardBody>
+                </Card>
+              )}
+            </>
           )}
         </div>
 
