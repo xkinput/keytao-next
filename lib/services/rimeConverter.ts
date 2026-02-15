@@ -3,7 +3,7 @@
  * Convert database phrases to Rime YAML format
  */
 
-import { PhraseType, PullRequest, PullRequestType } from '@prisma/client';
+import { PhraseType, PullRequest, PullRequestType, Phrase } from '@prisma/client';
 import { format } from 'date-fns';
 
 export interface RimeEntry {
@@ -92,6 +92,33 @@ export function pullRequestToRimeEntry(pr: PullRequest): RimeEntry | null {
     code: pr.code,
     weight: pr.weight || undefined,
   };
+}
+
+/**
+ * Convert phrase to Rime entry
+ */
+export function phraseToRimeEntry(phrase: Phrase): RimeEntry {
+  return {
+    word: phrase.word,
+    code: phrase.code,
+    weight: phrase.weight || undefined,
+  };
+}
+
+/**
+ * Group phrases by type
+ */
+export function groupPhrasesByType(phrases: Phrase[]): Map<PhraseType, Phrase[]> {
+  const grouped = new Map<PhraseType, Phrase[]>();
+
+  for (const phrase of phrases) {
+    if (!grouped.has(phrase.type)) {
+      grouped.set(phrase.type, []);
+    }
+    grouped.get(phrase.type)!.push(phrase);
+  }
+
+  return grouped;
 }
 
 /**
@@ -187,6 +214,61 @@ export function convertToRimeDicts(
       result.set('keytao-dz.dict.yaml', generateRimeYaml(dzDict));
 
       // keytao-cx.dict.yaml (used by keytao-cx schema)
+      const cxDict: RimeDict = {
+        name: 'keytao-cx',
+        version: 'Q1',
+        sort: 'by_weight',
+        entries,
+      };
+      result.set('keytao-cx.dict.yaml', generateRimeYaml(cxDict));
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Convert phrases to Rime dictionary files (for export)
+ */
+export function convertPhrasesToRimeDicts(
+  phrases: Phrase[],
+  version?: string
+): Map<string, string> {
+  const result = new Map<string, string>();
+  const grouped = groupPhrasesByType(phrases);
+  const dateVersion = version || format(new Date(), 'yyyy.MM.dd');
+
+  for (const [type, typePhrases] of grouped.entries()) {
+    const entries: RimeEntry[] = typePhrases.map(phraseToRimeEntry);
+
+    if (entries.length === 0) {
+      continue;
+    }
+
+    const suffix = phraseTypeToSuffix(type);
+    const dictName = `keytao.${suffix}`;
+    const fileName = `${dictName}.dict.yaml`;
+
+    const dict: RimeDict = {
+      name: dictName,
+      version: dateVersion,
+      sort: 'by_weight',
+      entries,
+    };
+
+    const content = generateRimeYaml(dict);
+    result.set(fileName, content);
+
+    // Special handling for Single type: also generate keytao-dz and keytao-cx
+    if (type === PhraseType.Single) {
+      const dzDict: RimeDict = {
+        name: 'keytao-dz',
+        version: 'Q1',
+        sort: 'by_weight',
+        entries,
+      };
+      result.set('keytao-dz.dict.yaml', generateRimeYaml(dzDict));
+
       const cxDict: RimeDict = {
         name: 'keytao-cx',
         version: 'Q1',

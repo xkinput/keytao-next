@@ -17,6 +17,7 @@ import {
 } from '@heroui/react'
 import { RefreshCw, Download } from 'lucide-react'
 import { useAPI, apiDownload } from '@/lib/hooks/useSWR'
+import { useIsAdmin } from '@/lib/hooks/useAuth'
 import { getPhraseTypeLabel, getPhraseTypeOptions, type PhraseType } from '@/lib/constants/phraseTypes'
 import { PHRASE_STATUS_MAP, PHRASE_STATUS_COLOR_MAP } from '@/lib/constants/status'
 
@@ -32,6 +33,7 @@ interface Phrase {
 }
 
 export default function PhrasesPage() {
+  const isAdmin = useIsAdmin()
   const [page, setPage] = useState(1)
   const [search, setSearch] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
@@ -122,16 +124,18 @@ export default function PhrasesPage() {
           <h1 className="text-3xl font-bold">词库管理</h1>
           <div className="flex items-center gap-2">
             <p className="text-default-500">共 {total} 条词条</p>
-            <Button
-              isIconOnly
-              variant="flat"
-              size="sm"
-              onPress={handleExport}
-              isLoading={isExporting}
-              title="导出为Rime词典"
-            >
-              <Download className="w-4 h-4" />
-            </Button>
+            {isAdmin && (
+              <Button
+                isIconOnly
+                variant="flat"
+                size="sm"
+                onPress={handleExport}
+                isLoading={isExporting}
+                title="导出为Rime词典（仅管理员）"
+              >
+                <Download className="w-4 h-4" />
+              </Button>
+            )}
             <Button
               isIconOnly
               variant="flat"
