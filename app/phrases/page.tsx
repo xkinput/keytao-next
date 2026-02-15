@@ -90,13 +90,14 @@ export default function PhrasesPage() {
     }
   }, [])
 
-  const { data, isLoading, isValidating, mutate } = useAPI<{ phrases: Phrase[]; total: number }>(
+  const { data, isLoading, isValidating, mutate } = useAPI<{ phrases: Phrase[]; total: number; phrasesByType: Record<string, number> }>(
     `/api/phrases?page=${page}&pageSize=20&search=${debouncedSearch}${typeFilter ? `&type=${typeFilter}` : ''}`,
     { keepPreviousData: true }
   )
 
   const phrases = data?.phrases || []
   const total = data?.total || 0
+  const phrasesByType = data?.phrasesByType || {}
   const isSearching = search !== debouncedSearch
   const showSkeleton = !data && isLoading
 
@@ -154,21 +155,28 @@ export default function PhrasesPage() {
             className="max-w-md"
             description={isSearching ? "正在输入..." : debouncedSearch ? `搜索: ${debouncedSearch}` : undefined}
           />
-          <Select
-            placeholder="筛选类型"
-            className="max-w-xs"
-            selectedKeys={typeFilter ? [typeFilter] : []}
-            onSelectionChange={handleTypeFilterChange}
-          >
-            {[
-              { value: '', label: '全部类型' },
-              ...getPhraseTypeOptions()
-            ].map((option) => (
-              <SelectItem key={option.value}>
-                {option.label}
-              </SelectItem>
-            ))}
-          </Select>
+          <div className="flex flex-col gap-1">
+            <Select
+              placeholder="筛选类型"
+              className="max-w-xs"
+              selectedKeys={typeFilter ? [typeFilter] : []}
+              onSelectionChange={handleTypeFilterChange}
+            >
+              {[
+                { value: '', label: '全部类型' },
+                ...getPhraseTypeOptions()
+              ].map((option) => (
+                <SelectItem key={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </Select>
+            {typeFilter && phrasesByType[typeFilter] !== undefined && (
+              <p className="text-xs text-default-500 px-1">
+                当前类型: {phrasesByType[typeFilter]} 条
+              </p>
+            )}
+          </div>
         </div>
 
         {showSkeleton ? (

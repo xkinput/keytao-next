@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
 
     if (!search) {
       // No search term, return all with pagination and type filter
-      const [phrases, total] = await Promise.all([
+      const [phrases, total, phrasesByTypeData] = await Promise.all([
         prisma.phrase.findMany({
           where: typeFilter,
           select: {
@@ -41,9 +41,19 @@ export async function GET(request: NextRequest) {
           take: pageSize,
         }),
         prisma.phrase.count({ where: typeFilter }),
+        prisma.phrase.groupBy({
+          by: ['type'],
+          _count: { id: true },
+        }),
       ])
 
-      return NextResponse.json({ phrases, total })
+      // Convert to phrasesByType object
+      const phrasesByType = phrasesByTypeData.reduce((acc, item) => {
+        acc[item.type] = item._count.id
+        return acc
+      }, {} as Record<string, number>)
+
+      return NextResponse.json({ phrases, total, phrasesByType })
     }
 
     // With search: prioritize exact matches, then startsWith, then contains
@@ -144,7 +154,18 @@ export async function GET(request: NextRequest) {
     // Apply pagination
     const phrases = allMatches.slice((page - 1) * pageSize, page * pageSize)
 
-    return NextResponse.json({ phrases, total })
+    // Get phrasesByType stats for all phrases (not just search results)
+    const phrasesByTypeData = await prisma.phrase.groupBy({
+      by: ['type'],
+      _count: { id: true },
+    })
+
+    const phrasesByType = phrasesByTypeData.reduce((acc, item) => {
+      acc[item.type] = item._count.id
+      return acc
+    }, {} as Record<string, number>)
+
+    return NextResponse.json({ phrases, total, phrasesByType })
   } catch (error) {
     console.error('Get phrases error:', error)
     return NextResponse.json(

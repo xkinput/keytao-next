@@ -8,8 +8,7 @@ import {
   Button,
   Tabs,
   Tab,
-  Input,
-  Switch
+  Input
 } from '@heroui/react'
 import { RefreshCw } from 'lucide-react'
 import { useAuthStore } from '@/lib/store/auth'
@@ -164,9 +163,6 @@ export default function BatchesPage() {
                 <>共 {data?.pagination?.total || 0} 个</>
               )}
             </p>
-            {!isAuthenticatedValue && (
-              <p className="text-sm text-default-500">当前为访客，仅可查看，登录后可创建与编辑。</p>
-            )}
           </div>
           <div className="flex items-center gap-2">
             <Button
@@ -223,18 +219,17 @@ export default function BatchesPage() {
             </div>
 
             {isAuthenticatedValue && (
-              <div className="flex items-center gap-2 sm:pl-2 sm:border-l sm:border-default-200">
-                <span className={`text-small transition-colors ${!onlyMine ? 'text-primary font-medium' : 'text-default-400'}`}>
-                  全部
-                </span>
-                <Switch
-                  isSelected={onlyMine}
-                  onValueChange={handleOnlyMineChange}
+              <div className="flex items-center sm:pl-2 sm:border-l sm:border-default-200">
+                <Tabs
+                  selectedKey={onlyMine ? 'mine' : 'all'}
+                  onSelectionChange={(key) => handleOnlyMineChange(key === 'mine')}
                   size="sm"
-                />
-                <span className={`text-small transition-colors ${onlyMine ? 'text-primary font-medium' : 'text-default-400'}`}>
-                  我的
-                </span>
+                  radius="full"
+                  color="primary"
+                >
+                  <Tab key="all" title="全部" />
+                  <Tab key="mine" title="我的" />
+                </Tabs>
               </div>
             )}
           </div>

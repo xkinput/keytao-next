@@ -21,6 +21,7 @@ export default function ImportPage() {
   // Check ROOT admin permission
   const { data: adminCheck, isLoading } = useAPI<{
     isRootAdmin: boolean
+    phrasesByType: Record<string, number>
   }>(
     isAuthenticated() && token ? '/api/admin/stats' : null
   )
@@ -144,6 +145,11 @@ export default function ImportPage() {
   const handleImport = async () => {
     if (!content) {
       alert('请先选择文件或输入内容')
+      return
+    }
+
+    if (!phraseType) {
+      alert('请选择词条类型')
       return
     }
 
@@ -281,14 +287,13 @@ export default function ImportPage() {
                   </div>
 
                   <div className="w-48">
-                    <label className="block text-sm font-medium mb-2">
-                      词条类型
-                    </label>
                     <Select
                       selectedKeys={[phraseType]}
                       onChange={(e) => setPhraseType(e.target.value as PhraseType)}
                       label="选择类型"
                       placeholder="请选择词条类型"
+                      isRequired
+                      isDisabled={importing}
                     >
                       {getPhraseTypeOptions().map((type) => (
                         <SelectItem key={type.value}>
@@ -296,6 +301,11 @@ export default function ImportPage() {
                         </SelectItem>
                       ))}
                     </Select>
+                    {adminCheck?.phrasesByType && (
+                      <p className="mt-2 text-sm text-default-500">
+                        当前词库: {adminCheck.phrasesByType[phraseType] || 0} 条
+                      </p>
+                    )}
                   </div>
                 </div>
 
@@ -316,7 +326,7 @@ export default function ImportPage() {
                   <Button
                     color="primary"
                     onPress={handleImport}
-                    isDisabled={!content}
+                    isDisabled={!content || !phraseType}
                   >
                     开始导入
                   </Button>

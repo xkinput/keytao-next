@@ -58,7 +58,7 @@ export default function BatchActionsDropdown({
         if (onSuccess) {
           onSuccess()
         } else {
-          router.refresh()
+          router.push('/')
         }
       } catch (error) {
         console.error('Delete error:', error)
