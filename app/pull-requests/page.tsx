@@ -23,6 +23,10 @@ interface PullRequest {
   action: 'Create' | 'Change' | 'Delete'
   status: 'Pending' | 'Approved' | 'Rejected'
   hasConflict: boolean
+  conflictInfo?: {
+    hasConflict: boolean
+    conflicts?: any[]
+  }
   createAt: string
   user: {
     id: number

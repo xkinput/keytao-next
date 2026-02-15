@@ -3,6 +3,7 @@ import { getSession } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { checkBatchConflictsWithWeight } from '@/lib/services/batchConflictService'
 import { PullRequestType } from '@prisma/client'
+import { PhraseType } from '@/lib/constants/phraseTypes'
 
 // POST /api/pull-requests/batch - Create multiple PRs in a batch
 export async function POST(request: NextRequest) {

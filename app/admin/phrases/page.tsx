@@ -139,12 +139,14 @@ export default function PhrasesPage() {
                 setPage(1)
               }}
             >
-              <SelectItem key="">全部类型</SelectItem>
-              {getPhraseTypeOptions().map((option) => (
-                <SelectItem key={option.value}>
-                  {option.label}
-                </SelectItem>
-              ))}
+              {[
+                <SelectItem key="">全部类型</SelectItem>,
+                ...getPhraseTypeOptions().map((option) => (
+                  <SelectItem key={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))
+              ]}
             </Select>
           </div>
 

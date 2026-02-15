@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/auth'
 import { checkBatchConflictsWithWeight } from '@/lib/services/batchConflictService'
+import { PhraseType } from '@/lib/constants/phraseTypes'
 
 interface PRItemInput {
   id: string
@@ -9,7 +10,7 @@ interface PRItemInput {
   oldWord?: string
   code: string
   weight?: number
-  type?: string
+  type?: PhraseType
 }
 
 export async function POST(request: NextRequest) {

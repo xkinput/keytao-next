@@ -11,7 +11,7 @@ export const runtime = 'nodejs';
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { taskId: string } }
+  { params }: { params: Promise<{ taskId: string }> }
 ) {
   try {
     // Verify admin permission
@@ -20,7 +20,7 @@ export async function GET(
       return authResult.response;
     }
 
-    const { taskId } = params;
+    const { taskId } = await params;
 
     const status = await getSyncTaskStatus(taskId);
 
