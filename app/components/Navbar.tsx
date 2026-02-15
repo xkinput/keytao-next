@@ -68,10 +68,6 @@ function Navbar() {
     router.push('/login')
   }, [router])
 
-  const handleRegisterClick = useCallback(() => {
-    router.push('/register')
-  }, [router])
-
   // Categorized navigation menu
   type MenuItem = { label: string; href: string; requireRootAdmin?: boolean }
   type MenuCategory = {
@@ -350,43 +346,14 @@ function Navbar() {
                 </Button>
               </>
             ) : (
-              <>
-                <Button
-                  color="primary"
-                  variant="flat"
-                  size="sm"
-                  onPress={handleLoginClick}
-                  className="hidden sm:flex"
-                >
-                  登录
-                </Button>
-                <Button
-                  color="primary"
-                  size="sm"
-                  onPress={handleRegisterClick}
-                  className="hidden sm:flex"
-                >
-                  注册
-                </Button>
-                <Dropdown className="sm:hidden">
-                  <DropdownTrigger>
-                    <Button
-                      color="primary"
-                      size="sm"
-                    >
-                      登录/注册
-                    </Button>
-                  </DropdownTrigger>
-                  <DropdownMenu aria-label="Auth actions">
-                    <DropdownItem key="login" onPress={handleLoginClick}>
-                      登录
-                    </DropdownItem>
-                    <DropdownItem key="register" onPress={handleRegisterClick}>
-                      注册
-                    </DropdownItem>
-                  </DropdownMenu>
-                </Dropdown>
-              </>
+              <Button
+                color="primary"
+                variant="flat"
+                size="sm"
+                onPress={handleLoginClick}
+              >
+                登录
+              </Button>
             )}
           </div>
         </div>
