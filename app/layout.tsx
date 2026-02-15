@@ -14,8 +14,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "KeyTao - 权限管理系统",
-  description: "基于 Next.js 和 Prisma 的权限管理系统",
+  title: "KeyTao 键道词库管理系统",
+  description: "键道输入法词库管理系统",
 };
 
 export default function RootLayout({
