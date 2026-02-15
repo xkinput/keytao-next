@@ -45,6 +45,13 @@ export async function executeSyncTask(taskId: string): Promise<void> {
       include: {
         batches: {
           include: {
+            creator: {
+              select: {
+                id: true,
+                name: true,
+                nickname: true,
+              },
+            },
             pullRequests: {
               where: {
                 status: 'Approved',
@@ -76,7 +83,7 @@ export async function executeSyncTask(taskId: string): Promise<void> {
 
     // Step 3: Generate summary
     await updateProgress(taskId, 50, '生成同步说明...');
-    const summary = generateSyncSummary(allPullRequests);
+    const summary = generateSyncSummary(allPullRequests, task.batches);
 
     // Step 4: Sync to Github
     await updateProgress(taskId, 60, '连接Github...');

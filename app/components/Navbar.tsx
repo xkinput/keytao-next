@@ -6,6 +6,7 @@ import { Button } from '@heroui/react'
 import { useAuthStore } from '@/lib/store/auth'
 import { useAPI } from '@/lib/hooks/useSWR'
 import Logo from './Logo'
+import ThemeSwitch from './ThemeSwitch'
 
 export default function Navbar() {
   const router = useRouter()
@@ -33,9 +34,7 @@ export default function Navbar() {
     { label: '数据概览', href: '/admin/dashboard' },
     { label: '批次审核', href: '/admin/batches' },
     { label: '用户管理', href: '/admin/users' },
-    { label: '词库管理', href: '/admin/phrases' },
     { label: '词库导入', href: '/admin/import' },
-    { label: 'GitHub 同步', href: '/admin/sync' },
   ]
 
   // 普通导航
@@ -43,6 +42,8 @@ export default function Navbar() {
     { label: '改词', href: '/' },
     { label: '讨论', href: '/issues' },
     { label: '修改提议', href: '/pull-requests' },
+    { label: '词库管理', href: '/phrases' },
+    { label: 'GitHub 同步', href: '/sync' },
   ]
 
   const navItems = isAdminArea ? adminNavItems : publicNavItems
@@ -78,6 +79,7 @@ export default function Navbar() {
           </div>
 
           <div className="flex items-center gap-2">
+            <ThemeSwitch />
             {isAuthenticated() ? (
               <>
                 <span className="text-sm text-default-500">

@@ -44,15 +44,12 @@ export async function GET(request: NextRequest) {
     ]);
 
     return NextResponse.json({
-      success: true,
-      data: {
-        tasks,
-        pagination: {
-          page,
-          pageSize,
-          total,
-          totalPages: Math.ceil(total / pageSize),
-        },
+      tasks,
+      pagination: {
+        page,
+        pageSize,
+        total,
+        totalPages: Math.ceil(total / pageSize),
       },
     });
   } catch (error: any) {

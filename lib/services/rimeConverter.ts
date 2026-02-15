@@ -181,12 +181,32 @@ export function convertToRimeDicts(
 /**
  * Generate sync summary for PR description
  */
-export function generateSyncSummary(pullRequests: PullRequest[]): string {
+export function generateSyncSummary(
+  pullRequests: PullRequest[],
+  batches?: Array<{ creator: { name: string | null; nickname: string | null } }>
+): string {
   const grouped = groupPullRequestsByType(pullRequests);
   const lines: string[] = [];
 
   lines.push('## 词库同步更新');
   lines.push('');
+
+  // Add contributors section
+  if (batches && batches.length > 0) {
+    const contributors = new Set<string>();
+    for (const batch of batches) {
+      const displayName = batch.creator.nickname || batch.creator.name || '匿名用户';
+      contributors.add(displayName);
+    }
+
+    if (contributors.size > 0) {
+      lines.push('### 本次词库贡献者');
+      lines.push('');
+      lines.push(Array.from(contributors).join('、'));
+      lines.push('');
+    }
+  }
+
   lines.push('### 更新统计');
   lines.push('');
 

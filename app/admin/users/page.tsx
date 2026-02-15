@@ -67,7 +67,7 @@ export default function UsersPage() {
   return (
     <>
       <Navbar />
-      <div className="min-h-screen bg-background">
+      <div className="min-h-screen">
         <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           <div className="flex justify-between items-center mb-6">
             <h1 className="text-3xl font-bold">用户管理</h1>

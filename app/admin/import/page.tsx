@@ -183,7 +183,7 @@ export default function ImportPage() {
   return (
     <>
       <Navbar />
-      <div className="min-h-screen bg-background">
+      <div className="min-h-screen">
         <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           <h1 className="text-3xl font-bold mb-8">词库导入</h1>
 

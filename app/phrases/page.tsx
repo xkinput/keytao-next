@@ -108,7 +108,7 @@ export default function PhrasesPage() {
   return (
     <>
       <Navbar />
-      <div className="min-h-screen bg-background">
+      <div className="min-h-screen">
         <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           <div className="flex justify-between items-center mb-6">
             <h1 className="text-3xl font-bold">词库管理</h1>
@@ -144,7 +144,7 @@ export default function PhrasesPage() {
                 <SelectItem key={option.value}>
                   {option.label}
                 </SelectItem>
-              ))}
+              )) as any}
             </Select>
           </div>
 

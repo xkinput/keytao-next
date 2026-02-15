@@ -10,11 +10,17 @@ export async function GET() {
   }
 
   try {
-    const [totalPhrases, totalIssues, totalUsers, totalPullRequests] = await Promise.all([
+    const [totalPhrases, totalIssues, totalUsers, totalPullRequests, pendingSyncBatches] = await Promise.all([
       prisma.phrase.count(),
       prisma.issue.count(),
       prisma.user.count(),
       prisma.pullRequest.count(),
+      prisma.batch.count({
+        where: {
+          status: 'Approved',
+          syncTaskId: null,
+        },
+      }),
     ])
 
     return NextResponse.json({
@@ -22,6 +28,7 @@ export async function GET() {
       totalIssues,
       totalUsers,
       totalPullRequests,
+      pendingSyncBatches,
     })
   } catch (error) {
     console.error('Get stats error:', error)

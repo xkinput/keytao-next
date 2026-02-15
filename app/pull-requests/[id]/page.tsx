@@ -158,7 +158,7 @@ export default function PRDetailPage({ params }: { params: Promise<{ id: string 
   return (
     <>
       <Navbar />
-      <div className="min-h-screen bg-linear-to-br from-blue-50 to-indigo-100 dark:bg-none dark:bg-background">
+      <div className="min-h-screen">
         <main className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           <Button
             variant="light"

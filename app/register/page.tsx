@@ -12,6 +12,7 @@ export default function RegisterPage() {
   const setAuth = useAuthStore((state) => state.setAuth)
   const [name, setName] = useState('')
   const [password, setPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
   const [nickname, setNickname] = useState('')
   const [email, setEmail] = useState('')
   const [error, setError] = useState('')
@@ -20,6 +21,13 @@ export default function RegisterPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
+
+    // Validate password match
+    if (password !== confirmPassword) {
+      setError('两次输入的密码不一致')
+      return
+    }
+
     setLoading(true)
 
     try {
@@ -48,7 +56,7 @@ export default function RegisterPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-linear-to-br from-blue-50 to-indigo-100 dark:bg-none dark:bg-background p-4">
+    <div className="min-h-screen flex items-center justify-center p-4">
       <Card className="w-full max-w-md">
         <CardHeader className="flex flex-col gap-1 items-center pb-6 pt-8">
           <h1 className="text-3xl font-bold">KeyTao</h1>
@@ -74,6 +82,18 @@ export default function RegisterPage() {
               onValueChange={setPassword}
               isRequired
               variant="bordered"
+            />
+
+            <Input
+              label="确认密码"
+              placeholder="请再次输入密码"
+              type="password"
+              value={confirmPassword}
+              onValueChange={setConfirmPassword}
+              isRequired
+              variant="bordered"
+              isInvalid={confirmPassword !== '' && password !== confirmPassword}
+              errorMessage={confirmPassword !== '' && password !== confirmPassword ? '两次输入的密码不一致' : ''}
             />
 
             <Input

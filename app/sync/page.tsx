@@ -71,6 +71,12 @@ export default function SyncPage() {
   const [selectedTask, setSelectedTask] = useState<SyncTask | null>(null)
   const [isBatchModalOpen, setIsBatchModalOpen] = useState(false)
 
+  // Check if user is admin
+  const { data: adminCheck } = useAPI(
+    token ? '/api/admin/stats' : null
+  )
+  const isAdmin = !!adminCheck
+
   // Get sync tasks with pagination
   const {
     data: tasksData,
@@ -157,12 +163,12 @@ export default function SyncPage() {
   return (
     <>
       <Navbar />
-      <div className="min-h-screen bg-background">
+      <div className="min-h-screen">
         <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           <div className="flex justify-between items-center mb-8">
             <h1 className="text-3xl font-bold">GitHub 同步管理</h1>
             <div className="flex items-center gap-4">
-              {statsData && (
+              {statsData && isAdmin && (
                 <div className="flex items-center gap-2">
                   <span className="text-sm text-default-600">待同步批次:</span>
                   <Chip
@@ -174,14 +180,16 @@ export default function SyncPage() {
                   </Chip>
                 </div>
               )}
-              <Button
-                color="primary"
-                onPress={handleTriggerSync}
-                isLoading={isTriggering}
-                isDisabled={!!runningTask || !statsData || statsData.pendingSyncBatches === 0}
-              >
-                触发同步
-              </Button>
+              {isAdmin && (
+                <Button
+                  color="primary"
+                  onPress={handleTriggerSync}
+                  isLoading={isTriggering}
+                  isDisabled={!!runningTask || !statsData || statsData.pendingSyncBatches === 0}
+                >
+                  触发同步
+                </Button>
+              )}
             </div>
           </div>
 
