@@ -1,6 +1,6 @@
 // Phrase type definitions and utilities
 
-export type PhraseType = 'Single' | 'Phrase' | 'Sentence' | 'Symbol' | 'Link' | 'Poem' | 'Other'
+export type PhraseType = 'Single' | 'Phrase' | 'Sentence' | 'Symbol' | 'Link' | 'Poem' | 'Supplement' | 'Other'
 
 export interface PhraseTypeConfig {
   type: PhraseType
@@ -45,6 +45,12 @@ export const PHRASE_TYPE_CONFIGS: Record<PhraseType, PhraseTypeConfig> = {
     label: '诗句',
     defaultWeight: 10000,
     description: '诗词名句'
+  },
+  Supplement: {
+    type: 'Supplement',
+    label: '补充',
+    defaultWeight: 100,
+    description: '补充词条'
   },
   Other: {
     type: 'Other',

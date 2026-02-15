@@ -17,7 +17,7 @@ import {
 } from '@heroui/react'
 import Navbar from '@/app/components/Navbar'
 import { useAPI } from '@/lib/hooks/useSWR'
-import { getPhraseTypeLabel, type PhraseType } from '@/lib/constants/phraseTypes'
+import { getPhraseTypeLabel, getPhraseTypeOptions, type PhraseType } from '@/lib/constants/phraseTypes'
 
 interface Phrase {
   id: number
@@ -74,6 +74,7 @@ export default function PhrasesPage() {
       Symbol: 'secondary',
       Link: 'secondary',
       Poem: 'secondary',
+      Supplement: 'secondary',
       Other: 'default'
     }
     return colors[type] || 'default'
@@ -138,14 +139,12 @@ export default function PhrasesPage() {
                 setPage(1)
               }}
             >
-              <SelectItem key="" >全部类型</SelectItem>
-              <SelectItem key="Single">单字 (默认权重: 10)</SelectItem>
-              <SelectItem key="Phrase">词组 (默认权重: 100)</SelectItem>
-              <SelectItem key="Sentence">句子 (默认权重: 1000)</SelectItem>
-              <SelectItem key="Symbol">符号 (默认权重: 10)</SelectItem>
-              <SelectItem key="Link">链接 (默认权重: 10000)</SelectItem>
-              <SelectItem key="Poem">诗词 (默认权重: 10000)</SelectItem>
-              <SelectItem key="Other">其他 (默认权重: 10000)</SelectItem>
+              <SelectItem key="">全部类型</SelectItem>
+              {getPhraseTypeOptions().map((option) => (
+                <SelectItem key={option.value}>
+                  {option.label}
+                </SelectItem>
+              )) as any}
             </Select>
           </div>
 

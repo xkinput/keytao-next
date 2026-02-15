@@ -3,7 +3,7 @@
  */
 
 const API_BASE = 'http://localhost:3000'
-const BEARER_TOKEN = 'eyJhbGciOiJIUzI1NiJ9.eyJpZCI6MSwibmFtZSI6ImFkbWluIiwiaWF0IjoxNzY5ODYyODM0LCJleHAiOjE3NzA0Njc2MzR9.Z-qkU02ZsW7UiecQUpdjGLYHuy9bYjMdCLvFxsOCMiw'
+const BEARER_TOKEN = 'eyJhbGciOiJIUzI1NiJ9.eyJpZCI6MSwibmFtZSI6ImFkbWluIiwiaWF0IjoxNzcwODM3NTU3LCJleHAiOjE3NzE0NDIzNTd9.EAtS8IAgh2k-IQFfMvTVJJCzEvupEBwJs5D1S6HeCZA'
 
 interface PhraseData {
   word: string

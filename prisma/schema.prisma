@@ -37,6 +37,8 @@ enum PhraseType {
   Link
   /// 诗句
   Poem
+  /// 补充
+  Supplement
   /// 其他
   Other
 }
