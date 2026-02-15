@@ -35,7 +35,7 @@ export default function PhrasesPage() {
   const [page, setPage] = useState(1)
   const [search, setSearch] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
-  const [typeFilter, setTypeFilter] = useState<string>('')
+  const [typeFilter, setTypeFilter] = useState<PhraseType | ''>('Phrase')
 
   // Debounce search input
   useEffect(() => {
@@ -48,8 +48,8 @@ export default function PhrasesPage() {
   }, [search])
 
   // Handle type filter change
-  const handleTypeFilterChange = useCallback((keys: any) => {
-    const selected = Array.from(keys)[0] as string
+  const handleTypeFilterChange = useCallback((keys: 'all' | Set<React.Key>) => {
+    const selected = Array.from(keys)[0] as PhraseType | ''
     setTypeFilter(selected || '')
     setPage(1)
   }, [])
