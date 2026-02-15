@@ -35,6 +35,7 @@ export default function Navbar() {
     { label: '用户管理', href: '/admin/users' },
     { label: '词库管理', href: '/admin/phrases' },
     { label: '词库导入', href: '/admin/import' },
+    { label: 'GitHub 同步', href: '/admin/sync' },
   ]
 
   // 普通导航

@@ -10,7 +10,7 @@ export default function Logo({ className = '', size = 40 }: LogoProps) {
   return (
     <Link href="/" className={`flex items-center gap-2 ${className}`}>
       <Image
-        src="/logo.jpg"
+        src="/logo.png"
         alt="KeyTao Logo"
         width={size}
         height={size}
