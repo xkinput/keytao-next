@@ -10,7 +10,7 @@ import {
   useDisclosure,
   Avatar,
 } from '@heroui/react'
-import { useAuthStore } from '@/lib/store/auth'
+import { useIsAuthenticated } from '@/lib/hooks/useAuth'
 import { useAPI } from '@/lib/hooks/useSWR'
 import { usePageFilterStore } from '@/lib/store/pageFilter'
 import { useRouter } from 'next/navigation'
@@ -67,7 +67,7 @@ function MessageCircleIcon(props: React.SVGProps<SVGSVGElement>) {
 }
 
 export default function HomePage() {
-  const { isAuthenticated } = useAuthStore()
+  const isAuthenticated = useIsAuthenticated()
   const { getPage, setPage: setStorePage } = usePageFilterStore()
   const [page, setPage] = useState(() => getPage('/issues', 1))
   const router = useRouter()

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import {
   Table,
   TableHeader,
@@ -9,7 +9,6 @@ import {
   TableRow,
   TableCell,
   Chip,
-  Spinner,
   Input,
   Pagination,
   Select,
@@ -17,6 +16,7 @@ import {
 } from '@heroui/react'
 import { useAPI } from '@/lib/hooks/useSWR'
 import { getPhraseTypeLabel, getPhraseTypeOptions, type PhraseType } from '@/lib/constants/phraseTypes'
+import PhraseTableRowSkeleton from '@/app/components/PhraseTableRowSkeleton'
 
 interface Phrase {
   id: number
@@ -55,6 +55,18 @@ export default function PhrasesPage() {
     return () => clearTimeout(timer)
   }, [search])
 
+  // Handle type filter change
+  const handleTypeFilterChange = useCallback((keys: any) => {
+    const selected = Array.from(keys)[0] as string
+    setTypeFilter(selected || '')
+    setPage(1)
+  }, [])
+
+  // Handle page change
+  const handlePageChange = useCallback((newPage: number) => {
+    setPage(newPage)
+  }, [])
+
   const { data, isLoading, isValidating } = useAPI<{ phrases: Phrase[]; total: number }>(
     `/api/admin/phrases?page=${page}&pageSize=20&search=${debouncedSearch}${typeFilter ? `&type=${typeFilter}` : ''}`,
     { keepPreviousData: true }
@@ -63,7 +75,7 @@ export default function PhrasesPage() {
   const phrases = data?.phrases || []
   const total = data?.total || 0
   const isSearching = search !== debouncedSearch
-  const isFirstLoad = !data && isLoading
+  const showSkeleton = !data && isLoading
 
   const getTypeColor = (type: string) => {
     const colors: Record<string, "default" | "primary" | "secondary" | "success" | "warning" | "danger"> = {
@@ -92,24 +104,12 @@ export default function PhrasesPage() {
     }
   }
 
-  // Only show full page loading on first load
-  if (isFirstLoad && isLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <Spinner size="lg" label="加载中..." />
-      </div>
-    )
-  }
-
   return (
     <div className="min-h-screen">
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="flex justify-between items-center mb-6">
           <h1 className="text-3xl font-bold">词库管理</h1>
-          <div className="flex items-center gap-2">
-            {(isSearching || isValidating) && <Spinner size="sm" />}
-            <p className="text-default-500">共 {total} 条词条</p>
-          </div>
+          <p className="text-default-500">共 {total} 条词条</p>
         </div>
 
         <div className="mb-4 flex gap-4">
@@ -126,63 +126,75 @@ export default function PhrasesPage() {
             placeholder="筛选类型"
             className="max-w-xs"
             selectedKeys={typeFilter ? [typeFilter] : []}
-            defaultSelectedKeys={""}
-            onSelectionChange={(keys) => {
-              const selected = Array.from(keys)[0] as string
-              setTypeFilter(selected || '')
-              setPage(1)
-            }}
+            onSelectionChange={handleTypeFilterChange}
           >
-            <SelectItem key="">全部类型</SelectItem>
-            {getPhraseTypeOptions().map((option) => (
+            {[
+              { value: '', label: '全部类型' },
+              ...getPhraseTypeOptions()
+            ].map((option) => (
               <SelectItem key={option.value}>
                 {option.label}
               </SelectItem>
-            )) as any}
+            ))}
           </Select>
         </div>
 
-        <Table aria-label="词条列表">
-          <TableHeader>
-            <TableColumn>词</TableColumn>
-            <TableColumn>编码</TableColumn>
-            <TableColumn>类型</TableColumn>
-            <TableColumn>权重</TableColumn>
-            <TableColumn>状态</TableColumn>
-            <TableColumn>备注</TableColumn>
-          </TableHeader>
-          <TableBody
-            emptyContent="暂无数据"
-          >
-            {phrases.map((phrase) => (
-              <TableRow key={phrase.id}>
-                <TableCell className="font-medium">{phrase.word}</TableCell>
-                <TableCell className="font-mono text-sm">{phrase.code}</TableCell>
-                <TableCell>
-                  <Chip color={getTypeColor(phrase.type)} variant="flat" size="sm">
-                    {getPhraseTypeLabel(phrase.type as PhraseType)}
-                  </Chip>
-                </TableCell>
-                <TableCell>{phrase.weight}</TableCell>
-                <TableCell>
-                  <Chip color={getStatusColor(phrase.status)} variant="flat" size="sm">
-                    {getStatusLabel(phrase.status)}
-                  </Chip>
-                </TableCell>
-                <TableCell className="max-w-xs truncate">
-                  {phrase.remark || '-'}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+        {showSkeleton ? (
+          <div className="flex justify-center items-center py-20">
+            <div className="space-y-4 w-full">
+              {Array.from({ length: 10 }).map((_, i) => (
+                <div key={i} className="animate-pulse flex space-x-4">
+                  <div className="flex-1 space-y-3 py-2">
+                    <div className="h-4 bg-default-200 rounded w-3/4"></div>
+                    <div className="h-4 bg-default-200 rounded w-1/2"></div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <Table aria-label="词条列表">
+            <TableHeader>
+              <TableColumn>词</TableColumn>
+              <TableColumn>编码</TableColumn>
+              <TableColumn>类型</TableColumn>
+              <TableColumn>权重</TableColumn>
+              <TableColumn>状态</TableColumn>
+              <TableColumn>备注</TableColumn>
+            </TableHeader>
+            <TableBody
+              emptyContent="暂无数据"
+            >
+              {phrases.map((phrase) => (
+                <TableRow key={phrase.id}>
+                  <TableCell className="font-medium">{phrase.word}</TableCell>
+                  <TableCell className="font-mono text-sm">{phrase.code}</TableCell>
+                  <TableCell>
+                    <Chip color={getTypeColor(phrase.type)} variant="flat" size="sm">
+                      {getPhraseTypeLabel(phrase.type as PhraseType)}
+                    </Chip>
+                  </TableCell>
+                  <TableCell>{phrase.weight}</TableCell>
+                  <TableCell>
+                    <Chip color={getStatusColor(phrase.status)} variant="flat" size="sm">
+                      {getStatusLabel(phrase.status)}
+                    </Chip>
+                  </TableCell>
+                  <TableCell className="max-w-xs truncate">
+                    {phrase.remark || '-'}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
 
         {total > 20 && (
           <div className="flex justify-center mt-4">
             <Pagination
               total={Math.ceil(total / 20)}
               page={page}
-              onChange={setPage}
+              onChange={handlePageChange}
             />
           </div>
         )}

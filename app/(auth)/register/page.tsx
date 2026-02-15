@@ -7,9 +7,19 @@ import { Card, CardHeader, CardBody, CardFooter, Input, Button, Divider } from '
 import { useAuthStore } from '@/lib/store/auth'
 import { apiRequest } from '@/lib/hooks/useSWR'
 
+interface AdminCheckResponse {
+  totalPhrases: number
+  totalIssues: number
+  totalUsers: number
+  totalPullRequests: number
+  pendingSyncBatches: number
+  isRootAdmin: boolean
+}
+
 export default function RegisterPage() {
   const router = useRouter()
   const setAuth = useAuthStore((state) => state.setAuth)
+  const setAdminStatus = useAuthStore((state) => state.setAdminStatus)
   const [name, setName] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
@@ -43,6 +53,18 @@ export default function RegisterPage() {
       // Save token and user info to zustand store
       if (data.token && data.user) {
         setAuth(data.token, data.user)
+
+        // Check admin status immediately after registration
+        try {
+          const adminData = await apiRequest<AdminCheckResponse>(
+            '/api/admin/stats',
+            { withAuth: true }
+          )
+          setAdminStatus(true, adminData.isRootAdmin)
+        } catch {
+          // Not an admin, set checked flag to avoid future checks
+          setAdminStatus(false, false)
+        }
       }
 
       router.push('/')

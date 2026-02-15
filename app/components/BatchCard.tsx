@@ -1,5 +1,6 @@
 'use client'
 
+import { memo } from 'react'
 import Link from 'next/link'
 import {
   Card,
@@ -51,7 +52,7 @@ interface BatchCardProps {
   refresh: () => void
 }
 
-export default function BatchCard({ batch, refresh }: BatchCardProps) {
+function BatchCard({ batch, refresh }: BatchCardProps) {
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -196,4 +197,6 @@ export default function BatchCard({ batch, refresh }: BatchCardProps) {
     </Card>
   )
 }
+
+export default memo(BatchCard)
 

@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import useSWR from 'swr'
 import { useAuthStore } from '@/lib/store/auth'
 
@@ -93,13 +94,22 @@ export function useAPI<T = unknown>(
   const token = useAuthStore((state) => state.token)
   const withAuth = options?.withAuth ?? true
 
+  // Create stable key without options object
+  const key = useMemo(() => {
+    if (!url) return null
+    return withAuth ? [url, token] : [url, null]
+  }, [url, withAuth, token])
+
   const { data, error, isLoading, isValidating, mutate } = useSWR<T>(
-    url ? [url, withAuth ? token : null, options] : null,
-    ([url, token, options]: [string, string | null, FetcherOptions | undefined]) => fetcher(url, token, options),
+    key,
+    ([url, token]: [string, string | null]) => fetcher(url, token, options),
     {
-      refreshInterval: options?.refreshInterval,
+      refreshInterval: options?.refreshInterval ?? 0,
       revalidateOnFocus: false,
-      keepPreviousData: options?.keepPreviousData,
+      revalidateOnReconnect: false,
+      revalidateIfStale: false,
+      dedupingInterval: 2000,
+      keepPreviousData: options?.keepPreviousData ?? true,
     }
   )
 

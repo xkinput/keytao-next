@@ -1,12 +1,11 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   Card,
   CardBody,
   Button,
-  Spinner,
   Tabs,
   Tab,
   Input,
@@ -16,6 +15,7 @@ import { useAuthStore } from '@/lib/store/auth'
 import { useAPI, apiRequest } from '@/lib/hooks/useSWR'
 import { usePageFilterStore } from '@/lib/store/pageFilter'
 import BatchCard from '@/app/components/BatchCard'
+import BatchCardSkeleton from '@/app/components/BatchCardSkeleton'
 
 interface Batch {
   id: string
@@ -66,7 +66,8 @@ interface BatchesResponse {
 
 export default function BatchesPage() {
   const router = useRouter()
-  const { isAuthenticated } = useAuthStore()
+  const isAuthenticated = useAuthStore(state => state.isAuthenticated)
+  const isAuthenticatedValue = isAuthenticated()
   const { getFilter, setFilter, getPage, setPage: setStorePage } = usePageFilterStore()
   const [status, setStatus] = useState<string>(() => getFilter('/', 'all'))
   const [page, setPage] = useState(() => getPage('/', 1))
@@ -90,10 +91,11 @@ export default function BatchesPage() {
     setStorePage('/', 1)
   }, [setStorePage])
 
-  // Sync page changes to store only when page actually changes
-  useEffect(() => {
-    setStorePage('/', page)
-  }, [page, setStorePage])
+  // Handle page change
+  const handlePageChange = useCallback((newPage: number) => {
+    setPage(newPage)
+    setStorePage('/', newPage)
+  }, [setStorePage])
 
   const { data, isLoading, mutate } = useAPI<BatchesResponse>(
     `/api/batches?page=${page}&pageSize=10${status === 'all' ? '' : `&status=${status}`}${onlyMine ? '&onlyMine=true' : ''}${search ? `&search=${encodeURIComponent(search)}` : ''}`,
@@ -120,7 +122,7 @@ export default function BatchesPage() {
   }
 
   const handleCreateBatch = async () => {
-    if (!isAuthenticated()) {
+    if (!isAuthenticatedValue) {
       router.push('/login')
       return
     }
@@ -144,14 +146,7 @@ export default function BatchesPage() {
   }
 
   const filteredBatches = data?.batches || []
-
-  if (isLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <Spinner size="lg" label="加载中..." />
-      </div>
-    )
-  }
+  const showSkeleton = isLoading && !data
 
   return (
     <div className="min-h-screen">
@@ -168,7 +163,7 @@ export default function BatchesPage() {
                 <>共 {data?.pagination?.total || 0} 个</>
               )}
             </p>
-            {!isAuthenticated() && (
+            {!isAuthenticatedValue && (
               <p className="text-sm text-default-500">当前为访客，仅可查看，登录后可创建与编辑。</p>
             )}
           </div>
@@ -216,7 +211,7 @@ export default function BatchesPage() {
               />
             </div>
 
-            {isAuthenticated() && (
+            {isAuthenticatedValue && (
               <div className="flex items-center gap-2 sm:pl-2 sm:border-l sm:border-default-200">
                 <span className={`text-small transition-colors ${!onlyMine ? 'text-primary font-medium' : 'text-default-400'}`}>
                   全部
@@ -234,19 +229,28 @@ export default function BatchesPage() {
           </div>
         </div>
 
-        <div className="grid gap-4">
-          {filteredBatches.map((batch) => (
-            <BatchCard key={batch.id} batch={batch} refresh={mutate} />
-          ))}
+        <div className="grid gap-4 transition-opacity duration-300" style={{ opacity: showSkeleton ? 0.6 : 1 }}>
+          {showSkeleton ? (
+            // Show skeleton loading
+            Array.from({ length: 3 }).map((_, i) => (
+              <BatchCardSkeleton key={i} />
+            ))
+          ) : (
+            <>
+              {filteredBatches.map((batch) => (
+                <BatchCard key={batch.id} batch={batch} refresh={mutate} />
+              ))}
 
-          {filteredBatches.length === 0 && (
-            <Card>
-              <CardBody className="text-center py-12">
-                <p className="text-default-500">
-                  {search ? '未找到匹配的批次' : onlyMine ? '你还没有创建任何批次' : '暂无批次'}
-                </p>
-              </CardBody>
-            </Card>
+              {filteredBatches.length === 0 && (
+                <Card>
+                  <CardBody className="text-center py-12">
+                    <p className="text-default-500">
+                      {search ? '未找到匹配的批次' : onlyMine ? '你还没有创建任何批次' : '暂无批次'}
+                    </p>
+                  </CardBody>
+                </Card>
+              )}
+            </>
           )}
         </div>
 
@@ -254,7 +258,7 @@ export default function BatchesPage() {
           <div className="mt-6 flex justify-center gap-2">
             <Button
               isDisabled={data.pagination.page === 1}
-              onPress={() => setPage((p) => Math.max(1, p - 1))}
+              onPress={() => handlePageChange(Math.max(1, page - 1))}
             >
               上一页
             </Button>
@@ -263,7 +267,7 @@ export default function BatchesPage() {
             </span>
             <Button
               isDisabled={data.pagination.page === data.pagination.totalPages}
-              onPress={() => setPage((p) => Math.min(data.pagination.totalPages, p + 1))}
+              onPress={() => handlePageChange(Math.min(data.pagination.totalPages, page + 1))}
             >
               下一页
             </Button>

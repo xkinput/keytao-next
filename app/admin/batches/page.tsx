@@ -1,19 +1,19 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   Card,
   CardBody,
   CardHeader,
   Button,
-  Spinner,
   Chip,
   RadioGroup,
   Radio
 } from '@heroui/react'
 import { useAPI } from '@/lib/hooks/useSWR'
 import { usePageFilterStore } from '@/lib/store/pageFilter'
+import AdminBatchCardSkeleton from '@/app/components/AdminBatchCardSkeleton'
 
 interface Batch {
   id: string
@@ -37,14 +37,18 @@ export default function AdminBatchesPage() {
     getFilter('/admin/batches', 'Submitted')
   )
 
-  // Sync status changes to store
-  useEffect(() => {
-    setFilter('/admin/batches', statusFilter)
-  }, [statusFilter, setFilter])
+  // Handle status change
+  const handleStatusChange = useCallback((newStatus: string) => {
+    setStatusFilter(newStatus)
+    setFilter('/admin/batches', newStatus)
+  }, [setFilter])
 
   const { data, error, isLoading } = useAPI<{ batches: Batch[] }>(
     `/api/admin/batches?status=${statusFilter}`
   )
+
+  const showSkeleton = isLoading && !data
+  const batches = data?.batches || []
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -74,29 +78,6 @@ export default function AdminBatchesPage() {
     return map[status] || status
   }
 
-  if (isLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <Spinner size="lg" label="加载中..." />
-      </div>
-    )
-  }
-
-  if (error) {
-    return (
-      <div className="min-h-screen flex items-center justify-center p-8">
-        <Card className="max-w-md">
-          <CardBody className="text-center">
-            <p className="text-danger mb-4">加载失败</p>
-            <p className="text-default-500">{error.message}</p>
-          </CardBody>
-        </Card>
-      </div>
-    )
-  }
-
-  const batches = data?.batches || []
-
   return (
     <div className="min-h-screen">
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -106,7 +87,7 @@ export default function AdminBatchesPage() {
           <RadioGroup
             label="状态筛选"
             value={statusFilter}
-            onValueChange={setStatusFilter}
+            onValueChange={handleStatusChange}
             orientation="horizontal"
             className="mb-4"
           >
@@ -117,15 +98,26 @@ export default function AdminBatchesPage() {
           </RadioGroup>
         </div>
 
-        {batches.length === 0 ? (
-          <Card>
-            <CardBody className="text-center py-12">
-              <p className="text-default-500">暂无{getStatusText(statusFilter)}的批次</p>
-            </CardBody>
-          </Card>
-        ) : (
-          <div className="space-y-4">
-            {batches.map((batch) => (
+        <div className="space-y-4 transition-opacity duration-300" style={{ opacity: showSkeleton ? 0.6 : 1 }}>
+          {error ? (
+            <Card>
+              <CardBody className="text-center py-12">
+                <p className="text-danger mb-4">加载失败</p>
+                <p className="text-default-500">{error.message}</p>
+              </CardBody>
+            </Card>
+          ) : showSkeleton ? (
+            Array.from({ length: 3 }).map((_, i) => (
+              <AdminBatchCardSkeleton key={i} />
+            ))
+          ) : batches.length === 0 ? (
+            <Card>
+              <CardBody className="text-center py-12">
+                <p className="text-default-500">暂无{getStatusText(statusFilter)}的批次</p>
+              </CardBody>
+            </Card>
+          ) : (
+            batches.map((batch) => (
               <Card key={batch.id} isPressable onPress={() => router.push(`/admin/batches/${batch.id}`)}>
                 <CardHeader className="flex justify-between items-start">
                   <div className="flex-1">
@@ -162,9 +154,9 @@ export default function AdminBatchesPage() {
                   </Button>
                 </CardHeader>
               </Card>
-            ))}
-          </div>
-        )}
+            ))
+          )}
+        </div>
       </main>
     </div>
   )

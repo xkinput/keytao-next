@@ -11,7 +11,11 @@ interface User {
 interface AuthState {
   token: string | null
   user: User | null
+  isAdmin: boolean
+  isRootAdmin: boolean
+  _adminChecked: boolean
   setAuth: (token: string, user: User) => void
+  setAdminStatus: (isAdmin: boolean, isRootAdmin: boolean) => void
   clearAuth: () => void
   isAuthenticated: () => boolean
   _hasHydrated: boolean
@@ -32,9 +36,13 @@ export const useAuthStore = create<AuthState>()(
     (set, get) => ({
       token: null,
       user: null,
+      isAdmin: false,
+      isRootAdmin: false,
+      _adminChecked: false,
       _hasHydrated: false,
-      setAuth: (token, user) => set({ token, user }),
-      clearAuth: () => set({ token: null, user: null }),
+      setAuth: (token, user) => set({ token, user, _adminChecked: false }),
+      setAdminStatus: (isAdmin, isRootAdmin) => set({ isAdmin, isRootAdmin, _adminChecked: true }),
+      clearAuth: () => set({ token: null, user: null, isAdmin: false, isRootAdmin: false, _adminChecked: false }),
       isAuthenticated: () => {
         const token = get().token
         return !!token && !isTokenExpired(token)

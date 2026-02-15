@@ -12,7 +12,7 @@ import {
   Input,
   Textarea
 } from '@heroui/react'
-import { useAuthStore } from '@/lib/store/auth'
+import { useIsAuthenticated } from '@/lib/hooks/useAuth'
 import { apiRequest } from '@/lib/hooks/useSWR'
 
 interface CreateIssueModalProps {
@@ -27,7 +27,7 @@ export default function CreateIssueModal({
   onSuccess
 }: CreateIssueModalProps) {
   const router = useRouter()
-  const { isAuthenticated } = useAuthStore()
+  const isAuthenticated = useIsAuthenticated()
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
   const [submitting, setSubmitting] = useState(false)
