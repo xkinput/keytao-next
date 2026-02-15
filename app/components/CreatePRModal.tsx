@@ -26,7 +26,7 @@ import { apiRequest } from '@/lib/hooks/useSWR'
 import { getPhraseTypeOptions, getDefaultWeight, type PhraseType } from '@/lib/constants/phraseTypes'
 import { CODE_PATTERN } from '@/lib/constants/codeValidation'
 import { useUIStore } from '@/lib/store/ui'
-import { Trash2, FileText, ChevronUp, ChevronDown, Plus } from 'lucide-react'
+import { Trash2, FileText, ChevronUp, ChevronDown, Plus, Edit2 } from 'lucide-react'
 import CodePhrasesPopover from './CodePhrasesPopover'
 
 interface CreatePRModalProps {
@@ -722,34 +722,46 @@ export default function CreatePRModal({
                             >
                               <Radio
                                 value="Create"
+                                color="success"
                                 classNames={{
-                                  base: "inline-flex m-0 bg-content1 hover:bg-content2 items-center justify-between flex-row-reverse max-w-full cursor-pointer rounded-lg gap-4 p-4 border-2 border-transparent data-[selected=true]:border-primary",
+                                  base: "inline-flex m-0 bg-content1 hover:bg-content2 items-center justify-between flex-row-reverse max-w-full cursor-pointer rounded-lg gap-4 p-4 border-2 border-transparent data-[selected=true]:border-success",
                                 }}
                               >
                                 <div className="flex flex-col gap-1">
-                                  <span className="text-small font-semibold">新增词条</span>
+                                  <div className="flex items-center gap-2">
+                                    <Plus className="w-4 h-4 text-success" />
+                                    <span className="text-small font-semibold">新增词条</span>
+                                  </div>
                                   <span className="text-tiny text-default-400">创建新的词典条目</span>
                                 </div>
                               </Radio>
                               <Radio
                                 value="Change"
+                                color="warning"
                                 classNames={{
-                                  base: "inline-flex m-0 bg-content1 hover:bg-content2 items-center justify-between flex-row-reverse max-w-full cursor-pointer rounded-lg gap-4 p-4 border-2 border-transparent data-[selected=true]:border-primary",
+                                  base: "inline-flex m-0 bg-content1 hover:bg-content2 items-center justify-between flex-row-reverse max-w-full cursor-pointer rounded-lg gap-4 p-4 border-2 border-transparent data-[selected=true]:border-warning",
                                 }}
                               >
                                 <div className="flex flex-col gap-1">
-                                  <span className="text-small font-semibold">修改词</span>
+                                  <div className="flex items-center gap-2">
+                                    <Edit2 className="w-4 h-4 text-warning" />
+                                    <span className="text-small font-semibold">修改词</span>
+                                  </div>
                                   <span className="text-tiny text-default-400">按编码更改现有词条</span>
                                 </div>
                               </Radio>
                               <Radio
                                 value="Delete"
+                                color="danger"
                                 classNames={{
-                                  base: "inline-flex m-0 bg-content1 hover:bg-content2 items-center justify-between flex-row-reverse max-w-full cursor-pointer rounded-lg gap-4 p-4 border-2 border-transparent data-[selected=true]:border-primary",
+                                  base: "inline-flex m-0 bg-content1 hover:bg-content2 items-center justify-between flex-row-reverse max-w-full cursor-pointer rounded-lg gap-4 p-4 border-2 border-transparent data-[selected=true]:border-danger",
                                 }}
                               >
                                 <div className="flex flex-col gap-1">
-                                  <span className="text-small font-semibold">删除词条</span>
+                                  <div className="flex items-center gap-2">
+                                    <Trash2 className="w-4 h-4 text-danger" />
+                                    <span className="text-small font-semibold">删除词条</span>
+                                  </div>
                                   <span className="text-tiny text-default-400">移除词典条目</span>
                                 </div>
                               </Radio>

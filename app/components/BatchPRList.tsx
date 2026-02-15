@@ -76,6 +76,15 @@ export default function BatchPRList({
         return map[action] || action
     }
 
+    const getActionColor = (action: string): "success" | "warning" | "danger" | "default" => {
+        const map: Record<string, "success" | "warning" | "danger"> = {
+            Create: 'success',
+            Change: 'warning',
+            Delete: 'danger'
+        }
+        return map[action] || 'default'
+    }
+
     if (pullRequests.length === 0) {
         return (
             <Card>
@@ -97,7 +106,7 @@ export default function BatchPRList({
                 <Card key={pr.id}>
                     <CardHeader className="flex justify-between">
                         <div className="flex items-center gap-2 flex-wrap">
-                            <Chip size="sm" variant="flat">
+                            <Chip size="sm" variant="flat" color={getActionColor(pr.action)}>
                                 {getActionText(pr.action)}
                             </Chip>
                             {pr.action === 'Change' && pr.oldWord ? (
