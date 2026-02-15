@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { checkAdminPermission } from '@/lib/adminAuth'
+import type { Prisma } from '@prisma/client'
+
+type PullRequestWithPhrase = Prisma.PullRequestGetPayload<{
+  include: { phrase: true }
+}>
 
 // POST /api/admin/batches/:id/approve - Approve a batch
 export async function POST(
@@ -45,7 +50,7 @@ export async function POST(
     // Calculate dynamic weights before execution
     const { checkBatchConflictsWithWeight } = await import('@/lib/services/batchConflictService')
 
-    const prItems = batch.pullRequests.map(pr => ({
+    const prItems = batch.pullRequests.map((pr: PullRequestWithPhrase) => ({
       id: String(pr.id),
       action: pr.action as 'Create' | 'Change' | 'Delete',
       word: pr.word || '',
@@ -69,7 +74,7 @@ export async function POST(
     // Apply all PRs in a transaction
     const result = await prisma.$transaction(async (tx) => {
       // Process each PR
-      for (const pr of batch.pullRequests) {
+      for (const pr of batch.pullRequests as PullRequestWithPhrase[]) {
         switch (pr.action) {
           case 'Create':
             // Create new phrase
