@@ -30,6 +30,9 @@ export async function GET(request: NextRequest) {
           ]
         }
       }
+    } else if (!onlyMine) {
+      // Filter out batches with no pull requests in public list (when not searching)
+      where.pullRequests = { some: {} }
     }
 
     const [batches, total] = await Promise.all([
@@ -50,10 +53,16 @@ export async function GET(request: NextRequest) {
             }
           },
           pullRequests: {
+            take: 3,
+            orderBy: { createAt: 'asc' },
             select: {
               id: true,
               status: true,
-              hasConflict: true
+              hasConflict: true,
+              action: true,
+              code: true,
+              word: true,
+              oldWord: true
             }
           },
           _count: {

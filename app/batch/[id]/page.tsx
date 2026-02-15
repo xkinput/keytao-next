@@ -14,12 +14,14 @@ import {
   Tabs,
   Tab
 } from '@heroui/react'
+import toast from 'react-hot-toast'
 import { useAuthStore } from '@/lib/store/auth'
 import { useAPI, apiRequest } from '@/lib/hooks/useSWR'
 import Navbar from '@/app/components/Navbar'
 import CreatePRModal from '@/app/components/CreatePRModal'
 import BatchPreview from '@/app/components/BatchPreview'
 import BatchPRList from '@/app/components/BatchPRList'
+import BatchActionsDropdown from '@/app/components/BatchActionsDropdown'
 import { useUIStore } from '@/lib/store/ui'
 
 interface PullRequest {
@@ -143,12 +145,40 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
     onClose()
   }
 
+  const handleDelete = async () => {
+    try {
+      await apiRequest(`/api/batches/${resolvedParams.id}`, {
+        method: 'DELETE',
+        withAuth: true
+      })
+      toast.success('批次已删除')
+      router.push('/')
+    } catch (err) {
+      const error = err as Error
+      openAlert(error.message || '删除失败', '出错了')
+    }
+  }
+
+  const handleWithdraw = async () => {
+    try {
+      await apiRequest(`/api/batches/${resolvedParams.id}/withdraw`, {
+        method: 'POST',
+        withAuth: true
+      })
+      toast.success('已撤销提交')
+      await mutate()
+    } catch (err) {
+      const error = err as Error
+      openAlert(error.message || '撤销失败', '出错了')
+    }
+  }
+
 
 
   const handleSubmit = async () => {
     if (!batch) return
 
-    openConfirm('确定要提交审核吗？提交后将无法修改。', async () => {
+    openConfirm('确定要提交审核吗？', async () => {
       setSubmitting(true)
       try {
         await apiRequest(`/api/batches/${resolvedParams.id}/submit`, {
@@ -316,7 +346,7 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
                       {new Date(batchData.createAt).toLocaleString('zh-CN')}
                     </p>
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex gap-2 flex-wrap">
                     {canEdit && (
                       <>
                         <Button color="primary" onPress={onOpen}>
@@ -342,6 +372,13 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
                         去审核
                       </Button>
                     )}
+                    <BatchActionsDropdown
+                      batchId={batchData.id}
+                      status={batchData.status}
+                      creatorId={batchData.creator.id}
+                      onSuccess={mutate}
+                      iconSize={18}
+                    />
                   </div>
                 </div>
               </CardHeader>
@@ -362,6 +399,17 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
                 </CardHeader>
                 <CardBody>
                   <p className="text-default-600">{batchData.reviewNote}</p>
+                </CardBody>
+              </Card>
+            )}
+
+            {batchData.pullRequests.length === 0 && canEdit && (
+              <Card className="mt-4 border-warning border-2">
+                <CardHeader className="pb-0">
+                  <h3 className="text-large font-bold text-warning">💡 提示</h3>
+                </CardHeader>
+                <CardBody>
+                  <p className="text-default-600">当前批次没有添加任何修改，不会在首页公众列表中展示。请添加修改后提交审核。</p>
                 </CardBody>
               </Card>
             )}

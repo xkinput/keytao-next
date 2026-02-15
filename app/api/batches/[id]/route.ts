@@ -169,9 +169,10 @@ export async function DELETE(
       return NextResponse.json({ error: '无权限' }, { status: 403 })
     }
 
-    if (batch.status !== 'Draft') {
+    // Cannot delete Submitted or Approved batches
+    if (batch.status === 'Submitted' || batch.status === 'Approved') {
       return NextResponse.json(
-        { error: '只能删除草稿状态的批次' },
+        { error: '不能删除审核中或已通过的批次' },
         { status: 400 }
       )
     }

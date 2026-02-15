@@ -18,12 +18,15 @@ import {
   CardHeader,
   Chip,
   RadioGroup,
-  Radio
+  Radio,
+  Tooltip
 } from '@heroui/react'
+import toast from 'react-hot-toast'
 import { apiRequest } from '@/lib/hooks/useSWR'
 import { getPhraseTypeOptions, getDefaultWeight, type PhraseType } from '@/lib/constants/phraseTypes'
 import { CODE_PATTERN } from '@/lib/constants/codeValidation'
 import { useUIStore } from '@/lib/store/ui'
+import { Trash2 } from 'lucide-react'
 
 interface CreatePRModalProps {
   isOpen: boolean
@@ -421,10 +424,9 @@ export default function CreatePRModal({
         }
       }
 
-      // Success! Show message and close
-      openAlert(
-        isBatchEditMode ? '批量更新成功' : isEditMode ? '更新成功' : `成功创建 ${data.items.length} 个修改提议`,
-        '操作成功'
+      // Success! Show toast and close
+      toast.success(
+        isBatchEditMode ? '批量更新成功' : isEditMode ? '更新成功' : `成功创建 ${data.items.length} 个修改提议`
       )
 
       // Trigger data refresh and wait for it to complete
@@ -484,7 +486,7 @@ export default function CreatePRModal({
                 {fields.map((field, index) => {
                   const meta = getMeta(field.id)
                   return (
-                    <Card key={field.id} className="border-2 min-h-100 shrink-0">
+                    <Card key={field.id} className="min-h-100 shrink-0">
                       <CardHeader className="flex justify-between">
                         <span className="font-semibold">修改 #{index + 1}</span>
                         {!isEditMode && fields.length > 1 && (
@@ -493,6 +495,7 @@ export default function CreatePRModal({
                             color="danger"
                             variant="light"
                             onPress={() => handleRemoveItem(index)}
+                            startContent={<Trash2 className='w-4' />}
                           >
                             删除
                           </Button>
@@ -599,7 +602,7 @@ export default function CreatePRModal({
                                           <Input
                                             value={codeField.value}
                                             label="编码"
-                                            placeholder="请输入编码（仅字母）"
+                                            placeholder="请输入编码"
                                             isRequired
                                             isInvalid={!!fieldState.error}
                                             errorMessage={fieldState.error?.message}
@@ -669,7 +672,7 @@ export default function CreatePRModal({
                                         <Input
                                           value={codeField.value}
                                           label="编码"
-                                          placeholder="请输入编码（仅字母）"
+                                          placeholder="请输入编码"
                                           isRequired
                                           isInvalid={!!fieldState.error}
                                           errorMessage={fieldState.error?.message}
@@ -916,19 +919,31 @@ export default function CreatePRModal({
                   <Button variant="light" onPress={handleClose} className="flex-1">
                     取消
                   </Button>
-                  <Button
-                    color="primary"
-                    onPress={() => onSubmitForm()}
-                    isLoading={submitting}
-                    isDisabled={fields.some((field) => {
+                  <Tooltip
+                    content="请先检测冲突"
+                    isDisabled={!fields.some((field) => {
                       const meta = getMeta(field.id)
                       const isResolved = meta.conflict?.suggestions?.some(sug => sug.action === 'Resolved')
                       return !meta.hasChecked || (meta.conflict?.hasConflict && !isResolved)
                     })}
-                    className="flex-1"
+                    color="warning"
                   >
-                    {isBatchEditMode ? '保存修改' : isEditMode ? '保存' : `批量创建 (${fields.length}个)`}
-                  </Button>
+                    <div className="flex-1">
+                      <Button
+                        color="primary"
+                        onPress={() => onSubmitForm()}
+                        isLoading={submitting}
+                        isDisabled={fields.some((field) => {
+                          const meta = getMeta(field.id)
+                          const isResolved = meta.conflict?.suggestions?.some(sug => sug.action === 'Resolved')
+                          return !meta.hasChecked || (meta.conflict?.hasConflict && !isResolved)
+                        })}
+                        className="w-full"
+                      >
+                        {isBatchEditMode ? '保存修改' : isEditMode ? '保存' : `批量创建 (${fields.length}个)`}
+                      </Button>
+                    </div>
+                  </Tooltip>
                 </div>
               </ModalFooter>
             </>

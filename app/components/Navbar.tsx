@@ -4,7 +4,7 @@ import { useRouter, usePathname } from 'next/navigation'
 import Link from 'next/link'
 import { Button } from '@heroui/react'
 import { useAuthStore } from '@/lib/store/auth'
-import { apiRequest, useAPI } from '@/lib/hooks/useSWR'
+import { useAPI } from '@/lib/hooks/useSWR'
 import Logo from './Logo'
 
 export default function Navbar() {
@@ -48,7 +48,7 @@ export default function Navbar() {
   const navItems = isAdminArea ? adminNavItems : publicNavItems
 
   return (
-    <nav className="bg-content1 shadow-sm border-b">
+    <nav className="bg-content1 shadow-sm">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center h-16">
           <div className="flex items-center gap-8">

@@ -1,23 +1,22 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import {
   Card,
   CardBody,
-  CardHeader,
   Button,
   Spinner,
-  Chip,
   Tabs,
   Tab,
   Input,
   Switch
 } from '@heroui/react'
 import { useAuthStore } from '@/lib/store/auth'
-import { useAPI } from '@/lib/hooks/useSWR'
+import { useAPI, apiRequest } from '@/lib/hooks/useSWR'
 import { usePageFilterStore } from '@/lib/store/pageFilter'
 import Navbar from '@/app/components/Navbar'
+import BatchCard from '@/app/components/BatchCard'
 
 interface Batch {
   id: string
@@ -37,6 +36,10 @@ interface Batch {
     id: number
     status: string
     hasConflict: boolean
+    action: 'Create' | 'Change' | 'Delete'
+    code: string | null
+    word: string | null
+    oldWord?: string | null
     conflictInfo?: {
       hasConflict: boolean
       impact?: string
@@ -63,6 +66,7 @@ interface BatchesResponse {
 }
 
 export default function BatchesPage() {
+  const router = useRouter()
   const { isAuthenticated } = useAuthStore()
   const { getFilter, setFilter, getPage, setPage: setStorePage } = usePageFilterStore()
   const [status, setStatus] = useState<string>(() => getFilter('/', 'all'))
@@ -70,6 +74,7 @@ export default function BatchesPage() {
   const [onlyMine, setOnlyMine] = useState(false)
   const [search, setSearch] = useState('')
   const [searchInput, setSearchInput] = useState('')
+  const [isCreating, setIsCreating] = useState(false)
 
   // Sync status changes to store (resets page to 1)
   useEffect(() => {
@@ -89,7 +94,7 @@ export default function BatchesPage() {
     setStorePage('/', page)
   }, [page, setStorePage])
 
-  const { data, isLoading } = useAPI<BatchesResponse>(
+  const { data, isLoading, mutate } = useAPI<BatchesResponse>(
     `/api/batches?page=${page}&pageSize=10${status === 'all' ? '' : `&status=${status}`}${onlyMine ? '&onlyMine=true' : ''}${search ? `&search=${encodeURIComponent(search)}` : ''}`,
     { withAuth: onlyMine, keepPreviousData: true }
   )
@@ -104,35 +109,31 @@ export default function BatchesPage() {
     }
   }
 
+  const handleCreateBatch = async () => {
+    if (!isAuthenticated()) {
+      router.push('/login')
+      return
+    }
+
+    setIsCreating(true)
+    try {
+      const now = new Date()
+      const defaultName = `修改批次 ${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
+
+      const result = await apiRequest('/api/batches', {
+        method: 'POST',
+        body: { description: defaultName },
+        withAuth: true
+      }) as { batch: { id: string } }
+
+      router.push(`/batch/${result.batch.id}`)
+    } catch (error) {
+      alert(error instanceof Error ? error.message : '创建失败')
+      setIsCreating(false)
+    }
+  }
+
   const filteredBatches = data?.batches || []
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'Draft':
-        return 'default'
-      case 'Submitted':
-        return 'primary'
-      case 'Approved':
-        return 'success'
-      case 'Rejected':
-        return 'danger'
-      case 'Published':
-        return 'secondary'
-      default:
-        return 'default'
-    }
-  }
-
-  const getStatusText = (status: string) => {
-    const map: Record<string, string> = {
-      Draft: '草稿',
-      Submitted: '已提交',
-      Approved: '已通过',
-      Rejected: '已拒绝',
-      Published: '已发布'
-    }
-    return map[status] || status
-  }
 
   if (isLoading) {
     return (
@@ -167,9 +168,9 @@ export default function BatchesPage() {
               )}
             </div>
             <Button
-              as={Link}
-              href="/batch/new"
               color="primary"
+              onPress={handleCreateBatch}
+              isLoading={isCreating}
             >
               新建
             </Button>
@@ -215,13 +216,17 @@ export default function BatchesPage() {
 
               {isAuthenticated() && (
                 <div className="flex items-center gap-2 sm:pl-2 sm:border-l sm:border-default-200">
+                  <span className={`text-small transition-colors ${!onlyMine ? 'text-primary font-medium' : 'text-default-400'}`}>
+                    全部
+                  </span>
                   <Switch
                     isSelected={onlyMine}
                     onValueChange={setOnlyMine}
                     size="sm"
-                  >
-                    <span className="text-small text-default-600">仅我的</span>
-                  </Switch>
+                  />
+                  <span className={`text-small transition-colors ${onlyMine ? 'text-primary font-medium' : 'text-default-400'}`}>
+                    我的
+                  </span>
                 </div>
               )}
             </div>
@@ -229,43 +234,7 @@ export default function BatchesPage() {
 
           <div className="grid gap-4">
             {filteredBatches.map((batch) => (
-              <Card key={batch.id} isPressable as={Link} href={`/batch/${batch.id}`}>
-                <CardHeader className="flex justify-between items-start">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-2">
-                      <h3 className="text-lg font-semibold">
-                        {batch.description || '未命名批次'}
-                      </h3>
-                      <Chip
-                        color={getStatusColor(batch.status)}
-                        size="sm"
-                        variant="flat"
-                      >
-                        {getStatusText(batch.status)}
-                      </Chip>
-                    </div>
-                    <p className="text-small text-default-500">
-                      由 {batch.creator.nickname || batch.creator.name} 创建于{' '}
-                      {new Date(batch.createAt).toLocaleString('zh-CN')}
-                    </p>
-                    {batch.sourceIssue && (
-                      <p className="text-small text-primary mt-1">
-                        关联讨论: #{batch.sourceIssue.id} {batch.sourceIssue.title}
-                      </p>
-                    )}
-                  </div>
-                </CardHeader>
-                <CardBody>
-                  <div className="flex items-center gap-4 text-small text-default-500">
-                    <span>📝 {batch._count.pullRequests} 个修改</span>
-                    {batch.pullRequests.some(pr => pr.conflictInfo?.hasConflict ?? pr.hasConflict) && (
-                      <Chip color="warning" size="sm" variant="flat">
-                        ⚠️ 有冲突
-                      </Chip>
-                    )}
-                  </div>
-                </CardBody>
-              </Card>
+              <BatchCard key={batch.id} batch={batch} refresh={mutate} />
             ))}
 
             {filteredBatches.length === 0 && (
