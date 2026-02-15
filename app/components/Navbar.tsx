@@ -19,11 +19,11 @@ function Navbar() {
   const isAdmin = useAuthStore(state => state.isAdmin)
   const isRootAdmin = useAuthStore(state => state.isRootAdmin)
   const adminChecked = useAuthStore(state => state._adminChecked)
-  const isAuthenticated = useAuthStore(state => state.isAuthenticated)
   const clearAuth = useAuthStore(state => state.clearAuth)
   const setAdminStatus = useAuthStore(state => state.setAdminStatus)
 
-  const isAuthenticatedValue = isAuthenticated()
+  // Check authentication based on user and token directly from store
+  const isAuthenticatedValue = !!user && !!token
 
   // Only check admin status when authenticated and not yet checked
   const shouldCheckAdmin = isAuthenticatedValue && token && !adminChecked
@@ -118,9 +118,13 @@ function Navbar() {
             <ThemeSwitch />
             {isAuthenticatedValue ? (
               <>
-                <span className="text-sm text-default-500">
+                <Button
+                  variant="light"
+                  size="sm"
+                  onPress={() => router.push('/profile')}
+                >
                   {user?.nickname || user?.name}
-                </span>
+                </Button>
                 <Button color="danger" variant="light" size="sm" onPress={handleLogout}>
                   退出登录
                 </Button>

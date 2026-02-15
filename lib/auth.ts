@@ -36,3 +36,15 @@ export async function getSession(): Promise<JWTPayload | null> {
   const token = authHeader.substring(7)
   return await verifyToken(token)
 }
+
+export function validatePassword(password: string): { valid: boolean; error?: string } {
+  if (!password) {
+    return { valid: false, error: '密码不能为空' }
+  }
+  
+  if (password.length < 6) {
+    return { valid: false, error: '密码长度至少为6个字符' }
+  }
+  
+  return { valid: true }
+}

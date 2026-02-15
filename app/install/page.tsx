@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { Button, Card, CardBody, Code, Divider, Listbox, ListboxItem, Progress, Alert } from '@heroui/react'
-import { Folder, File, Apple, Monitor, Check, Download, AlertTriangle, RefreshCw } from 'lucide-react'
+import { Folder, File, Apple, Monitor, Check, Download, RefreshCw } from 'lucide-react'
 import JSZip from 'jszip'
 
 type OSType = 'windows' | 'macos' | 'linux' | 'unknown'
@@ -37,6 +37,7 @@ export default function InstallPage() {
   const [isInstalling, setIsInstalling] = useState(false)
   const [installProgress, setInstallProgress] = useState(0)
   const [installStatus, setInstallStatus] = useState<string>('')
+  const [installSuccess, setInstallSuccess] = useState(false)
 
   useEffect(() => {
     detectOS()
@@ -343,17 +344,18 @@ export default function InstallPage() {
       // Reload directory contents
       await loadDirectoryContents(selectedDirectory)
 
-      setTimeout(() => {
-        setIsInstalling(false)
-        setInstallStatus('')
-        setInstallProgress(0)
-      }, 2000)
+      // Show success message
+      setInstallSuccess(true)
+      setIsInstalling(false)
+      setInstallStatus('')
+      setInstallProgress(0)
     } catch (err) {
       console.error('Installation error:', err)
       setError(err instanceof Error ? err.message : '安装失败')
       setIsInstalling(false)
       setInstallStatus('')
       setInstallProgress(0)
+      setInstallSuccess(false)
     }
   }
 
@@ -391,32 +393,6 @@ export default function InstallPage() {
             </CardBody>
           </Card>
 
-          {/* macOS Warning */}
-          {osType === 'macos' && (
-            <Alert
-              color="warning"
-              title="macOS 系统限制"
-              description={
-                <>
-                  由于浏览器安全限制，<Code size="sm">~/Library</Code> 目录无法通过网页访问。
-                  <strong>请选择其他目录</strong>（如 <Code size="sm">~/Documents/RimeSync</Code>）作为同步目录。
-                </>
-              }
-            />
-          )}
-
-          {/* Installation Warning */}
-          <Alert
-            color="danger"
-            title="重要提示"
-            description={
-              <>
-                点击安装将会<span className="font-semibold underline">覆盖选择目录中的所有同名文件</span>！
-                在执行安装操作前，请务必备份您的 Rime 配置目录，以免丢失个人配置和词库数据。
-              </>
-            }
-          />
-
           {/* Directory Selection Card */}
           <Card>
             <CardBody>
@@ -424,6 +400,34 @@ export default function InstallPage() {
               <p className="text-sm text-default-600 mb-4">
                 选择一个目录，KeyTao 输入法方案将被安装到该目录
               </p>
+
+              {/* macOS Warning */}
+              {osType === 'macos' && (
+                <Alert
+                  color="warning"
+                  title="macOS 系统限制"
+                  description={
+                    <>
+                      由于浏览器安全限制，<Code size="sm">~/Library</Code> 目录无法通过网页访问。
+                      <strong>请选择其他目录</strong>（如 <Code size="sm">~/Documents/RimeSync</Code>）作为同步目录。
+                    </>
+                  }
+                  className="mb-3"
+                />
+              )}
+
+              {/* Installation Warning */}
+              <Alert
+                color="danger"
+                title="重要提示"
+                description={
+                  <>
+                    点击安装将会<span className="font-semibold underline">覆盖选择目录中的所有同名文件</span>！
+                    在执行安装操作前，请务必备份您的 Rime 配置目录，以免丢失个人配置和词库数据。
+                  </>
+                }
+                className="mb-3"
+              />
 
               {releaseInfo && (
                 <Alert
@@ -438,7 +442,6 @@ export default function InstallPage() {
               <div className="flex gap-2 mb-4">
                 <Button
                   color="primary"
-                  size="lg"
                   onPress={selectDirectory}
                   isLoading={isLoading}
                   isDisabled={isLoading || isInstalling}
@@ -449,8 +452,6 @@ export default function InstallPage() {
 
                 {selectedDirectory && releaseInfo && (
                   <Button
-                    color="danger"
-                    size="lg"
                     onPress={downloadAndInstall}
                     isLoading={isInstalling}
                     isDisabled={isLoading || isInstalling}
@@ -465,14 +466,15 @@ export default function InstallPage() {
               {isInstalling && (
                 <Card className="bg-primary-50 border-primary-200 mb-3">
                   <CardBody className="py-2">
-                    <p className="text-xs font-semibold text-primary-800 mb-1.5">{installStatus}</p>
                     <Progress
                       value={installProgress}
                       color="primary"
                       size="sm"
                       className="mb-1"
+                      label={installStatus}
+                      valueLabel={`${Math.round(installProgress)}%`}
+                      showValueLabel
                     />
-                    <p className="text-xs text-primary-600">{Math.round(installProgress)}%</p>
                   </CardBody>
                 </Card>
               )}
@@ -491,7 +493,7 @@ export default function InstallPage() {
                         isIconOnly
                         size="sm"
                         variant="light"
-                        onClick={refreshDirectory}
+                        onPress={refreshDirectory}
                         isLoading={isLoading}
                         isDisabled={isLoading || isInstalling}
                         title="刷新目录内容"
@@ -531,6 +533,20 @@ export default function InstallPage() {
                     </div>
                   </CardBody>
                 </Card>
+              )}
+
+              {installSuccess && (
+                <Alert
+                  color="success"
+                  title="安装完成！"
+                  description={
+                    <div>
+                      <p className="mb-2">KeyTao 输入法方案已成功安装到所选目录。</p>
+                      <p className="font-semibold">请前往输入法中点击&ldquo;重新部署&rdquo;即可使用。</p>
+                    </div>
+                  }
+                  onClose={() => setInstallSuccess(false)}
+                />
               )}
 
               {error && (

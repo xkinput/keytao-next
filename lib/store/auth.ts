@@ -5,6 +5,7 @@ interface User {
   id: number
   name: string
   nickname?: string | null
+  email?: string | null
   roles?: any[]
 }
 
