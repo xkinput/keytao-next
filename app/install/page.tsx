@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Button, Card, CardBody, Code, Divider, Listbox, ListboxItem, Progress, Alert } from '@heroui/react'
+import { Button, Card, CardBody, Code, Divider, Listbox, ListboxItem, Progress, Alert, Link } from '@heroui/react'
 import { Folder, File, Apple, Monitor, Check, Download, RefreshCw } from 'lucide-react'
 import JSZip from 'jszip'
 
@@ -23,6 +23,17 @@ interface ReleaseInfo {
     linux?: string
     android?: string
   }
+}
+
+interface RimeDownloadInfo {
+  name: string
+  description: string
+  url: string
+  installMethod: string
+  command?: string
+  commands?: string[]
+  nixosNote?: string
+  nixosUrl?: string
 }
 
 export default function InstallPage() {
@@ -112,6 +123,42 @@ export default function InstallPage() {
         return 'Linux'
       default:
         return '未知系统'
+    }
+  }
+
+  const getRimeDownloadInfo = (): RimeDownloadInfo | null => {
+    switch (osType) {
+      case 'macos':
+        return {
+          name: '鼠须管（Squirrel）',
+          description: 'macOS 平台的 Rime 输入法',
+          url: 'https://rime.im/download/#macOS',
+          installMethod: 'dmg 安装包或通过 Homebrew 安装',
+          command: 'brew install --cask squirrel'
+        }
+      case 'windows':
+        return {
+          name: '小狼毫（Weasel）',
+          description: 'Windows 平台的 Rime 输入法',
+          url: 'https://rime.im/download/#Windows',
+          installMethod: 'exe 安装包',
+        }
+      case 'linux':
+        return {
+          name: 'iBus-Rime 或 Fcitx-Rime',
+          description: 'Linux 平台的 Rime 输入法',
+          url: 'https://rime.im/download/#Linux',
+          installMethod: '通过包管理器安装',
+          commands: [
+            'sudo apt install ibus-rime  # Ubuntu/Debian',
+            'sudo pacman -S ibus-rime    # Arch Linux',
+            'sudo dnf install ibus-rime  # Fedora'
+          ],
+          nixosNote: '如果您使用 NixOS，可以选择专用的安装方式',
+          nixosUrl: 'https://github.com/xkinput/KeyTao/blob/master/INSTALL_NIXOS.md'
+        }
+      default:
+        return null
     }
   }
 
@@ -393,10 +440,111 @@ export default function InstallPage() {
             </CardBody>
           </Card>
 
+          {/* Rime Installation Guide Card */}
+          {osType !== 'unknown' && (
+            <Card>
+              <CardBody>
+                <div className="flex items-start gap-3 mb-3">
+                  <div className="flex-1">
+                    <h2 className="text-xl font-semibold mb-1">
+                      步骤 1：安装 Rime 输入法
+                    </h2>
+                    <p className="text-sm text-default-600">
+                      在安装 KeyTao 方案前，请确保您已安装对应系统的 Rime 输入法
+                    </p>
+                  </div>
+                </div>
+
+                {(() => {
+                  const rimeInfo = getRimeDownloadInfo()
+                  if (!rimeInfo) return null
+
+                  return (
+                    <div className="space-y-3">
+                      <Alert
+                        color="primary"
+                        title={`为 ${getOSName()} 安装 ${rimeInfo.name}`}
+                        description={rimeInfo.description}
+                      />
+
+                      <div className="bg-default-50 rounded-lg p-4 space-y-3 border border-default-200">
+                        <div>
+                          <p className="text-sm font-semibold mb-2">
+                            📥 下载地址：
+                          </p>
+                          <Link
+                            href={rimeInfo.url}
+                            isExternal
+                            showAnchorIcon
+                            className="font-medium"
+                          >
+                            {rimeInfo.url}
+                          </Link>
+                        </div>
+
+                        <div>
+                          <p className="text-sm font-semibold mb-2">
+                            💿 安装方式：
+                          </p>
+                          <p className="text-sm text-default-600 mb-2">
+                            {rimeInfo.installMethod}
+                          </p>
+
+                          {rimeInfo.command && (
+                            <Code className="w-full" size="sm">
+                              {rimeInfo.command}
+                            </Code>
+                          )}
+
+                          {rimeInfo.commands && (
+                            <div className="space-y-2">
+                              {rimeInfo.commands.map((cmd, idx) => (
+                                <Code key={idx} className="w-full block" size="sm">
+                                  {cmd}
+                                </Code>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        <Alert
+                          color="warning"
+                          description="安装完成后，请重启输入法或重新登录系统，确保输入法正常工作后再继续下一步。"
+                          className="text-xs"
+                        />
+
+                        {rimeInfo.nixosNote && rimeInfo.nixosUrl && (
+                          <Alert
+                            color="primary"
+                            title="🐧 NixOS 用户"
+                            description={
+                              <div>
+                                <p className="mb-1">{rimeInfo.nixosNote}</p>
+                                <Link
+                                  href={rimeInfo.nixosUrl}
+                                  isExternal
+                                  showAnchorIcon
+                                  className="text-sm font-medium"
+                                >
+                                  查看 NixOS 安装文档
+                                </Link>
+                              </div>
+                            }
+                            className="text-xs"
+                          />
+                        )}
+                      </div>
+                    </div>
+                  )
+                })()}
+              </CardBody>
+            </Card>
+          )}
+
           {/* Directory Selection Card */}
           <Card>
             <CardBody>
-              <h2 className="text-xl font-semibold mb-4">选择安装目录</h2>
+              <h2 className="text-xl font-semibold mb-4">步骤 2：安装 KeyTao 方案</h2>
               <p className="text-sm text-default-600 mb-4">
                 选择一个目录，KeyTao 输入法方案将被安装到该目录
               </p>
@@ -562,14 +710,14 @@ export default function InstallPage() {
           {/* Instructions Card */}
           <Card className="bg-primary-50 border-primary-200">
             <CardBody className="py-3">
-              <h2 className="text-lg font-semibold mb-3 text-primary-900">📋 使用说明</h2>
+              <h2 className="text-lg font-semibold mb-3">📋 使用说明</h2>
               <div className="space-y-3 text-xs">
                 <div>
-                  <p className="font-semibold text-primary-800 mb-1.5">安装步骤：</p>
-                  <ol className="list-decimal list-inside space-y-1 text-primary-700 ml-2">
+                  <p className="font-semibold mb-1.5">安装步骤：</p>
+                  <ol className="list-decimal list-inside space-y-1 text-default-600 ml-2">
                     <li>点击 <strong>选择安装目录</strong> 按钮，选择您的 Rime 配置目录
                     </li>
-                    <li><span className="text-danger-600 font-bold">备份您的配置！</span>确保不会丢失个人数据</li>
+                    <li><span className="text-danger font-bold">备份您的配置！</span>确保不会丢失个人数据</li>
                     <li>点击 <strong>立即安装</strong> 按钮，系统将自动下载并解压最新版本</li>
                     <li>等待安装完成后，在 Rime 输入法中点击 <strong>重新部署</strong></li>
                     <li>部署完成后即可使用 KeyTao 输入法方案</li>
@@ -589,8 +737,8 @@ export default function InstallPage() {
                 />
 
                 <div>
-                  <p className="font-semibold text-primary-800 mb-1.5">各平台 Rime 配置目录：</p>
-                  <ul className="list-disc list-inside space-y-0.5 text-primary-700 ml-2">
+                  <p className="font-semibold mb-1.5">各平台 Rime 配置目录：</p>
+                  <ul className="list-disc list-inside space-y-0.5 text-default-600 ml-2">
                     {osType === 'macos' && (
                       <>
                         <li><Code size="sm">~/Library/Rime/</Code> - 鼠须管标准目录（浏览器无法访问）</li>
