@@ -26,7 +26,8 @@ import { apiRequest } from '@/lib/hooks/useSWR'
 import { getPhraseTypeOptions, getDefaultWeight, type PhraseType } from '@/lib/constants/phraseTypes'
 import { CODE_PATTERN } from '@/lib/constants/codeValidation'
 import { useUIStore } from '@/lib/store/ui'
-import { Trash2 } from 'lucide-react'
+import { Trash2, FileText, ChevronUp, ChevronDown, Plus } from 'lucide-react'
+import CodePhrasesPopover from './CodePhrasesPopover'
 
 interface CreatePRModalProps {
   isOpen: boolean
@@ -133,9 +134,17 @@ export default function CreatePRModal({
   const [metaStates, setMetaStates] = useState<Map<string, MetaState>>(new Map())
   const [submitting, setSubmitting] = useState(false)
   const [checkingAll, setCheckingAll] = useState(false)
+  const [showDictParser, setShowDictParser] = useState(false)
+  const [dictInput, setDictInput] = useState('')
 
   // Track if we've initialized the form in this modal session
   const hasInitializedRef = useRef(false)
+
+  // Refs for scrolling to conflict items
+  const cardRefs = useRef<Map<string, HTMLDivElement>>(new Map())
+
+  // Track current issue index for navigation
+  const [currentIssueIndex, setCurrentIssueIndex] = useState<number>(-1)
 
   // Helper functions for meta state management
   const getMeta = (fieldId: string): MetaState => {
@@ -155,7 +164,7 @@ export default function CreatePRModal({
     })
   }
 
-  // Calculate conflict statistics
+  // Calculate conflict and warning statistics
   const conflictStats = useMemo(() => {
     const checkedCount = fields.filter(field => {
       const meta = metaStates.get(field.id)
@@ -163,18 +172,31 @@ export default function CreatePRModal({
     }).length
 
     if (checkedCount === 0) {
-      return { hasChecked: false, conflictCount: 0 }
+      return { hasChecked: false, conflictCount: 0, warningCount: 0 }
     }
 
-    const conflictCount = fields.filter(field => {
-      const meta = metaStates.get(field.id)
-      if (!meta?.hasChecked) return false
-      const isResolved = meta.conflict?.suggestions?.some(sug => sug.action === 'Resolved')
-      return meta.conflict?.hasConflict && !isResolved
-    }).length
+    let conflictCount = 0
+    let warningCount = 0
 
-    return { hasChecked: true, conflictCount }
-  }, [fields, metaStates])
+    fields.forEach((field, index) => {
+      const meta = metaStates.get(field.id)
+      if (!meta?.hasChecked) return
+
+      const isResolved = meta.conflict?.suggestions?.some(sug => sug.action === 'Resolved')
+      const action = watch(`items.${index}.action`)
+
+      // Conflict: has conflict and not resolved
+      if (meta.conflict?.hasConflict && !isResolved) {
+        conflictCount++
+      }
+      // Warning: Create action with existing phrase (重码警告) but not a hard conflict
+      else if (meta.conflict?.currentPhrase && action === 'Create' && !isResolved) {
+        warningCount++
+      }
+    })
+
+    return { hasChecked: true, conflictCount, warningCount }
+  }, [fields, metaStates, watch])
 
   // Reset when modal opens/closes - only initialize once per modal session
   useEffect(() => {
@@ -249,6 +271,64 @@ export default function CreatePRModal({
     }
   }
 
+  // Parse dictionary format
+  const handleParseDictionary = () => {
+    if (!dictInput.trim()) {
+      openAlert('请输入词典内容', '输入为空')
+      return
+    }
+
+    const lines = dictInput.split('\n').filter(line => line.trim())
+    const parsed: FormItem[] = []
+
+    for (const line of lines) {
+      const parts = line.split('\t')
+      if (parts.length < 2) continue
+
+      const word = parts[0].trim()
+      const code = parts[1].trim()
+
+      if (!word || !code) continue
+
+      // Auto-detect type
+      let type: PhraseType = 'Phrase'
+      if (/^[a-zA-Z\s]+$/.test(word)) {
+        // Pure English
+        type = 'English'
+      } else if (word.length === 1) {
+        // Single character
+        type = 'Single'
+      }
+
+      // Get default weight for type
+      const weight = getDefaultWeight(type)
+
+      parsed.push({
+        action: 'Create',
+        word,
+        oldWord: '',
+        code,
+        type,
+        weight: weight.toString(),
+        remark: ''
+      })
+    }
+
+    if (parsed.length === 0) {
+      openAlert('未能解析到有效的词条，请检查格式是否正确（词条[Tab]编码）', '解析失败')
+      return
+    }
+
+    // Append parsed items to existing items
+    parsed.forEach(item => {
+      append(item)
+    })
+
+    setShowDictParser(false)
+    setDictInput('')
+    toast.success(`已追加 ${parsed.length} 个词条`)
+  }
+
   // Check all conflicts
   const handleCheckAllConflicts = async () => {
     const formData = getValues()
@@ -257,6 +337,23 @@ export default function CreatePRModal({
     const isFormValid = await trigger()
     if (!isFormValid) {
       openAlert('请先修正表单错误', '验证失败')
+
+      // Scroll to first error field
+      setTimeout(() => {
+        const firstErrorIndex = fields.findIndex((field, index) => {
+          const fieldState = formState.errors.items?.[index]
+          return fieldState && Object.keys(fieldState).length > 0
+        })
+
+        if (firstErrorIndex !== -1) {
+          const fieldId = fields[firstErrorIndex].id
+          const cardElement = cardRefs.current.get(fieldId)
+          if (cardElement) {
+            cardElement.scrollIntoView({ behavior: 'smooth', block: 'center' })
+          }
+        }
+      }, 100)
+
       return
     }
 
@@ -287,6 +384,23 @@ export default function CreatePRModal({
           checking: false
         })
       })
+
+      // Scroll to first conflict if any
+      setTimeout(() => {
+        const firstConflictIndex = result.results.findIndex(({ conflict }) => {
+          const isResolved = conflict.suggestions?.some(sug => sug.action === 'Resolved')
+          return conflict.hasConflict && !isResolved
+        })
+
+        if (firstConflictIndex !== -1) {
+          setCurrentIssueIndex(firstConflictIndex)
+          const fieldId = fields[firstConflictIndex].id
+          const cardElement = cardRefs.current.get(fieldId)
+          if (cardElement) {
+            cardElement.scrollIntoView({ behavior: 'smooth', block: 'center' })
+          }
+        }
+      }, 100)
     } catch (err) {
       const error = err as Error
       openAlert(error.message || '检测失败', '检测失败')
@@ -468,6 +582,81 @@ export default function CreatePRModal({
     }
   }
 
+  // Navigate to next/previous conflict or warning
+  const navigateToIssue = (direction: 'next' | 'prev') => {
+    const issueIndices: number[] = []
+
+    fields.forEach((field, index) => {
+      const meta = metaStates.get(field.id)
+      if (!meta?.hasChecked) return
+
+      const isResolved = meta.conflict?.suggestions?.some(sug => sug.action === 'Resolved')
+      const action = watch(`items.${index}.action`)
+
+      // Has conflict or warning
+      const hasIssue =
+        (meta.conflict?.hasConflict && !isResolved) ||
+        (meta.conflict?.currentPhrase && action === 'Create' && !isResolved)
+
+      if (hasIssue) {
+        issueIndices.push(index)
+      }
+    })
+
+    if (issueIndices.length === 0) return
+
+    let nextIndex: number
+    if (direction === 'next') {
+      // Find next issue after current
+      const nextIndices = issueIndices.filter(i => i > currentIssueIndex)
+      nextIndex = nextIndices.length > 0 ? nextIndices[0] : issueIndices[0]
+    } else {
+      // Find previous issue before current
+      const prevIndices = issueIndices.filter(i => i < currentIssueIndex)
+      nextIndex = prevIndices.length > 0 ? prevIndices[prevIndices.length - 1] : issueIndices[issueIndices.length - 1]
+    }
+
+    setCurrentIssueIndex(nextIndex)
+
+    // Scroll to the issue
+    const fieldId = fields[nextIndex].id
+    const cardElement = cardRefs.current.get(fieldId)
+    if (cardElement) {
+      cardElement.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }
+  }
+
+  // Calculate current issue position for display
+  const currentIssuePosition = useMemo(() => {
+    if (currentIssueIndex === -1) return null
+
+    const issueIndices: number[] = []
+    fields.forEach((field, index) => {
+      const meta = metaStates.get(field.id)
+      if (!meta?.hasChecked) return
+
+      const isResolved = meta.conflict?.suggestions?.some(sug => sug.action === 'Resolved')
+      const action = watch(`items.${index}.action`)
+
+      const hasIssue =
+        (meta.conflict?.hasConflict && !isResolved) ||
+        (meta.conflict?.currentPhrase && action === 'Create' && !isResolved)
+
+      if (hasIssue) {
+        issueIndices.push(index)
+      }
+    })
+
+    const position = issueIndices.indexOf(currentIssueIndex)
+    if (position === -1) return null
+
+    return {
+      current: position + 1,
+      total: issueIndices.length
+    }
+  }, [currentIssueIndex, fields, metaStates, watch])
+
+
   return (
     <>
       <Modal isOpen={isOpen} onClose={handleClose} size="4xl" scrollBehavior="inside">
@@ -486,7 +675,17 @@ export default function CreatePRModal({
                 {fields.map((field, index) => {
                   const meta = getMeta(field.id)
                   return (
-                    <Card key={field.id} className="min-h-100 shrink-0">
+                    <Card
+                      key={field.id}
+                      className="min-h-100 shrink-0"
+                      ref={(el: HTMLDivElement | null) => {
+                        if (el) {
+                          cardRefs.current.set(field.id, el)
+                        } else {
+                          cardRefs.current.delete(field.id)
+                        }
+                      }}
+                    >
                       <CardHeader className="flex justify-between">
                         <span className="font-semibold">修改 #{index + 1}</span>
                         {!isEditMode && fields.length > 1 && (
@@ -756,9 +955,16 @@ export default function CreatePRModal({
                             <CardBody className="max-h-75 overflow-y-auto">
                               {meta.conflict.hasConflict ? (
                                 <div>
-                                  <Chip color="danger" variant="flat" size="sm" className="mb-2">
-                                    ⚠️ 冲突
-                                  </Chip>
+                                  <div className="flex items-center gap-2 mb-2">
+                                    <Chip color="danger" variant="flat" size="sm">
+                                      ⚠️ 冲突
+                                    </Chip>
+                                    <CodePhrasesPopover code={watch(`items.${index}.code`)}>
+                                      <Button size="sm" variant="light" className="text-xs h-6">
+                                        查看编码
+                                      </Button>
+                                    </CodePhrasesPopover>
+                                  </div>
                                   <p className="text-small mb-2">{meta.conflict.impact}</p>
                                   {meta.conflict.currentPhrase && (
                                     <div className="mb-2 p-2 bg-default-100 rounded text-small">
@@ -810,9 +1016,16 @@ export default function CreatePRModal({
                                   </div>
                                 ) : (
                                   <div>
-                                    <Chip color="warning" variant="flat" size="sm" className="mb-2">
-                                      ⚠️ 重码警告
-                                    </Chip>
+                                    <div className="flex items-center gap-2 mb-2">
+                                      <Chip color="warning" variant="flat" size="sm">
+                                        ⚠️ 重码警告
+                                      </Chip>
+                                      <CodePhrasesPopover code={watch(`items.${index}.code`)}>
+                                        <Button size="sm" variant="light" className="text-xs h-6">
+                                          查看编码
+                                        </Button>
+                                      </CodePhrasesPopover>
+                                    </div>
                                     <p className="text-small mb-2 text-warning-600 dark:text-warning-400">
                                       {meta.conflict.impact || '此编码已存在其他词条，将创建重码'}
                                     </p>
@@ -895,55 +1108,102 @@ export default function CreatePRModal({
                     🔍 检测所有冲突
                   </Button>
                   {conflictStats.hasChecked && (
-                    conflictStats.conflictCount === 0 ? (
-                      <Chip color="success" variant="flat" size="sm">
-                        ✓ 无冲突
-                      </Chip>
-                    ) : (
-                      <Chip color="danger" variant="flat" size="sm">
-                        {conflictStats.conflictCount} 个冲突
-                      </Chip>
-                    )
+                    <>
+                      {conflictStats.warningCount > 0 && (
+                        <Chip color="warning" variant="flat" size="sm">
+                          {conflictStats.warningCount} 个警告
+                        </Chip>
+                      )}
+                      {conflictStats.conflictCount === 0 ? (
+                        <Chip color="success" variant="flat" size="sm">
+                          ✓ 无冲突
+                        </Chip>
+                      ) : (
+                        <Chip color="danger" variant="flat" size="sm">
+                          {conflictStats.conflictCount} 个冲突
+                        </Chip>
+                      )}
+                      {(conflictStats.conflictCount > 0 || conflictStats.warningCount > 0) && (
+                        <div className="flex gap-1 items-center">
+                          <Button
+                            isIconOnly
+                            size="sm"
+                            variant="flat"
+                            onPress={() => navigateToIssue('prev')}
+                            title="上一个问题"
+                          >
+                            <ChevronUp size={16} />
+                          </Button>
+                          {currentIssuePosition && (
+                            <span className="text-xs text-default-500 px-1 min-w-10 text-center">
+                              {currentIssuePosition.current}/{currentIssuePosition.total}
+                            </span>
+                          )}
+                          <Button
+                            isIconOnly
+                            size="sm"
+                            variant="flat"
+                            onPress={() => navigateToIssue('next')}
+                            title="下一个问题"
+                          >
+                            <ChevronDown size={16} />
+                          </Button>
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
-                <div className="flex gap-2 w-full">
+                <div className="flex justify-between gap-2 w-full">
                   {!isEditMode && (
-                    <Button
-                      color="primary"
-                      variant="bordered"
-                      onPress={handleAddItem}
-                    >
-                      + 添加
-                    </Button>
-                  )}
-                  <Button variant="light" onPress={handleClose} className="flex-1">
-                    取消
-                  </Button>
-                  <Tooltip
-                    content="请先检测冲突"
-                    isDisabled={!fields.some((field) => {
-                      const meta = getMeta(field.id)
-                      const isResolved = meta.conflict?.suggestions?.some(sug => sug.action === 'Resolved')
-                      return !meta.hasChecked || (meta.conflict?.hasConflict && !isResolved)
-                    })}
-                    color="warning"
-                  >
-                    <div className="flex-1">
+                    <div className="flex gap-2">
                       <Button
                         color="primary"
-                        onPress={() => onSubmitForm()}
-                        isLoading={submitting}
-                        isDisabled={fields.some((field) => {
-                          const meta = getMeta(field.id)
-                          const isResolved = meta.conflict?.suggestions?.some(sug => sug.action === 'Resolved')
-                          return !meta.hasChecked || (meta.conflict?.hasConflict && !isResolved)
-                        })}
-                        className="w-full"
+                        variant="bordered"
+                        onPress={handleAddItem}
+                        startContent={<Plus size={16} />}
                       >
-                        {isBatchEditMode ? '保存修改' : isEditMode ? '保存' : `批量创建 (${fields.length}个)`}
+                        添加
+                      </Button>
+                      <Button
+                        color="secondary"
+                        variant="bordered"
+                        onPress={() => setShowDictParser(true)}
+                        startContent={<FileText size={16} />}
+                      >
+                        词典解析
                       </Button>
                     </div>
-                  </Tooltip>
+                  )}
+                  <div className="flex gap-2">
+                    <Button variant="light" onPress={handleClose}>
+                      取消
+                    </Button>
+                    <Tooltip
+                      content="请先检测并解决冲突"
+                      isDisabled={!fields.some((field) => {
+                        const meta = getMeta(field.id)
+                        const isResolved = meta.conflict?.suggestions?.some(sug => sug.action === 'Resolved')
+                        return !meta.hasChecked || (meta.conflict?.hasConflict && !isResolved)
+                      })}
+                      color="warning"
+                    >
+                      <div>
+                        <Button
+                          color="primary"
+                          onPress={() => onSubmitForm()}
+                          isLoading={submitting}
+                          isDisabled={fields.some((field) => {
+                            const meta = getMeta(field.id)
+                            const isResolved = meta.conflict?.suggestions?.some(sug => sug.action === 'Resolved')
+                            return !meta.hasChecked || (meta.conflict?.hasConflict && !isResolved)
+                          })}
+                          className="w-full"
+                        >
+                          {isBatchEditMode ? '保存修改' : isEditMode ? '保存' : `批量创建 (${fields.length}个)`}
+                        </Button>
+                      </div>
+                    </Tooltip>
+                  </div>
                 </div>
               </ModalFooter>
             </>
@@ -951,6 +1211,57 @@ export default function CreatePRModal({
         </ModalContent>
       </Modal>
 
+      {/* Dictionary Parser Modal */}
+      <Modal
+        isOpen={showDictParser}
+        onClose={() => {
+          setShowDictParser(false)
+          setDictInput('')
+        }}
+        size="2xl"
+      >
+        <ModalContent>
+          {(onClose) => (
+            <>
+              <ModalHeader>Rime词典解析</ModalHeader>
+              <ModalBody>
+                <div className="space-y-3">
+                  <div>
+                    <p className="text-sm text-default-600 mb-2">
+                      请粘贴Rime词典格式的内容，每行格式：<code className="bg-content2 px-1 rounded">词条[Tab]编码</code>
+                    </p>
+                    <Textarea
+                      placeholder={"示例：\n程序员\tjxyu\nalgorithm\tstfs\n的\td"}
+                      value={dictInput}
+                      onValueChange={setDictInput}
+                      minRows={10}
+                      className="font-mono text-sm"
+                    />
+                  </div>
+                  <div className="bg-default-100 p-3 rounded-lg text-sm space-y-1">
+                    <p className="font-semibold text-default-700">自动识别规则：</p>
+                    <p className="text-default-600">• <span className="font-medium">纯英文</span> → 英文类型</p>
+                    <p className="text-default-600">• <span className="font-medium">单个字符</span> → 单字类型</p>
+                    <p className="text-default-600">• <span className="font-medium">其他</span> → 词组类型</p>
+                  </div>
+                </div>
+              </ModalBody>
+              <ModalFooter>
+                <Button variant="light" onPress={onClose}>
+                  取消
+                </Button>
+                <Button
+                  color="primary"
+                  onPress={handleParseDictionary}
+                  isDisabled={!dictInput.trim()}
+                >
+                  解析并导入
+                </Button>
+              </ModalFooter>
+            </>
+          )}
+        </ModalContent>
+      </Modal>
     </>
   )
 }

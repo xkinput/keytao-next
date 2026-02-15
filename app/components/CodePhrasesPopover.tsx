@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   Popover,
   PopoverTrigger,
@@ -12,8 +12,11 @@ import {
   TableRow,
   TableCell,
   Chip,
-  Spinner
+  Spinner,
+  Input,
+  Button
 } from '@heroui/react'
+import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { getPhraseTypeLabel, type PhraseType } from '@/lib/constants/phraseTypes'
 
 interface Phrase {
@@ -43,33 +46,76 @@ export default function CodePhrasesPopover({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [isOpen, setIsOpen] = useState(false)
+  const [searchCode, setSearchCode] = useState('')
+  const [page, setPage] = useState(1)
+  const [pagination, setPagination] = useState({
+    total: 0,
+    totalPages: 0,
+    pageSize: 6
+  })
+  const lastCodeRef = useRef<string | null>(null)
 
-  const fetchPhrases = useCallback(async () => {
-    if (!code) return
+  const fetchPhrases = useCallback(async (codeToSearch: string, pageNum: number) => {
+    if (!codeToSearch) return
 
     setLoading(true)
     setError(null)
 
     try {
-      const response = await fetch(`/api/phrases/by-code?code=${encodeURIComponent(code)}`)
+      const response = await fetch(`/api/phrases/by-code?code=${encodeURIComponent(codeToSearch)}&page=${pageNum}`)
       if (!response.ok) {
         throw new Error('查询失败')
       }
 
       const data = await response.json()
       setPhrases(data.phrases || [])
+      setPagination({
+        total: data.pagination.total,
+        totalPages: data.pagination.totalPages,
+        pageSize: data.pagination.pageSize
+      })
     } catch (err) {
       setError(err instanceof Error ? err.message : '查询失败')
     } finally {
       setLoading(false)
     }
-  }, [code])
+  }, [])
 
   useEffect(() => {
     if (isOpen && code) {
-      fetchPhrases()
+      setSearchCode(code)
+      setPage(1)
+      fetchPhrases(code, 1)
+      lastCodeRef.current = code
     }
   }, [isOpen, code, fetchPhrases])
+
+  // Auto-search with debounce (skip if same as lastCodeRef)
+  useEffect(() => {
+    if (!searchCode || searchCode === lastCodeRef.current) return
+
+    const timer = setTimeout(() => {
+      setPage(1)
+      fetchPhrases(searchCode, 1)
+      lastCodeRef.current = searchCode
+    }, 500)
+
+    return () => clearTimeout(timer)
+  }, [searchCode, fetchPhrases])
+
+  const handleSearch = () => {
+    if (searchCode) {
+      setPage(1)
+      fetchPhrases(searchCode, 1)
+    }
+  }
+
+  const handlePageChange = (newPage: number) => {
+    if (newPage >= 1 && newPage <= pagination.totalPages) {
+      setPage(newPage)
+      fetchPhrases(searchCode, newPage)
+    }
+  }
 
   return (
     <Popover
@@ -83,6 +129,20 @@ export default function CodePhrasesPopover({
       </PopoverTrigger>
       <PopoverContent className="w-125">
         <div className="px-1 py-2 w-full">
+          <div className="mb-3">
+            <Input
+              size="sm"
+              value={searchCode}
+              onValueChange={setSearchCode}
+              placeholder="输入编码查询"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  handleSearch()
+                }
+              }}
+            />
+          </div>
+
           {loading && (
             <div className="flex justify-center py-4">
               <Spinner size="sm" />
@@ -101,9 +161,36 @@ export default function CodePhrasesPopover({
 
           {!loading && !error && phrases.length > 0 && (
             <div>
-              <p className="text-tiny text-default-400 mb-2">
-                共 {phrases.length} 个词条
-              </p>
+              <div className="flex justify-between items-center mb-2">
+                <p className="text-tiny text-default-400">
+                  共 {pagination.total} 个词条
+                </p>
+                {pagination.totalPages > 1 && (
+                  <div className="flex items-center gap-2">
+                    <Button
+                      size="sm"
+                      variant="flat"
+                      isIconOnly
+                      isDisabled={page === 1}
+                      onPress={() => handlePageChange(page - 1)}
+                    >
+                      <ChevronLeft size={14} />
+                    </Button>
+                    <span className="text-tiny text-default-600">
+                      {page} / {pagination.totalPages}
+                    </span>
+                    <Button
+                      size="sm"
+                      variant="flat"
+                      isIconOnly
+                      isDisabled={page === pagination.totalPages}
+                      onPress={() => handlePageChange(page + 1)}
+                    >
+                      <ChevronRight size={14} />
+                    </Button>
+                  </div>
+                )}
+              </div>
               <Table
                 aria-label="编码词条列表"
                 removeWrapper
@@ -111,6 +198,7 @@ export default function CodePhrasesPopover({
               >
                 <TableHeader>
                   <TableColumn>词条</TableColumn>
+                  <TableColumn>编码</TableColumn>
                   <TableColumn>权重</TableColumn>
                   <TableColumn>类型</TableColumn>
                 </TableHeader>
@@ -126,6 +214,9 @@ export default function CodePhrasesPopover({
                             </p>
                           )}
                         </div>
+                      </TableCell>
+                      <TableCell>
+                        <span className="text-small text-default-600 font-mono">{phrase.code}</span>
                       </TableCell>
                       <TableCell>
                         <span className="text-small text-default-600">{phrase.weight}</span>
