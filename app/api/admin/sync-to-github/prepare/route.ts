@@ -138,6 +138,8 @@ export async function POST() {
 
     // Generate sync summary
     const summary = generateSyncSummary(allPullRequests, batches);
+    console.log(`[Prepare] Generated summary length: ${summary.length}`);
+    console.log(`[Prepare] Summary preview:\n${summary.slice(0, 300)}`);
 
     // Create task
     const task = await prisma.syncTask.create({

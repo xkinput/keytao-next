@@ -259,6 +259,10 @@ export class GithubSyncService {
     title: string,
     body: string
   ): Promise<CreatePRResult> {
+    console.log(`[GitHub] Creating PR with title: ${title}`);
+    console.log(`[GitHub] PR body length: ${body?.length || 0}`);
+    console.log(`[GitHub] PR body preview: ${body?.slice(0, 200) || '(empty)'}`);
+
     const { data } = await this.octokit.pulls.create({
       owner: this.owner,
       repo: this.repo,

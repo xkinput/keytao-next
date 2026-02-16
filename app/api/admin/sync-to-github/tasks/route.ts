@@ -1,9 +1,8 @@
 /**
  * GET /api/admin/sync-to-github/tasks
- * List all sync tasks (accessible to all authenticated users)
+ * List all sync tasks (publicly accessible, no authentication required)
  */
 
-import { getSession } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import { NextRequest, NextResponse } from 'next/server';
 
@@ -11,14 +10,7 @@ export const runtime = 'nodejs';
 
 export async function GET(request: NextRequest) {
   try {
-    // Verify user is logged in (admin check removed - all users can view tasks)
-    const session = await getSession();
-    if (!session) {
-      return NextResponse.json(
-        { success: false, error: '未授权' },
-        { status: 401 }
-      );
-    }
+    // No authentication required - allow public access to view sync history
 
     // Get query parameters
     const { searchParams } = new URL(request.url);

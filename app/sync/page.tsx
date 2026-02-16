@@ -74,23 +74,23 @@ export default function SyncPage() {
   const [cancellingTaskId, setCancellingTaskId] = useState<string | null>(null)
 
   // Check if user is admin
-  const { data: adminCheck } = useAPI(
-    token ? '/api/admin/stats' : null
-  )
+  const { data: adminCheck } = useAPI('/api/admin/stats')
   const isAdmin = !!adminCheck
 
-  // Get sync tasks with pagination
+  // Get sync tasks with pagination (public access, no auth required)
   const {
     data: tasksData,
+    error: tasksError,
     isLoading,
     mutate,
   } = useAPI<TasksResponse>(
-    token ? `/api/admin/sync-to-github/tasks?page=${currentPage}&pageSize=10` : null
+    `/api/admin/sync-to-github/tasks?page=${currentPage}&pageSize=10`,
+    { withAuth: false }
   )
 
   // Get stats including pending sync batches count
   const { data: statsData, mutate: mutateStats } = useAPI<StatsResponse>(
-    token ? '/api/admin/stats' : null
+    '/api/admin/stats'
   )
 
   // Get running task (if any)
@@ -326,6 +326,17 @@ export default function SyncPage() {
                     ))}
                   </TableBody>
                 </Table>
+              ) : tasksError ? (
+                <div className="text-center py-12">
+                  <p className="text-danger mb-4">加载失败</p>
+                  <Button
+                    color="primary"
+                    variant="flat"
+                    onPress={() => mutate()}
+                  >
+                    重试
+                  </Button>
+                </div>
               ) : tasksData && tasksData.tasks && tasksData.tasks.length > 0 ? (
                 <Table aria-label="同步任务历史">
                   <TableHeader>

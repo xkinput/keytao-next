@@ -29,6 +29,8 @@ export async function POST(request: NextRequest) {
     const { taskId, summary } = body;
 
     console.log(`[Finalize] Creating PR for task ${taskId}`);
+    console.log(`[Finalize] Summary length: ${summary?.length || 0}`);
+    console.log(`[Finalize] Summary preview: ${summary?.slice(0, 200) || '(empty)'}`);
 
     // Check if task exists
     const task = await prisma.syncTask.findUnique({

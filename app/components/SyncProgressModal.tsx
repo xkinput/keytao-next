@@ -85,6 +85,7 @@ export function SyncProgressModal({
       setTaskId(result.taskId)
       setFiles(result.files)
       setSummary(result.summary)
+      console.log('[Modal] Received summary:', result.summary?.slice(0, 200))
       setTotalCount(result.totalFiles)
       setStatus('processing')
 
@@ -170,6 +171,8 @@ export function SyncProgressModal({
     try {
       setStatus('finalizing')
       setError(null)
+
+      console.log('[Modal] Calling finalize with summary:', summary?.slice(0, 200))
 
       const response = await fetch('/api/admin/sync-to-github/finalize', {
         method: 'POST',

@@ -164,6 +164,8 @@ export async function POST(
 
     // Generate sync summary
     const summary = generateSyncSummary(allPullRequests, task.batches);
+    console.log(`[Retry] Generated summary length: ${summary.length}`);
+    console.log(`[Retry] Summary preview:\n${summary.slice(0, 300)}`);
 
     // Reset task to Pending state
     await prisma.syncTask.update({
