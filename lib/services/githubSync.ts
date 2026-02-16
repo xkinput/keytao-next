@@ -158,6 +158,31 @@ export class GithubSyncService {
   }
 
   /**
+   * Get file content from repository
+   */
+  async getFileContent(branch: string, path: string): Promise<string | null> {
+    try {
+      const { data } = await this.octokit.repos.getContent({
+        owner: this.owner,
+        repo: this.repo,
+        path,
+        ref: branch,
+      });
+
+      if ('content' in data && data.content) {
+        // GitHub API returns base64 encoded content
+        return Buffer.from(data.content, 'base64').toString('utf-8');
+      }
+      return null;
+    } catch (error: any) {
+      if (error.status === 404) {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  /**
    * Commit files to branch
    */
   async commitFiles(

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import {
   Modal,
   ModalContent,
@@ -47,12 +47,14 @@ export function SyncProgressModal({
   const [prUrl, setPrUrl] = useState<string | null>(null)
   const [isProcessing, setIsProcessing] = useState(false)
   const [autoMode, setAutoMode] = useState(true)
+  const [hasStarted, setHasStarted] = useState(false) // Track if preparation has started
 
   const progress = totalCount > 0 ? Math.floor((processedCount / totalCount) * 100) : 0
 
   // Prepare sync task (or retry existing task)
   const prepare = async () => {
     try {
+      setHasStarted(true)
       setStatus('preparing')
       setError(null)
 
@@ -189,7 +191,7 @@ export function SyncProgressModal({
         return
       }
     }
-    // Reset state
+    // Reset all state
     setStatus('preparing')
     setTaskId('')
     setFiles([])
@@ -200,6 +202,7 @@ export function SyncProgressModal({
     setError(null)
     setPrUrl(null)
     setIsProcessing(false)
+    setHasStarted(false) // Reset started flag
     onClose()
   }
 
@@ -209,11 +212,12 @@ export function SyncProgressModal({
     processNextBatch()
   }
 
-  // Auto start preparation when modal opens
-  // Reset state when modal opens for a new/different task
-  if (isOpen && status === 'preparing' && !taskId) {
-    prepare()
-  }
+  // Use useEffect to trigger preparation when modal opens
+  useEffect(() => {
+    if (isOpen && !hasStarted) {
+      prepare()
+    }
+  }, [isOpen, retryTaskId]) // Trigger when modal opens or retry task changes
 
   return (
     <Modal

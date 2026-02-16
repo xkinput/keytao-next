@@ -1,9 +1,9 @@
 /**
  * GET /api/admin/sync-to-github/tasks
- * List all sync tasks
+ * List all sync tasks (accessible to all authenticated users)
  */
 
-import { checkAdminPermission } from '@/lib/adminAuth';
+import { getSession } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import { NextRequest, NextResponse } from 'next/server';
 
@@ -11,10 +11,13 @@ export const runtime = 'nodejs';
 
 export async function GET(request: NextRequest) {
   try {
-    // Verify admin permission
-    const authResult = await checkAdminPermission();
-    if (!authResult.authorized) {
-      return authResult.response;
+    // Verify user is logged in (admin check removed - all users can view tasks)
+    const session = await getSession();
+    if (!session) {
+      return NextResponse.json(
+        { success: false, error: '未授权' },
+        { status: 401 }
+      );
     }
 
     // Get query parameters

@@ -6,7 +6,15 @@
 
 import { checkAdminPermission } from '@/lib/adminAuth';
 import { prisma } from '@/lib/prisma';
-import { convertToRimeDicts, generateSyncSummary } from '@/lib/services/rimeConverter';
+import {
+  convertToRimeDicts,
+  generateSyncSummary,
+  parseRimeYaml,
+  mergeRimeEntries,
+  generateRimeYaml,
+  RimeDict
+} from '@/lib/services/rimeConverter';
+import { createGithubSyncService } from '@/lib/services/githubSync';
 import { SyncTaskStatus } from '@prisma/client';
 import { NextRequest, NextResponse } from 'next/server';
 
@@ -89,9 +97,70 @@ export async function POST(
 
     console.log(`[Retry] Resetting task ${taskId}...`);
 
-    // Convert to Rime format
-    const dictFiles = convertToRimeDicts(allPullRequests);
-    const fileNames = Array.from(dictFiles.keys());
+    // Convert new pull requests to Rime format (incremental changes)
+    const newDictFiles = convertToRimeDicts(allPullRequests);
+
+    // Fetch existing files from GitHub and merge
+    console.log('[Retry] Fetching existing files from GitHub...');
+    const githubService = createGithubSyncService();
+    const baseBranch = process.env.GITHUB_BASE_BRANCH || 'master';
+    const mergedDictFiles = new Map<string, string>();
+
+    for (const [fileName, newContent] of newDictFiles.entries()) {
+      const filePath = `rime/${fileName}`;
+
+      try {
+        // Try to get existing file from GitHub
+        const existingContent = await githubService.getFileContent(baseBranch, filePath);
+
+        if (existingContent) {
+          console.log(`[Retry] Merging with existing file: ${fileName}`);
+
+          // Parse existing and new entries
+          const existingEntries = parseRimeYaml(existingContent);
+          const newEntries = parseRimeYaml(newContent);
+
+          // Merge entries
+          const mergedEntries = mergeRimeEntries(existingEntries, newEntries);
+
+          // Extract dict metadata from new content
+          const lines = newContent.split('\n');
+          let dictName = fileName.replace('.dict.yaml', '');
+          let dictVersion = new Date().toISOString().split('T')[0].replace(/-/g, '.');
+
+          for (const line of lines) {
+            if (line.startsWith('name:')) {
+              dictName = line.split(':')[1].trim();
+            } else if (line.startsWith('version:')) {
+              dictVersion = line.split(':')[1].trim().replace(/"/g, '');
+            }
+          }
+
+          // Generate merged YAML
+          const mergedDict: RimeDict = {
+            name: dictName,
+            version: dictVersion,
+            sort: 'by_weight',
+            entries: mergedEntries,
+          };
+
+          const mergedContent = generateRimeYaml(mergedDict);
+          mergedDictFiles.set(fileName, mergedContent);
+
+          console.log(`[Retry] Merged ${fileName}: ${existingEntries.length} existing + ${newEntries.length} new = ${mergedEntries.length} total entries`);
+        } else {
+          // File doesn't exist on GitHub, use new content as-is
+          console.log(`[Retry] New file: ${fileName}`);
+          mergedDictFiles.set(fileName, newContent);
+        }
+      } catch (error) {
+        console.error(`[Retry] Error processing ${fileName}:`, error);
+        // Fallback to new content if merge fails
+        mergedDictFiles.set(fileName, newContent);
+      }
+    }
+
+    const fileNames = Array.from(mergedDictFiles.keys());
 
     // Generate sync summary
     const summary = generateSyncSummary(allPullRequests, task.batches);
@@ -120,7 +189,7 @@ export async function POST(
     // Prepare file data for frontend
     const files = fileNames.map((fileName) => ({
       name: fileName,
-      content: dictFiles.get(fileName)!,
+      content: mergedDictFiles.get(fileName)!,
     }));
 
     return NextResponse.json({

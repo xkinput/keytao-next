@@ -283,6 +283,77 @@ export function convertPhrasesToRimeDicts(
 }
 
 /**
+ * Parse Rime YAML content to extract entries
+ */
+export function parseRimeYaml(content: string): RimeEntry[] {
+  const entries: RimeEntry[] = [];
+  const lines = content.split('\n');
+
+  let inDataSection = false;
+
+  for (const line of lines) {
+    // Skip until we find the ... marker (end of header)
+    if (line.trim() === '...') {
+      inDataSection = true;
+      continue;
+    }
+
+    if (!inDataSection) continue;
+
+    // Skip empty lines and comments
+    if (!line.trim() || line.trim().startsWith('#')) continue;
+
+    // Parse entry line (format: word\tcode\tweight or word\tcode)
+    const parts = line.split('\t').map(p => p.trim());
+
+    if (parts.length >= 2) {
+      const entry: RimeEntry = {
+        word: parts[0],
+        code: parts[1],
+      };
+
+      if (parts.length >= 3 && parts[2]) {
+        const weight = parseInt(parts[2], 10);
+        if (!isNaN(weight)) {
+          entry.weight = weight;
+        }
+      }
+
+      entries.push(entry);
+    }
+  }
+
+  return entries;
+}
+
+/**
+ * Merge new entries with existing entries
+ * - Remove duplicates (same word + code)
+ * - Keep the newer entry (from newEntries) if duplicate
+ */
+export function mergeRimeEntries(
+  existingEntries: RimeEntry[],
+  newEntries: RimeEntry[]
+): RimeEntry[] {
+  // Create a map keyed by word+code for deduplication
+  const entryMap = new Map<string, RimeEntry>();
+
+  // First, add all existing entries
+  for (const entry of existingEntries) {
+    const key = `${entry.word}\t${entry.code}`;
+    entryMap.set(key, entry);
+  }
+
+  // Then, add/overwrite with new entries
+  for (const entry of newEntries) {
+    const key = `${entry.word}\t${entry.code}`;
+    entryMap.set(key, entry);
+  }
+
+  return Array.from(entryMap.values());
+}
+
+/**
  * Generate sync summary for PR description
  */
 export function generateSyncSummary(
