@@ -269,8 +269,12 @@ export async function checkBatchConflictsWithWeight(
     if (item.action === 'Create' && item.type) {
       calculatedWeight = await calculateDynamicWeight(item, items, i)
 
-      // Only override impact if there's NO conflict (重码 is allowed)
-      if (conflict.currentPhrase && !conflict.hasConflict) {
+      // Only override impact if there's NO conflict and it's a duplicate code warning
+      if (
+        conflict.currentPhrase &&
+        !conflict.hasConflict &&
+        conflict.currentPhrase.code === item.code
+      ) {
         conflict.impact = `编码 "${item.code}" 已被词条 "${conflict.currentPhrase.word}" 占用，将创建重码（建议权重: ${calculatedWeight}）`
       }
     }

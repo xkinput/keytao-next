@@ -186,19 +186,36 @@ export class ConflictDetector {
     }
 
     // Second: Check if code exists with different word (重码)
-    const existing = await prisma.phrase.findFirst({
-      where: {
-        code: change.code,
-        NOT: change.phraseId ? { id: change.phraseId } : undefined
-      },
-      include: {
-        user: {
-          select: { id: true, name: true }
+    // Third: Check if word exists with different code (多编码词)
+    const [existingCode, existingWord] = await Promise.all([
+      prisma.phrase.findFirst({
+        where: {
+          code: change.code,
+          NOT: change.phraseId ? { id: change.phraseId } : undefined
+        },
+        include: {
+          user: {
+            select: { id: true, name: true }
+          }
         }
-      }
-    })
+      }),
+      prisma.phrase.findFirst({
+        where: {
+          word: change.word,
+          code: { not: change.code },
+          NOT: change.phraseId ? { id: change.phraseId } : undefined
+        },
+        select: {
+          id: true,
+          word: true,
+          code: true,
+          weight: true,
+          userId: true
+        }
+      })
+    ])
 
-    if (!existing) {
+    if (!existingCode && !existingWord) {
       return {
         hasConflict: false,
         code: change.code,
@@ -206,22 +223,42 @@ export class ConflictDetector {
       }
     }
 
-    // Code exists with different word - this creates a duplicate code (重码)
-    // Allow creation but provide warning via currentPhrase
-    const suggestions = await this.generateSuggestions(change, existing)
+    if (existingCode) {
+      // Code exists with different word - this creates a duplicate code (重码)
+      // Allow creation but provide warning via currentPhrase
+      const suggestions = await this.generateSuggestions(change, existingCode)
+      const extraWarning = existingWord
+        ? `；词条 "${change.word}" 已存在于编码 "${existingWord.code}"`
+        : ''
 
+      return {
+        hasConflict: false, // Allow creation, let user confirm
+        code: change.code,
+        currentPhrase: {
+          id: existingCode.id,
+          word: existingCode.word,
+          code: existingCode.code,
+          weight: existingCode.weight,
+          userId: existingCode.userId
+        },
+        impact: `编码 "${change.code}" 已被词条 "${existingCode.word}" 占用，将创建重码${extraWarning}`,
+        suggestions
+      }
+    }
+
+    // Word exists with different code - warn but allow
     return {
-      hasConflict: false, // Allow creation, let user confirm
+      hasConflict: false,
       code: change.code,
       currentPhrase: {
-        id: existing.id,
-        word: existing.word,
-        code: existing.code,
-        weight: existing.weight,
-        userId: existing.userId
+        id: existingWord!.id,
+        word: existingWord!.word,
+        code: existingWord!.code,
+        weight: existingWord!.weight,
+        userId: existingWord!.userId
       },
-      impact: `编码 "${change.code}" 已被词条 "${existing.word}" 占用，将创建重码`,
-      suggestions
+      impact: `词条 "${change.word}" 已存在于编码 "${existingWord!.code}"，将创建多编码词条`,
+      suggestions: []
     }
   }
 

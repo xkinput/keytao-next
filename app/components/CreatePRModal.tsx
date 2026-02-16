@@ -28,6 +28,7 @@ import { CODE_PATTERN } from '@/lib/constants/codeValidation'
 import { useUIStore } from '@/lib/store/ui'
 import { Trash2, FileText, ChevronUp, ChevronDown, Plus, Edit2, AlertTriangle, Eye, Check, Lightbulb, Search } from 'lucide-react'
 import CodePhrasesPopover from './CodePhrasesPopover'
+import WordCodesPopover from './WordCodesPopover'
 
 interface CreatePRModalProps {
   isOpen: boolean
@@ -396,7 +397,8 @@ export default function CreatePRModal({
       }, 100)
     } catch (err) {
       const error = err as Error
-      openAlert(error.message || '检测失败', '检测失败')
+      const message = error.message ? `${error.message}\n请重试` : '检测失败，请重试'
+      openAlert(message, '检测失败')
     } finally {
       setCheckingAll(false)
     }
@@ -429,19 +431,33 @@ export default function CreatePRModal({
       // Skip if conflict is resolved by batch
       const isResolved = meta.conflict?.suggestions?.some((sug) => sug.action === 'Resolved')
 
-      // Check for duplicate code (重码) in Create action
+      // Check for Create action warnings
       if (item.action === 'Create' && meta.conflict?.currentPhrase && !isResolved) {
-        // Extract suggested weight from impact message
-        const match = meta.conflict.impact?.match(/权重: (\d+)/);
-        const actualWeight = match ? match[1] : (meta.conflict.currentPhrase.weight + 1).toString();
+        const isWordDuplicate =
+          meta.conflict.currentPhrase.word === item.word &&
+          meta.conflict.currentPhrase.code !== item.code
 
-        itemsNeedingConfirmation.push(
-          `▶ 项目 #${i + 1} - 创建重码警告:\n` +
-          `   编码: ${item.code}\n` +
-          `   现有词条: ${meta.conflict.currentPhrase.word} (权重: ${meta.conflict.currentPhrase.weight})\n` +
-          `   新增词条: ${item.word} (权重: ${actualWeight})\n` +
-          `   ! 这将创建重码（同一编码对应多个词条）！`
-        )
+        if (isWordDuplicate) {
+          itemsNeedingConfirmation.push(
+            `▶ 项目 #${i + 1} - 词条重复警告:\n` +
+            `   词条: ${item.word}\n` +
+            `   已存在编码: ${meta.conflict.currentPhrase.code}\n` +
+            `   新增编码: ${item.code}\n` +
+            `   ! 同一词条将拥有多个编码！`
+          )
+        } else {
+          // Extract suggested weight from impact message
+          const match = meta.conflict.impact?.match(/权重: (\d+)/)
+          const actualWeight = match ? match[1] : (meta.conflict.currentPhrase.weight + 1).toString()
+
+          itemsNeedingConfirmation.push(
+            `▶ 项目 #${i + 1} - 创建重码警告:\n` +
+            `   编码: ${item.code}\n` +
+            `   现有词条: ${meta.conflict.currentPhrase.word} (权重: ${meta.conflict.currentPhrase.weight})\n` +
+            `   新增词条: ${item.word} (权重: ${actualWeight})\n` +
+            `   ! 这将创建重码（同一编码对应多个词条）！`
+          )
+        }
       }
 
       // Check for Change action - warn about removal
@@ -789,6 +805,20 @@ export default function CreatePRModal({
                                               oldWordField.onChange(v)
                                               updateMeta(field.id, { hasChecked: false, conflict: null })
                                             }}
+                                            endContent={
+                                              oldWordField.value && (
+                                                <WordCodesPopover word={oldWordField.value}>
+                                                  <Button
+                                                    size="sm"
+                                                    variant="light"
+                                                    isIconOnly
+                                                    className="min-w-unit-6 w-6 h-6"
+                                                  >
+                                                    <Eye className="w-4 h-4" />
+                                                  </Button>
+                                                </WordCodesPopover>
+                                              )
+                                            }
                                           />
                                         )}
                                       />
@@ -850,6 +880,20 @@ export default function CreatePRModal({
                                             wordField.onChange(v)
                                             updateMeta(field.id, { hasChecked: false, conflict: null })
                                           }}
+                                          endContent={
+                                            wordField.value && (
+                                              <WordCodesPopover word={wordField.value}>
+                                                <Button
+                                                  size="sm"
+                                                  variant="light"
+                                                  isIconOnly
+                                                  className="min-w-unit-6 w-6 h-6"
+                                                >
+                                                  <Eye className="w-4 h-4" />
+                                                </Button>
+                                              </WordCodesPopover>
+                                            )
+                                          }
                                         />
                                       )}
                                     />
@@ -873,6 +917,20 @@ export default function CreatePRModal({
                                             wordField.onChange(v)
                                             updateMeta(field.id, { hasChecked: false, conflict: null })
                                           }}
+                                          endContent={
+                                            wordField.value && (
+                                              <WordCodesPopover word={wordField.value}>
+                                                <Button
+                                                  size="sm"
+                                                  variant="light"
+                                                  isIconOnly
+                                                  className="min-w-unit-6 w-6 h-6"
+                                                >
+                                                  <Eye className="w-4 h-4" />
+                                                </Button>
+                                              </WordCodesPopover>
+                                            )
+                                          }
                                         />
                                       )}
                                     />
@@ -1091,48 +1149,62 @@ export default function CreatePRModal({
                                     )}
                                   </div>
                                 ) : (
-                                  <div>
-                                    <div className="flex items-center gap-2 mb-2">
-                                      <Chip color="warning" variant="flat" size="sm" startContent={<AlertTriangle className="w-3 h-3" />}>
-                                        重码警告
-                                      </Chip>
-                                      <p className="text-small text-warning-600 dark:text-warning-400">
-                                        {meta.conflict.impact || '此编码已存在其他词条，将创建重码'}
-                                      </p>
-                                    </div>
-                                    <div className="mb-2 p-2 bg-warning-50 dark:bg-warning-100/10 rounded text-small">
-                                      <p className="font-medium text-warning-700 dark:text-warning-400">现有词条:</p>
-                                      <p>{meta.conflict.currentPhrase!.word} @ {meta.conflict.currentPhrase!.code} (权重: {meta.conflict.currentPhrase!.weight})</p>
-                                    </div>
-                                    <div className="p-2 bg-warning-50 dark:bg-warning-100/10 rounded text-small">
-                                      <p className="font-medium text-warning-700 dark:text-warning-400">即将创建:</p>
-                                      <p>{watch(`items.${index}.word`)} @ {watch(`items.${index}.code`)} (权重: {(() => {
-                                        // Extract suggested weight from impact message
-                                        const match = meta.conflict.impact?.match(/权重: (\d+)/);
-                                        if (match) return match[1];
-                                        // Fallback: calculate based on current phrase weight
-                                        return meta.conflict.currentPhrase!.weight + 1;
-                                      })()})</p>
-                                    </div>
-                                    {meta.conflict.suggestions.length > 0 && (
-                                      <div className="mt-2 space-y-1">
-                                        <p className="text-small font-medium">建议:</p>
-                                        {meta.conflict.suggestions.map((sug, idx) => (
-                                          <div key={idx} className="p-2 bg-primary-50 dark:bg-primary-100/10 rounded text-small flex justify-between items-start">
-                                            <div className="flex-1">
-                                              <p className="text-default-600 dark:text-default-400">{sug.reason}</p>
-                                              {sug.toCode && <p className="text-primary">建议编码: {sug.toCode}</p>}
-                                            </div>
-                                            {sug.toCode && sug.action === 'Adjust' && (
-                                              <Button size="sm" variant="flat" color="primary" onPress={() => applySuggestion(index, sug)}>
-                                                应用
-                                              </Button>
-                                            )}
+                                  (() => {
+                                    const currentWord = watch(`items.${index}.word`)
+                                    const currentCode = watch(`items.${index}.code`)
+                                    const isWordDuplicate =
+                                      meta.conflict.currentPhrase!.word === currentWord &&
+                                      meta.conflict.currentPhrase!.code !== currentCode
+
+                                    return (
+                                      <div>
+                                        <div className="flex items-center gap-2 mb-2">
+                                          <Chip color="warning" variant="flat" size="sm" startContent={<AlertTriangle className="w-3 h-3" />}>
+                                            {isWordDuplicate ? '词条重复警告' : '重码警告'}
+                                          </Chip>
+                                          <p className="text-small text-warning-600 dark:text-warning-400">
+                                            {meta.conflict.impact || (isWordDuplicate ? '该词条已存在其他编码，将创建多编码词条' : '此编码已存在其他词条，将创建重码')}
+                                          </p>
+                                        </div>
+                                        <div className="mb-2 p-2 bg-warning-50 dark:bg-warning-100/10 rounded text-small">
+                                          <p className="font-medium text-warning-700 dark:text-warning-400">现有词条:</p>
+                                          <p>{meta.conflict.currentPhrase!.word} @ {meta.conflict.currentPhrase!.code} (权重: {meta.conflict.currentPhrase!.weight})</p>
+                                        </div>
+                                        <div className="p-2 bg-warning-50 dark:bg-warning-100/10 rounded text-small">
+                                          <p className="font-medium text-warning-700 dark:text-warning-400">即将创建:</p>
+                                          {isWordDuplicate ? (
+                                            <p>{currentWord} @ {currentCode}</p>
+                                          ) : (
+                                            <p>{currentWord} @ {currentCode} (权重: {(() => {
+                                              // Extract suggested weight from impact message
+                                              const match = meta.conflict.impact?.match(/权重: (\d+)/)
+                                              if (match) return match[1]
+                                              // Fallback: calculate based on current phrase weight
+                                              return meta.conflict.currentPhrase!.weight + 1
+                                            })()})</p>
+                                          )}
+                                        </div>
+                                        {meta.conflict.suggestions.length > 0 && (
+                                          <div className="mt-2 space-y-1">
+                                            <p className="text-small font-medium">建议:</p>
+                                            {meta.conflict.suggestions.map((sug, idx) => (
+                                              <div key={idx} className="p-2 bg-primary-50 dark:bg-primary-100/10 rounded text-small flex justify-between items-start">
+                                                <div className="flex-1">
+                                                  <p className="text-default-600 dark:text-default-400">{sug.reason}</p>
+                                                  {sug.toCode && <p className="text-primary">建议编码: {sug.toCode}</p>}
+                                                </div>
+                                                {sug.toCode && sug.action === 'Adjust' && (
+                                                  <Button size="sm" variant="flat" color="primary" onPress={() => applySuggestion(index, sug)}>
+                                                    应用
+                                                  </Button>
+                                                )}
+                                              </div>
+                                            ))}
                                           </div>
-                                        ))}
+                                        )}
                                       </div>
-                                    )}
-                                  </div>
+                                    )
+                                  })()
                                 )
                               ) : (
                                 <div>

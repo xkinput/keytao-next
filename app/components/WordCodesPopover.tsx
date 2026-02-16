@@ -34,36 +34,36 @@ interface Phrase {
   }
 }
 
-interface CodePhrasesPopoverProps {
-  code: string | null
+interface WordCodesPopoverProps {
+  word: string | null
   children: React.ReactNode
 }
 
-export default function CodePhrasesPopover({
-  code,
+export default function WordCodesPopover({
+  word,
   children
-}: CodePhrasesPopoverProps) {
+}: WordCodesPopoverProps) {
   const [phrases, setPhrases] = useState<Phrase[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [isOpen, setIsOpen] = useState(false)
-  const [searchCode, setSearchCode] = useState('')
+  const [searchWord, setSearchWord] = useState('')
   const [page, setPage] = useState(1)
   const [pagination, setPagination] = useState({
     total: 0,
     totalPages: 0,
     pageSize: 6
   })
-  const lastCodeRef = useRef<string | null>(null)
+  const lastWordRef = useRef<string | null>(null)
 
-  const fetchPhrases = useCallback(async (codeToSearch: string, pageNum: number) => {
-    if (!codeToSearch) return
+  const fetchPhrases = useCallback(async (wordToSearch: string, pageNum: number) => {
+    if (!wordToSearch) return
 
     setLoading(true)
     setError(null)
 
     try {
-      const response = await fetch(`/api/phrases/by-code?code=${encodeURIComponent(codeToSearch)}&page=${pageNum}`)
+      const response = await fetch(`/api/phrases/by-word?word=${encodeURIComponent(wordToSearch)}&page=${pageNum}`)
       if (!response.ok) {
         throw new Error('查询失败')
       }
@@ -83,38 +83,38 @@ export default function CodePhrasesPopover({
   }, [])
 
   useEffect(() => {
-    if (isOpen && code) {
-      setSearchCode(code)
+    if (isOpen && word) {
+      setSearchWord(word)
       setPage(1)
-      fetchPhrases(code, 1)
-      lastCodeRef.current = code
+      fetchPhrases(word, 1)
+      lastWordRef.current = word
     }
-  }, [isOpen, code, fetchPhrases])
+  }, [isOpen, word, fetchPhrases])
 
-  // Auto-search with debounce (skip if same as lastCodeRef)
+  // Auto-search with debounce (skip if same as lastWordRef)
   useEffect(() => {
-    if (!searchCode || searchCode === lastCodeRef.current) return
+    if (!searchWord || searchWord === lastWordRef.current) return
 
     const timer = setTimeout(() => {
       setPage(1)
-      fetchPhrases(searchCode, 1)
-      lastCodeRef.current = searchCode
+      fetchPhrases(searchWord, 1)
+      lastWordRef.current = searchWord
     }, 500)
 
     return () => clearTimeout(timer)
-  }, [searchCode, fetchPhrases])
+  }, [searchWord, fetchPhrases])
 
   const handleSearch = () => {
-    if (searchCode) {
+    if (searchWord) {
       setPage(1)
-      fetchPhrases(searchCode, 1)
+      fetchPhrases(searchWord, 1)
     }
   }
 
   const handlePageChange = (newPage: number) => {
     if (newPage >= 1 && newPage <= pagination.totalPages) {
       setPage(newPage)
-      fetchPhrases(searchCode, newPage)
+      fetchPhrases(searchWord, newPage)
     }
   }
 
@@ -142,9 +142,9 @@ export default function CodePhrasesPopover({
           <div className="mb-3">
             <Input
               size="sm"
-              value={searchCode}
-              onValueChange={setSearchCode}
-              placeholder="输入编码查询"
+              value={searchWord}
+              onValueChange={setSearchWord}
+              placeholder="输入词条查询"
               onKeyDown={(e) => {
                 if (e.key === 'Enter') {
                   handleSearch()
@@ -165,7 +165,7 @@ export default function CodePhrasesPopover({
 
           {!loading && !error && phrases.length === 0 && (
             <div className="text-default-500 text-center py-4 text-small">
-              该编码暂无词条
+              该词条暂无编码
             </div>
           )}
 
@@ -173,7 +173,7 @@ export default function CodePhrasesPopover({
             <div>
               <div className="flex justify-between items-center mb-2">
                 <p className="text-tiny text-default-400">
-                  共 {pagination.total} 个词条
+                  共 {pagination.total} 个编码
                 </p>
                 {pagination.totalPages > 1 && (
                   <div className="flex items-center gap-2">
@@ -202,7 +202,7 @@ export default function CodePhrasesPopover({
                 )}
               </div>
               <Table
-                aria-label="编码词条列表"
+                aria-label="词条编码列表"
                 removeWrapper
                 className="max-h-100 overflow-auto"
               >
