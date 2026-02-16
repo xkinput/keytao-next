@@ -83,16 +83,16 @@ export async function GET(request: NextRequest) {
         : lastResult.hasMore
           ? `Processed ${batchCount} batches, more work remaining`
           : 'Task completed',
+    });
+  } catch (error) {
+    console.error('[BatchProcessor] Error:', error);
 
-    } catch (error: any) {
-      console.error('[BatchProcessor] Error:', error);
-
-      return NextResponse.json(
-        {
-          success: false,
-          error: error.message || 'Unknown error',
-        },
-        { status: 500 }
-      );
-    }
+    return NextResponse.json(
+      {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      },
+      { status: 500 }
+    );
   }
+}
