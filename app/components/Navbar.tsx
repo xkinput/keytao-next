@@ -190,7 +190,9 @@ function Navbar() {
                       variant="light"
                       size="sm"
                       startContent={<IconComponent className="w-4 h-4" />}
-                      className={pathname === firstHref ? 'bg-primary text-primary-foreground' : 'text-default-700'}
+                      className={pathname === firstHref
+                        ? 'bg-primary text-primary-foreground data-[hover=true]:bg-primary-600'
+                        : 'text-default-700 hover:bg-default-200 dark:hover:bg-default-100 hover:text-default-900'}
                       onPress={() => {
                         if (firstHref) {
                           if (firstItem?.isExternal) {
@@ -226,7 +228,7 @@ function Navbar() {
                         }
                       }
                     }}
-                    className="cursor-pointer"
+                    className="cursor-pointer rounded-lg hover:bg-default-200 dark:hover:bg-default-100 transition-colors"
                   >
                     <Dropdown
                       isOpen={openDropdown === category.key}
@@ -237,7 +239,7 @@ function Navbar() {
                           size="sm"
                           startContent={<IconComponent className="w-4 h-4" />}
                           endContent={<ChevronDown className="w-4 h-4" />}
-                          className="text-default-700 pointer-events-none"
+                          className="text-default-700 hover:bg-default-100 hover:text-default-900 pointer-events-none"
                           as="div"
                         >
                           {category.label}

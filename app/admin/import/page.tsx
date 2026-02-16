@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { Card, CardBody, CardHeader, Button, Progress, Textarea, Chip, Listbox, ListboxItem, Select, SelectItem, Spinner } from '@heroui/react'
+import { Check } from 'lucide-react'
 import { apiRequest, useAPI } from '@/lib/hooks/useSWR'
 import { type PhraseType, getPhraseTypeOptions } from '@/lib/constants/phraseTypes'
 import { useAuthStore } from '@/lib/store/auth'
@@ -394,8 +395,8 @@ export default function ImportPage() {
                 {successCount > 0 && (
                   <div className="border border-success-200 dark:border-success-800 rounded-lg p-4">
                     <div className="flex items-center justify-between">
-                      <span className="text-sm font-medium text-success-700 dark:text-success-400">
-                        ✓ 成功导入 {successCount} 条词条
+                      <span className="text-sm font-medium text-success-700 dark:text-success-400 flex items-center gap-2">
+                        <Check className="w-4 h-4" /> 成功导入 {successCount} 条词条
                       </span>
                     </div>
                   </div>

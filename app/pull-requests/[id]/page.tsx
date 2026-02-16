@@ -13,6 +13,7 @@ import {
 import { useAPI } from '@/lib/hooks/useSWR'
 import Link from 'next/link'
 import { PR_STATUS_MAP, STATUS_COLOR_MAP } from '@/lib/constants/status'
+import { AlertTriangle, Link as LinkIcon } from 'lucide-react'
 
 interface PRDetail {
   id: number
@@ -171,8 +172,8 @@ export default function PRDetailPage({ params }: { params: Promise<{ id: string 
               </div>
               <div className="flex items-center gap-2">
                 {(pr.conflictInfo?.hasConflict ?? pr.hasConflict) && (
-                  <Chip color="warning" size="sm" variant="flat">
-                    ⚠️ 冲突
+                  <Chip color="warning" size="sm" variant="flat" startContent={<AlertTriangle className="w-3 h-3" />}>
+                    冲突
                   </Chip>
                 )}
                 <Chip color={STATUS_COLOR_MAP[pr.status] || 'default'} variant="flat">
@@ -226,7 +227,10 @@ export default function PRDetailPage({ params }: { params: Promise<{ id: string 
         {/* Conflicts */}
         {pr.conflicts.length > 0 && (
           <Card className="mb-6">
-            <CardHeader className="font-semibold">⚠️ 冲突详情</CardHeader>
+            <CardHeader className="font-semibold flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4" />
+              冲突详情
+            </CardHeader>
             <CardBody>
               {(pr.conflictInfo?.impact || pr.conflictReason) && (
                 <p className="text-small mb-4 p-3 bg-warning-50 dark:bg-warning-100/10 rounded-lg">
@@ -261,7 +265,7 @@ export default function PRDetailPage({ params }: { params: Promise<{ id: string 
         {/* Dependencies */}
         {(pr.dependencies.length > 0 || pr.dependedBy.length > 0) && (
           <Card className="mb-6">
-            <CardHeader className="font-semibold">🔗 依赖关系</CardHeader>
+            <CardHeader className="font-semibold flex items-center gap-2"><LinkIcon className="w-4 h-4" /> 依赖关系</CardHeader>
             <CardBody className="space-y-4">
               {pr.dependencies.length > 0 && (
                 <div>

@@ -11,7 +11,7 @@ import {
   Tabs,
   Tab
 } from '@heroui/react'
-import { RefreshCw } from 'lucide-react'
+import { RefreshCw, AlertTriangle, Link as LinkIcon } from 'lucide-react'
 import { useAPI } from '@/lib/hooks/useSWR'
 import { usePageFilterStore } from '@/lib/store/pageFilter'
 import PullRequestCardSkeleton from '@/app/components/PullRequestCardSkeleton'
@@ -154,8 +154,8 @@ export default function PullRequestsPage() {
                     </div>
                     <div className="flex items-center gap-2">
                       {(pr.conflictInfo?.hasConflict ?? pr.hasConflict) && (
-                        <Chip color="warning" size="sm" variant="flat">
-                          ⚠️ 冲突
+                        <Chip color="warning" size="sm" variant="flat" startContent={<AlertTriangle className="w-3 h-3" />}>
+                          冲突
                         </Chip>
                       )}
                       <Chip
@@ -179,8 +179,8 @@ export default function PullRequestsPage() {
                         </span>
                       )}
                       {(pr._count.dependencies > 0 || pr._count.dependedBy > 0) && (
-                        <span>
-                          🔗 {pr._count.dependencies + pr._count.dependedBy} 个依赖
+                        <span className="flex items-center gap-1">
+                          <LinkIcon className="w-3 h-3" /> {pr._count.dependencies + pr._count.dependedBy} 个依赖
                         </span>
                       )}
                     </div>

@@ -1,6 +1,7 @@
 'use client'
 
 import { Card, CardBody, Chip, Spinner } from '@heroui/react'
+import { AlertTriangle, X } from 'lucide-react'
 import { useAPI } from '@/lib/hooks/useSWR'
 import CodePhrasesPopover from './CodePhrasesPopover'
 
@@ -216,7 +217,7 @@ export default function BatchPreview({ batchId }: BatchPreviewProps) {
                 <Card className="border-2 border-default-300">
                     <div className="bg-default-100 px-4 py-3 border-b border-default-200">
                         <div className="flex items-center gap-2">
-                            <span className="text-medium font-semibold text-default-700">⚠️ 被拒绝的操作</span>
+                            <span className="text-medium font-semibold text-default-700 flex items-center gap-2"><AlertTriangle className="w-4 h-4" /> 被拒绝的操作</span>
                             <Chip size="sm" variant="flat">{rejected.length}</Chip>
                         </div>
                         <p className="text-tiny text-default-500 mt-1">以下操作因冲突无法执行，将被跳过</p>
@@ -226,8 +227,8 @@ export default function BatchPreview({ batchId }: BatchPreviewProps) {
                             {rejected.map((op, idx) => (
                                 <div key={idx} className="p-3 border border-default-200 rounded-lg bg-default-50">
                                     <div className="flex items-start gap-3">
-                                        <div className="w-6 h-6 flex items-center justify-center rounded bg-default-200 text-default-600 shrink-0 font-bold">
-                                            ✖
+                                        <div className="w-6 h-6 flex items-center justify-center rounded bg-default-200 text-default-600 shrink-0">
+                                            <X className="w-4 h-4" />
                                         </div>
                                         <div className="flex-1 space-y-2">
                                             <div className="flex flex-wrap items-center gap-2">

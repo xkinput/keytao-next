@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { Button, Card, CardBody, Code, Listbox, ListboxItem, Progress, Alert, Link } from '@heroui/react'
-import { Folder, File, Apple, Monitor, Check, Download, RefreshCw, Smartphone, TabletSmartphone } from 'lucide-react'
+import { Folder, File, Apple, Monitor, Check, Download, RefreshCw, Smartphone, TabletSmartphone, Lightbulb, Package, ClipboardList } from 'lucide-react'
 import JSZip from 'jszip'
 
 type OSType = 'windows' | 'macos' | 'linux' | 'android' | 'ios' | 'unknown'
@@ -112,7 +112,7 @@ export default function InstallPage() {
       // Check if createWritable is available on FileSystemFileHandle
       writeSupport = typeof FileSystemFileHandle !== 'undefined' &&
         'createWritable' in FileSystemFileHandle.prototype
-      apiSupport = writeSupport ? '✓ 完全支持 (读写)' : '⚠ 部分支持 (仅读取)'
+      apiSupport = writeSupport ? '完全支持 (读写)' : '部分支持 (仅读取)'
     }
 
     setHasWriteSupport(writeSupport)
@@ -656,7 +656,7 @@ export default function InstallPage() {
                     className="mb-3"
                   />
                   <Alert
-                    title="📦 手动安装方式"
+                    title={<span className="flex items-center gap-2"><Package className="w-4 h-4" /> 手动安装方式</span>}
                     description={
                       <div className="text-xs space-y-1">
                         <p>1. 前往 <Link href="https://github.com/xkinput/KeyTao/releases" isExternal showAnchorIcon className="text-xs">​GitHub Releases</Link> 下载对应系统的压缩包</p>
@@ -800,7 +800,7 @@ export default function InstallPage() {
           {/* Instructions Card */}
           <Card className="bg-primary-50 border-primary-200">
             <CardBody className="py-3">
-              <h2 className="text-lg font-semibold mb-3">📋 使用说明</h2>
+              <h2 className="text-lg font-semibold mb-3 flex items-center gap-2"><ClipboardList className="w-5 h-5" /> 使用说明</h2>
               <div className="space-y-3 text-xs">
                 <div>
                   <p className="font-semibold mb-1.5">安装步骤：</p>
@@ -853,14 +853,14 @@ export default function InstallPage() {
                       <>
                         <li><Code size="sm">/sdcard/rime/</Code> - 同文输入法标准目录</li>
                         <li><Code size="sm">内部存储/rime/</Code> - 备用目录</li>
-                        <li className="text-xs text-default-500 mt-1">💡 在同文输入法设置中可以查看具体路径</li>
+                        <li className="text-xs text-default-500 mt-1 flex items-center gap-1"><Lightbulb className="w-3 h-3" /> 在同文输入法设置中可以查看具体路径</li>
                       </>
                     )}
                     {osType === 'ios' && (
                       <>
                         <li><Code size="sm">iRime App</Code> - 通过应用内导入</li>
-                        <li className="text-xs text-default-500 mt-1">💡 可通过 iCloud Drive、文件共享或 iTunes 导入方案文件</li>
-                        <li className="text-xs text-default-500">💡 详见应用内帮助文档</li>
+                        <li className="text-xs text-default-500 mt-1 flex items-center gap-1"><Lightbulb className="w-3 h-3" /> 可通过 iCloud Drive、文件共享或 iTunes 导入方案文件</li>
+                        <li className="text-xs text-default-500 flex items-center gap-1"><Lightbulb className="w-3 h-3" /> 详见应用内帮助文档</li>
                       </>
                     )}
                   </ul>

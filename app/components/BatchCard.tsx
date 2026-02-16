@@ -155,7 +155,7 @@ function BatchCard({ batch, refresh }: BatchCardProps) {
                     )}
                   </div>
                   {pr.hasConflict && (
-                    <span className="text-xs text-warning" title="存在冲突">⚠️</span>
+                    <AlertTriangle className="w-3 h-3 text-warning" title="存在冲突" />
                   )}
                 </div>
               ))}

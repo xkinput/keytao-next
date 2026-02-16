@@ -7,6 +7,7 @@ import {
     Chip,
     Button
 } from '@heroui/react'
+import { AlertTriangle } from 'lucide-react'
 import CodePhrasesPopover from './CodePhrasesPopover'
 
 interface PullRequest {
@@ -156,8 +157,8 @@ export default function BatchPRList({
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
                             {(pr.conflictInfo?.hasConflict ?? pr.hasConflict) && (
-                                <Chip color="warning" size="sm" variant="flat">
-                                    ⚠️ 冲突
+                                <Chip color="warning" size="sm" variant="flat" startContent={<AlertTriangle className="w-3 h-3" />}>
+                                    冲突
                                 </Chip>
                             )}
                         </div>

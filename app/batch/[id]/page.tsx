@@ -23,6 +23,7 @@ import BatchPRList from '@/app/components/BatchPRList'
 import BatchActionsDropdown from '@/app/components/BatchActionsDropdown'
 import { useUIStore } from '@/lib/store/ui'
 import { BATCH_STATUS_MAP, STATUS_COLOR_MAP } from '@/lib/constants/status'
+import { Edit, AlertTriangle, Lightbulb, FileText, Eye } from 'lucide-react'
 
 interface PullRequest {
   id: number
@@ -302,7 +303,7 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
                             isIconOnly
                             onPress={() => setEditingName(true)}
                           >
-                            ✏️
+                            <Edit className="w-4 h-4" />
                           </Button>
                         )}
                       </>
@@ -368,7 +369,10 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
           {batchData.status === 'Rejected' && batchData.reviewNote && (
             <Card className="mt-4 border-danger border-2">
               <CardHeader className="pb-0">
-                <h3 className="text-large font-bold text-danger">⚠️ 审核拒绝原因</h3>
+                <h3 className="text-large font-bold text-danger flex items-center gap-2">
+                  <AlertTriangle className="w-5 h-5" />
+                  审核拒绝原因
+                </h3>
               </CardHeader>
               <CardBody>
                 <p className="text-default-600">{batchData.reviewNote}</p>
@@ -379,7 +383,10 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
           {batchData.pullRequests.length === 0 && canEdit && (
             <Card className="mt-4 border-warning border-2">
               <CardHeader className="pb-0">
-                <h3 className="text-large font-bold text-warning">💡 提示</h3>
+                <h3 className="text-large font-bold text-warning flex items-center gap-2">
+                  <Lightbulb className="w-5 h-5" />
+                  提示
+                </h3>
               </CardHeader>
               <CardBody>
                 <p className="text-default-600">当前批次没有添加任何修改，不会在首页公众列表中展示。请添加修改后提交审核。</p>
@@ -389,14 +396,24 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
         </div>
 
         <Tabs aria-label="批次视图" className="mb-4">
-          <Tab key="list" title={`📝 修改列表 (${batchData.pullRequests.length})`}>
+          <Tab key="list" title={
+            <div className="flex items-center gap-1">
+              <FileText className="w-4 h-4" />
+              修改列表 ({batchData.pullRequests.length})
+            </div>
+          }>
             <BatchPRList
               pullRequests={batchData.pullRequests}
               canEdit={canEdit}
               onAddFirst={onOpen}
             />
           </Tab>
-          <Tab key="preview" title="👁️ 预览执行">
+          <Tab key="preview" title={
+            <div className="flex items-center gap-1">
+              <Eye className="w-4 h-4" />
+              预览执行
+            </div>
+          }>
             <div className="pt-4">
               <BatchPreview batchId={resolvedParams.id} />
             </div>
