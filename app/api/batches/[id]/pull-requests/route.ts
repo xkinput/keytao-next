@@ -71,12 +71,12 @@ export async function PUT(
 
         // Cache current DB phrase counts for relevant codes AND types
         const codes = new Set(items.map(i => i.code))
-        const types = new Set(items.map(i => i.type).filter(Boolean) as string[])
+        const types = new Set(items.map(i => i.type).filter(Boolean) as PhraseType[])
 
         const existingPhrases = await prisma.phrase.findMany({
             where: {
                 code: { in: Array.from(codes) },
-                type: { in: Array.from(types) }
+                type: { in: Array.from(types) as PhraseType[] }
             },
             select: { code: true, type: true, word: true }
         })
