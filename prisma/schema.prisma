@@ -97,6 +97,8 @@ enum SyncTaskStatus {
   Completed
   /// 失败
   Failed
+  /// 已取消
+  Cancelled
 }
 
 // User model
@@ -376,6 +378,10 @@ model SyncTask {
   // 统计信息
   totalItems     Int @default(0)
   processedItems Int @default(0)
+
+  // 批处理状态（用于 Hobby 计划的分段处理）
+  processedFiles String[] @default([]) // 已处理的文件路径列表
+  pendingFiles   String[] @default([]) // 待处理的文件路径列表
 
   // Relations
   batches Batch[] @relation("SyncTaskBatches")

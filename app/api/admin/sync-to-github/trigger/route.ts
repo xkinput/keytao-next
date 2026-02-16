@@ -4,11 +4,11 @@
  */
 
 import { checkAdminPermission } from '@/lib/adminAuth';
-import { createSyncTask } from '@/lib/services/syncService';
+import { createSyncTask, processSyncTaskBatch } from '@/lib/services/syncService';
 import { NextRequest, NextResponse } from 'next/server';
 
 export const runtime = 'nodejs';
-export const maxDuration = 300; // 5 minutes for Pro plan
+export const maxDuration = 10; // Vercel Hobby limit
 
 export async function POST(request: NextRequest) {
   try {
@@ -18,8 +18,16 @@ export async function POST(request: NextRequest) {
       return authResult.response;
     }
 
-    // Create and start sync task
+    // Create sync task
     const taskId = await createSyncTask();
+
+    console.log(`[Trigger] Created task ${taskId}, starting first batch...`);
+
+    // Start first batch immediately in background
+    // Don't await - let it run after response
+    triggerNextBatch().catch((error) => {
+      console.error('[Trigger] Failed to start first batch:', error);
+    });
 
     return NextResponse.json({
       success: true,
@@ -46,5 +54,38 @@ export async function POST(request: NextRequest) {
       },
       { status: 500 }
     );
+  }
+}
+
+/**
+ * Trigger next batch processing
+ * This creates a chain of batch processing without cron
+ */
+async function triggerNextBatch() {
+  try {
+    const result = await processSyncTaskBatch();
+
+    if (result.hasMore && result.taskId) {
+      console.log(`[Trigger] Batch completed, triggering next batch for task ${result.taskId}`);
+
+      // Chain the next batch by calling ourselves via HTTP
+      const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || process.env.VERCEL_URL
+        ? `https://${process.env.VERCEL_URL}`
+        : 'http://localhost:3000';
+
+      // Fire and forget - don't wait for response
+      fetch(`${baseUrl}/api/cron/sync-to-github`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${process.env.CRON_SECRET || 'internal'}`,
+        },
+      }).catch((error) => {
+        console.error('[Trigger] Failed to chain next batch:', error);
+      });
+    } else {
+      console.log('[Trigger] All batches completed or no more work');
+    }
+  } catch (error) {
+    console.error('[Trigger] Error processing batch:', error);
   }
 }

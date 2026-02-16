@@ -1,54 +1,79 @@
 /**
  * GET /api/cron/sync-to-github
- * Cron job to automatically sync dictionaries every 3 days
+ * Internal endpoint to process sync tasks in batches
+ * Called by chain trigger mechanism (not scheduled cron)
  */
 
-import { createSyncTask } from '@/lib/services/syncService';
+import { processSyncTaskBatch } from '@/lib/services/syncService';
 import { NextRequest, NextResponse } from 'next/server';
 
 export const runtime = 'nodejs';
-export const maxDuration = 300;
+export const maxDuration = 10; // Vercel Hobby limit
 
 export async function GET(request: NextRequest) {
-  try {
-    // Verify cron secret (for security)
-    const authHeader = request.headers.get('authorization');
-    const cronSecret = process.env.CRON_SECRET;
+  console.log('[BatchProcessor] Processing next batch...');
 
-    if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
+  try {
+    // Verify secret (for security)
+    const authHeader = request.headers.get('authorization');
+    const secret = process.env.CRON_SECRET || 'internal';
+
+    if (authHeader !== `Bearer ${secret}`) {
+      console.error('[BatchProcessor] Unauthorized access attempt');
       return NextResponse.json(
         { error: 'Unauthorized' },
         { status: 401 }
       );
     }
 
-    console.log('Cron job triggered: sync-to-github');
+    // Process one batch of files
+    const result = await processSyncTaskBatch();
 
-    // Create and start sync task
-    const taskId = await createSyncTask();
+    if (!result.taskId) {
+      console.log('[BatchProcessor] No active tasks to process');
+      return NextResponse.json({
+        success: true,
+        message: 'No active tasks',
+      });
+    }
 
-    console.log(`Sync task created: ${taskId}`);
+    console.log(`[BatchProcessor] Processed task ${result.taskId}, hasMore: ${result.hasMore}`);
+
+    // If more work remains, trigger next batch
+    if (result.hasMore) {
+      console.log('[BatchProcessor] Triggering next batch...');
+
+      const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || process.env.VERCEL_URL
+        ? `https://${process.env.VERCEL_URL}`
+        : 'http://localhost:3000';
+
+      // Fire and forget - chain the next batch
+      fetch(`${baseUrl}/api/cron/sync-to-github`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${secret}`,
+        },
+      }).catch((error) => {
+        console.error('[BatchProcessor] Failed to chain next batch:', error);
+      });
+    }
 
     return NextResponse.json({
       success: true,
-      taskId,
-      message: 'Sync task created successfully',
+      taskId: result.taskId,
+      hasMore: result.hasMore,
+      message: result.hasMore
+        ? 'Batch processed, next batch triggered'
+        : 'Task completed',
     });
-  } catch (error: any) {
-    console.error('Cron job failed:', error);
 
-    // If no batches to sync, return success (not an error)
-    if (error.message === 'No batches to sync') {
-      return NextResponse.json({
-        success: true,
-        message: 'No batches to sync',
-      });
-    }
+  } catch (error: any) {
+    console.error('[BatchProcessor] Error:', error);
 
     return NextResponse.json(
       {
         success: false,
-        error: error.message || 'Failed to create sync task',
+        error: error.message || 'Unknown error',
       },
       { status: 500 }
     );

@@ -31,7 +31,7 @@ import { zhCN } from 'date-fns/locale'
 
 interface SyncTask {
   id: string
-  status: 'Pending' | 'Running' | 'Completed' | 'Failed'
+  status: 'Pending' | 'Running' | 'Completed' | 'Failed' | 'Cancelled'
   progress: number
   message: string | null
   error: string | null
@@ -70,6 +70,8 @@ export default function SyncPage() {
   const [triggerError, setTriggerError] = useState<string | null>(null)
   const [selectedTask, setSelectedTask] = useState<SyncTask | null>(null)
   const [isBatchModalOpen, setIsBatchModalOpen] = useState(false)
+  const [cancellingTaskId, setCancellingTaskId] = useState<string | null>(null)
+  const [retryingTaskId, setRetryingTaskId] = useState<string | null>(null)
 
   // Check if user is admin
   const { data: adminCheck } = useAPI(
@@ -132,6 +134,7 @@ export default function SyncPage() {
       Running: { color: 'primary' as const, text: '运行中' },
       Completed: { color: 'success' as const, text: '已完成' },
       Failed: { color: 'danger' as const, text: '失败' },
+      Cancelled: { color: 'default' as const, text: '已取消' },
     }
     const { color, text } = config[status]
     return <Chip color={color}>{text}</Chip>
@@ -150,6 +153,79 @@ export default function SyncPage() {
   const handleCloseBatchModal = () => {
     setIsBatchModalOpen(false)
     setTimeout(() => setSelectedTask(null), 300)
+  }
+
+  const handleCancelTask = async (taskId: string, taskProgress: number) => {
+    // Show confirmation with warning based on progress
+    const needsCleanup = taskProgress >= 70
+    const warningMessage = needsCleanup
+      ? '任务正在进行文件提交，取消后可能需要手动清理 GitHub 上的分支。\n\n确定要取消吗？'
+      : '确定要取消这个同步任务吗？'
+
+    if (!confirm(warningMessage)) {
+      return
+    }
+
+    setCancellingTaskId(taskId)
+
+    try {
+      const response = await fetch(`/api/admin/sync-to-github/cancel/${taskId}`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      })
+
+      const result = await response.json()
+
+      if (!response.ok || !result.success) {
+        throw new Error(result.error || '取消任务失败')
+      }
+
+      // Show cleanup note if needed
+      if (result.needsCleanup && result.cleanupNote) {
+        alert(`任务已取消\n\n⚠️ ${result.cleanupNote}`)
+      }
+
+      // Refresh task list
+      mutate()
+      mutateStats()
+    } catch (error) {
+      alert(error instanceof Error ? error.message : '取消任务失败')
+    } finally {
+      setCancellingTaskId(null)
+    }
+  }
+
+  const handleRetryTask = async (taskId: string) => {
+    if (!confirm('确定要重试这个任务吗？\n\n任务将从头开始执行。')) {
+      return
+    }
+
+    setRetryingTaskId(taskId)
+
+    try {
+      const response = await fetch(`/api/admin/sync-to-github/retry/${taskId}`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      })
+
+      const result = await response.json()
+
+      if (!response.ok || !result.success) {
+        throw new Error(result.error || '重试任务失败')
+      }
+
+      // Refresh task list
+      mutate()
+      mutateStats()
+    } catch (error) {
+      alert(error instanceof Error ? error.message : '重试任务失败')
+    } finally {
+      setRetryingTaskId(null)
+    }
   }
 
   const syncTableColumns = [
@@ -344,28 +420,52 @@ export default function SyncPage() {
                           )}
                         </TableCell>
                         <TableCell>
-                          {task.githubPrUrl && (
-                            <Button
-                              size="sm"
-                              variant="light"
-                              color="primary"
-                              as="a"
-                              href={task.githubPrUrl}
-                              target="_blank"
-                            >
-                              查看 PR
-                            </Button>
-                          )}
-                          {task.error && (
-                            <Button
-                              size="sm"
-                              variant="light"
-                              color="danger"
-                              onPress={() => alert(task.error)}
-                            >
-                              查看错误
-                            </Button>
-                          )}
+                          <div className="flex gap-2">
+                            {task.githubPrUrl && (
+                              <Button
+                                size="sm"
+                                variant="light"
+                                color="primary"
+                                as="a"
+                                href={task.githubPrUrl}
+                                target="_blank"
+                              >
+                                查看 PR
+                              </Button>
+                            )}
+                            {task.error && (
+                              <Button
+                                size="sm"
+                                variant="light"
+                                color="danger"
+                                onPress={() => alert(task.error)}
+                              >
+                                查看错误
+                              </Button>
+                            )}
+                            {(task.status === 'Pending' || task.status === 'Running') && isAdmin && (
+                              <Button
+                                size="sm"
+                                variant="light"
+                                color="warning"
+                                onPress={() => handleCancelTask(task.id, task.progress)}
+                                isLoading={cancellingTaskId === task.id}
+                              >
+                                取消
+                              </Button>
+                            )}
+                            {(task.status === 'Failed' || task.status === 'Cancelled') && isAdmin && (
+                              <Button
+                                size="sm"
+                                variant="light"
+                                color="success"
+                                onPress={() => handleRetryTask(task.id)}
+                                isLoading={retryingTaskId === task.id}
+                              >
+                                重试
+                              </Button>
+                            )}
+                          </div>
                         </TableCell>
                       </TableRow>
                     ))}
