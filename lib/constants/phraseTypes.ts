@@ -129,8 +129,8 @@ export function detectPhraseType(word: string, code?: string): PhraseType {
     return 'Link'
   }
 
-  // English: pure ASCII letters, spaces, numbers or common punctuation
-  if (/^[a-zA-Z0-9\s\-'.]+$/.test(word) && /[a-zA-Z]/.test(word)) {
+  // English: contains any English letters
+  if (/[a-zA-Z]/.test(word)) {
     return 'English'
   }
 

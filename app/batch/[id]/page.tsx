@@ -14,7 +14,6 @@ import {
   Tabs,
   Tab
 } from '@heroui/react'
-import toast from 'react-hot-toast'
 import { useAuthStore } from '@/lib/store/auth'
 import { useAPI, apiRequest } from '@/lib/hooks/useSWR'
 import CreatePRModal from '@/app/components/CreatePRModal'
@@ -32,7 +31,7 @@ interface PullRequest {
   oldWord?: string | null
   code: string | null
   action: 'Create' | 'Change' | 'Delete'
-  type?: string | null
+  type?: PhraseType | null
   status: string
   weight: number | null
   remark: string | null
@@ -146,36 +145,6 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
   const handleCloseModal = () => {
     onClose()
   }
-
-  const handleDelete = async () => {
-    try {
-      await apiRequest(`/api/batches/${resolvedParams.id}`, {
-        method: 'DELETE',
-        withAuth: true
-      })
-      toast.success('批次已删除')
-      router.push('/')
-    } catch (err) {
-      const error = err as Error
-      openAlert(error.message || '删除失败', '出错了')
-    }
-  }
-
-  const handleWithdraw = async () => {
-    try {
-      await apiRequest(`/api/batches/${resolvedParams.id}/withdraw`, {
-        method: 'POST',
-        withAuth: true
-      })
-      toast.success('已撤销提交')
-      await mutate()
-    } catch (err) {
-      const error = err as Error
-      openAlert(error.message || '撤销失败', '出错了')
-    }
-  }
-
-
 
   const handleSubmit = async () => {
     if (!batch) return

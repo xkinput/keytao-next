@@ -7,8 +7,9 @@ import {
     Chip,
     Button
 } from '@heroui/react'
-import { AlertTriangle } from 'lucide-react'
+import { AlertTriangle, FileText } from 'lucide-react'
 import CodePhrasesPopover from './CodePhrasesPopover'
+import { getPhraseTypeLabel, type PhraseType } from '@/lib/constants/phraseTypes'
 
 interface PullRequest {
     id: number
@@ -16,6 +17,7 @@ interface PullRequest {
     oldWord?: string | null
     code: string | null
     action: string
+    type?: PhraseType | null
     weight: number | null
     remark: string | null
     hasConflict?: boolean
@@ -110,6 +112,11 @@ export default function BatchPRList({
                             <Chip size="sm" variant="flat" color={getActionColor(pr.action)}>
                                 {getActionText(pr.action)}
                             </Chip>
+                            {pr.type && (
+                                <Chip size="sm" variant="flat" color="default">
+                                    {getPhraseTypeLabel(pr.type)}
+                                </Chip>
+                            )}
                             {pr.action === 'Change' && pr.oldWord ? (
                                 <>
                                     <span className="text-default-500 line-through">{pr.oldWord}</span>

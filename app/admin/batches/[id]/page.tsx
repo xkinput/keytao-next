@@ -18,12 +18,14 @@ import BatchPreview from '@/app/components/BatchPreview'
 import { useAPI, apiRequest } from '@/lib/hooks/useSWR'
 import BatchPRList from '@/app/components/BatchPRList'
 import { useUIStore } from '@/lib/store/ui'
+import type { PhraseType } from '@/lib/constants/phraseTypes'
 
 interface PullRequest {
   id: number
   word: string | null
   code: string | null
   action: 'Create' | 'Change' | 'Delete'
+  type?: PhraseType | null
   weight: number | null
   remark: string | null
   hasConflict: boolean
