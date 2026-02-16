@@ -73,9 +73,13 @@ export async function calculateDynamicWeight(
 
   const baseWeight = getDefaultWeight(item.type)
 
-  // Get all existing phrases with their weights for this code
+  // Get all existing phrases with their weights for this code AND type
+  // Different types (单字, 词语, etc.) should have independent weight calculation
   const existingPhrases = await prisma.phrase.findMany({
-    where: { code: item.code },
+    where: {
+      code: item.code,
+      type: item.type
+    },
     select: { word: true, weight: true }
   })
 
@@ -91,7 +95,8 @@ export async function calculateDynamicWeight(
     if (i === currentIndex) continue
 
     const other = allItems[i]
-    if (other.code !== item.code) continue
+    // Only consider items with same code AND same type
+    if (other.code !== item.code || other.type !== item.type) continue
 
     if (other.action === 'Create' && i < currentIndex) {
       // Previous Create: if it's a new word, it will occupy baseWeight + currentSize
