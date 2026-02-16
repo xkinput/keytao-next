@@ -89,8 +89,8 @@ export function SyncProgressModal({
       setTotalCount(result.totalFiles)
       setStatus('processing')
 
-      // Auto start processing
-      processNextBatch(result.taskId, result.files, 0)
+      // Auto start processing - pass summary directly to avoid state update delay
+      processNextBatch(result.taskId, result.files, 0, result.summary)
     } catch (err) {
       setError(err instanceof Error ? err.message : '准备同步失败')
       setStatus('error')
@@ -101,7 +101,8 @@ export function SyncProgressModal({
   const processNextBatch = async (
     tid: string = taskId,
     fileList: SyncFile[] = files,
-    processed: number = processedCount
+    processed: number = processedCount,
+    summaryText: string = summary
   ) => {
     if (isProcessing) return
 
@@ -116,7 +117,7 @@ export function SyncProgressModal({
 
       if (batch.length === 0) {
         // All files processed, finalize
-        await finalize(tid)
+        await finalize(tid, summaryText)
         return
       }
 
@@ -152,12 +153,12 @@ export function SyncProgressModal({
       // Check if all files are processed
       if (endIdx >= fileList.length) {
         // All files processed, finalize
-        await finalize(tid)
+        await finalize(tid, summaryText)
         return
       }
 
       // Continue automatically
-      setTimeout(() => processNextBatch(tid, fileList, endIdx), 500)
+      setTimeout(() => processNextBatch(tid, fileList, endIdx, summaryText), 500)
     } catch (err) {
       setError(err instanceof Error ? err.message : '提交文件失败')
       setStatus('error')
@@ -167,12 +168,12 @@ export function SyncProgressModal({
   }
 
   // Finalize and create PR
-  const finalize = async (tid: string = taskId) => {
+  const finalize = async (tid: string = taskId, summaryText: string = summary) => {
     try {
       setStatus('finalizing')
       setError(null)
 
-      console.log('[Modal] Calling finalize with summary:', summary?.slice(0, 200))
+      console.log('[Modal] Calling finalize with summary:', summaryText?.slice(0, 200))
 
       const response = await fetch('/api/admin/sync-to-github/finalize', {
         method: 'POST',
@@ -182,7 +183,7 @@ export function SyncProgressModal({
         },
         body: JSON.stringify({
           taskId: tid,
-          summary,
+          summary: summaryText,
         }),
       })
 
