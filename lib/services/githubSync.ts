@@ -163,9 +163,12 @@ export class GithubSyncService {
   async commitFiles(
     branch: string,
     files: FileCommit[],
-    message: string
+    message: string,
+    onProgress?: (current: number, total: number) => void | Promise<void>
   ): Promise<void> {
-    for (const file of files) {
+    const total = files.length
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i]
       const existingSha = await this.getFileSha(branch, file.path);
       const content = Buffer.from(file.content, 'utf-8').toString('base64');
 
@@ -190,6 +193,11 @@ export class GithubSyncService {
           content,
           branch,
         });
+      }
+
+      // Report progress after each file
+      if (onProgress) {
+        await onProgress(i + 1, total)
       }
     }
   }
@@ -223,7 +231,8 @@ export class GithubSyncService {
    */
   async syncDictionaries(
     dictFiles: Map<string, string>,
-    summary: string
+    summary: string,
+    onProgress?: (current: number, total: number) => void | Promise<void>
   ): Promise<CreatePRResult> {
     const branchName = this.generateBranchName();
 
@@ -241,7 +250,7 @@ export class GithubSyncService {
 
     // Step 3: Commit files
     const commitMessage = `Update dictionaries - ${format(new Date(), 'yyyy-MM-dd')}`;
-    await this.commitFiles(branchName, files, commitMessage);
+    await this.commitFiles(branchName, files, commitMessage, onProgress);
 
     // Step 4: Create PR
     const prTitle = `[自动同步] 词库更新 - ${format(new Date(), 'yyyy年MM月dd日')}`;

@@ -93,7 +93,22 @@ export async function executeSyncTask(taskId: string): Promise<void> {
     const githubService = createGithubSyncService();
 
     await updateProgress(taskId, 70, '创建分支和提交文件...');
-    const pr = await githubService.syncDictionaries(dictFiles, summary);
+
+    // Pass progress callback to show file commit progress
+    const pr = await githubService.syncDictionaries(
+      dictFiles,
+      summary,
+      async (current, total) => {
+        // Calculate progress between 70% and 90% based on files committed
+        const fileProgress = (current / total) * 20  // 20% range for file commits
+        const overallProgress = 70 + fileProgress
+        await updateProgress(
+          taskId,
+          Math.floor(overallProgress),
+          `提交文件 ${current}/${total}...`
+        )
+      }
+    );
 
     await updateProgress(taskId, 90, '创建Pull Request...');
 
