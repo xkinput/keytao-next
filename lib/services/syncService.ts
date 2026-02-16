@@ -56,6 +56,9 @@ export async function executeSyncTask(taskId: string): Promise<void> {
               where: {
                 status: 'Approved',
               },
+              orderBy: {
+                createAt: 'asc',
+              },
             },
           },
         },
@@ -139,6 +142,9 @@ export async function createSyncTask(): Promise<string> {
       pullRequests: {
         where: {
           status: 'Approved',
+        },
+        orderBy: {
+          createAt: 'asc',
         },
       },
     },

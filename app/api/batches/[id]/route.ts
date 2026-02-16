@@ -52,6 +52,9 @@ export async function GET(
               }
             },
             conflicts: true
+          },
+          orderBy: {
+            createAt: 'asc'
           }
         }
       }

@@ -164,7 +164,7 @@ export async function PATCH(
         action: action as PullRequestType,
         type: type || undefined,
         weight: weight || undefined,
-        remark: remark || undefined,
+        remark: remark !== undefined ? (remark || null) : undefined,
         hasConflict: conflict.hasConflict,
         conflictReason: conflict.hasConflict ? conflict.impact : null
       } as any,

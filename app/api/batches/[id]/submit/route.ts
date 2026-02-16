@@ -19,7 +19,11 @@ export async function POST(
     const batch = await prisma.batch.findUnique({
       where: { id },
       include: {
-        pullRequests: true
+        pullRequests: {
+          orderBy: {
+            createAt: 'asc'
+          }
+        }
       }
     })
 

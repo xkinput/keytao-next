@@ -577,7 +577,7 @@ export default function CreatePRModal({
               code: item.code,
               type: item.action !== 'Delete' ? item.type : undefined,
               weight: item.weight ? parseInt(item.weight) : undefined,
-              remark: item.remark || undefined
+              remark: item.remark || null
             }))
           },
           withAuth: true
@@ -595,7 +595,7 @@ export default function CreatePRModal({
             code: item.code,
             type: item.action !== 'Delete' ? item.type : undefined,
             weight: item.weight ? parseInt(item.weight) : (item.action !== 'Delete' ? getDefaultWeight(item.type as PhraseType) : undefined),
-            remark: item.remark || undefined
+            remark: item.remark || null
           },
           withAuth: true
         })
@@ -611,7 +611,7 @@ export default function CreatePRModal({
               code: item.code,
               type: item.action !== 'Delete' ? item.type : undefined,
               weight: item.weight ? parseInt(item.weight) : (item.action !== 'Delete' ? getDefaultWeight(item.type as PhraseType) : undefined),
-              remark: item.remark || undefined
+              remark: item.remark || null
             })),
             batchId
           },

@@ -196,7 +196,7 @@ export async function PUT(
                             action: item.action,
                             type: item.type ? (item.type as PhraseType) : undefined,
                             weight: finalWeight || undefined,
-                            remark: item.remark || undefined,
+                            remark: item.remark !== undefined ? (item.remark || null) : undefined,
                             phraseId: finalPhraseId,
                             hasConflict: conflict.hasConflict,
                             conflictReason: conflict.hasConflict ? conflict.impact : null
@@ -214,7 +214,7 @@ export async function PUT(
                             action: item.action,
                             type: item.type ? (item.type as PhraseType) : undefined,
                             weight: finalWeight || undefined,
-                            remark: item.remark || undefined,
+                            remark: item.remark || null,
                             phraseId: finalPhraseId,
                             hasConflict: conflict.hasConflict,
                             conflictReason: conflict.hasConflict ? conflict.impact : undefined

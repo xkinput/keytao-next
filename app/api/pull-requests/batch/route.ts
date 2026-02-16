@@ -93,7 +93,7 @@ export async function POST(request: NextRequest) {
               action: change.action as PullRequestType,
               phraseId: change.phraseId || undefined,
               weight: change.weight || undefined,
-              remark: change.remark || undefined,
+              remark: change.remark || null,
               type: change.type || undefined,
               userId: session.id,
               batchId: batch.id,

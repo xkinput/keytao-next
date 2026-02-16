@@ -106,7 +106,7 @@ export async function POST(request: NextRequest) {
         action: action as PullRequestType,
         phraseId: finalPhraseId || undefined,
         weight: finalWeight || undefined,
-        remark: remark || undefined,
+        remark: remark || null,
         type: type || undefined,
         userId: session.id,
         batchId: finalBatchId,
