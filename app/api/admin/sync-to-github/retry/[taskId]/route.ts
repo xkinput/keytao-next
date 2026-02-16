@@ -111,19 +111,43 @@ export async function POST(
 }
 
 /**
- * Trigger first batch processing
+ * Trigger first batch processing and chain if needed
  */
 async function triggerFirstBatch() {
   try {
-    const result = await processSyncTaskBatch();
+    console.log('[Retry] Starting batch processing chain...');
 
-    if (result.hasMore && result.taskId) {
-      console.log(`[Retry] First batch completed, triggering next batch for task ${result.taskId}`);
+    // Process batches in a loop until done or timeout
+    let batchCount = 0;
+    const maxBatchesPerInvocation = 3;
 
-      // Chain the next batch
-      const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || process.env.VERCEL_URL
+    while (batchCount < maxBatchesPerInvocation) {
+      console.log(`[Retry] Processing batch #${batchCount + 1}...`);
+
+      const result = await processSyncTaskBatch();
+
+      if (!result.taskId) {
+        console.log('[Retry] No active tasks found');
+        break;
+      }
+
+      console.log(`[Retry] Batch #${batchCount + 1} completed for task ${result.taskId}, hasMore: ${result.hasMore}`);
+
+      if (!result.hasMore) {
+        console.log('[Retry] All batches completed!');
+        break;
+      }
+
+      batchCount++;
+    }
+
+    // If we hit the limit and there's still more work, trigger via HTTP
+    if (batchCount >= maxBatchesPerInvocation) {
+      console.log('[Retry] Hit batch limit, triggering continuation...');
+
+      const baseUrl = process.env.VERCEL_URL
         ? `https://${process.env.VERCEL_URL}`
-        : 'http://localhost:3000';
+        : process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
 
       fetch(`${baseUrl}/api/cron/sync-to-github`, {
         method: 'GET',
@@ -131,10 +155,10 @@ async function triggerFirstBatch() {
           'Authorization': `Bearer ${process.env.CRON_SECRET || 'internal'}`,
         },
       }).catch((error) => {
-        console.error('[Retry] Failed to chain next batch:', error);
+        console.error('[Retry] Failed to trigger continuation:', error);
       });
     }
   } catch (error) {
-    console.error('[Retry] Error processing first batch:', error);
+    console.error('[Retry] Error in batch processing chain:', error);
   }
 }

@@ -11,7 +11,7 @@ export const runtime = 'nodejs';
 export const maxDuration = 10; // Vercel Hobby limit
 
 export async function GET(request: NextRequest) {
-  console.log('[BatchProcessor] Processing next batch...');
+  console.log('[BatchProcessor] === Invocation started ===');
 
   try {
     // Verify secret (for security)
@@ -26,26 +26,39 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Process one batch of files
-    const result = await processSyncTaskBatch();
+    // Process multiple batches in a loop (up to a limit)
+    let batchCount = 0;
+    const maxBatchesPerInvocation = 3;
+    let lastResult: { hasMore: boolean; taskId?: string } = { hasMore: false };
 
-    if (!result.taskId) {
-      console.log('[BatchProcessor] No active tasks to process');
-      return NextResponse.json({
-        success: true,
-        message: 'No active tasks',
-      });
+    while (batchCount < maxBatchesPerInvocation) {
+      console.log(`[BatchProcessor] Processing batch #${batchCount + 1}...`);
+
+      const result = await processSyncTaskBatch();
+
+      if (!result.taskId) {
+        console.log('[BatchProcessor] No active tasks to process');
+        break;
+      }
+
+      console.log(`[BatchProcessor] Batch #${batchCount + 1} completed for task ${result.taskId}, hasMore: ${result.hasMore}`);
+      lastResult = result;
+
+      if (!result.hasMore) {
+        console.log('[BatchProcessor] Task completed!');
+        break;
+      }
+
+      batchCount++;
     }
 
-    console.log(`[BatchProcessor] Processed task ${result.taskId}, hasMore: ${result.hasMore}`);
+    // If more work remains after hitting the limit, trigger another invocation
+    if (lastResult.hasMore && batchCount >= maxBatchesPerInvocation) {
+      console.log('[BatchProcessor] Hit batch limit, triggering next invocation...');
 
-    // If more work remains, trigger next batch
-    if (result.hasMore) {
-      console.log('[BatchProcessor] Triggering next batch...');
-
-      const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || process.env.VERCEL_URL
+      const baseUrl = process.env.VERCEL_URL
         ? `https://${process.env.VERCEL_URL}`
-        : 'http://localhost:3000';
+        : process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
 
       // Fire and forget - chain the next batch
       fetch(`${baseUrl}/api/cron/sync-to-github`, {
@@ -54,28 +67,32 @@ export async function GET(request: NextRequest) {
           'Authorization': `Bearer ${secret}`,
         },
       }).catch((error) => {
-        console.error('[BatchProcessor] Failed to chain next batch:', error);
+        console.error('[BatchProcessor] Failed to chain next invocation:', error);
       });
     }
 
+    console.log('[BatchProcessor] === Invocation completed ===');
+
     return NextResponse.json({
       success: true,
-      taskId: result.taskId,
-      hasMore: result.hasMore,
-      message: result.hasMore
-        ? 'Batch processed, next batch triggered'
-        : 'Task completed',
-    });
+      batchesProcessed: batchCount,
+      taskId: lastResult.taskId,
+      hasMore: lastResult.hasMore,
+      message: batchCount === 0
+        ? 'No active tasks'
+        : lastResult.hasMore
+          ? `Processed ${batchCount} batches, more work remaining`
+          : 'Task completed',
 
-  } catch (error: any) {
-    console.error('[BatchProcessor] Error:', error);
+    } catch (error: any) {
+      console.error('[BatchProcessor] Error:', error);
 
-    return NextResponse.json(
-      {
-        success: false,
-        error: error.message || 'Unknown error',
-      },
-      { status: 500 }
-    );
+      return NextResponse.json(
+        {
+          success: false,
+          error: error.message || 'Unknown error',
+        },
+        { status: 500 }
+      );
+    }
   }
-}

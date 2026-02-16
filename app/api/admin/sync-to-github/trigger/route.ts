@@ -21,12 +21,12 @@ export async function POST(request: NextRequest) {
     // Create sync task
     const taskId = await createSyncTask();
 
-    console.log(`[Trigger] Created task ${taskId}, starting first batch...`);
+    console.log(`[Trigger] Created task ${taskId}, processing first batch immediately...`);
 
-    // Start first batch immediately in background
-    // Don't await - let it run after response
-    triggerNextBatch().catch((error) => {
-      console.error('[Trigger] Failed to start first batch:', error);
+    // Process first batch immediately (don't wait for response)
+    // This ensures at least the first batch starts before function terminates
+    processFirstBatch().catch((error) => {
+      console.error('[Trigger] Failed to process first batch:', error);
     });
 
     return NextResponse.json({
@@ -58,34 +58,71 @@ export async function POST(request: NextRequest) {
 }
 
 /**
- * Trigger next batch processing
- * This creates a chain of batch processing without cron
+ * Process first batch and chain subsequent batches
+ * Uses recursive processing to avoid HTTP overhead
  */
-async function triggerNextBatch() {
+async function processFirstBatch() {
   try {
-    const result = await processSyncTaskBatch();
+    console.log('[Trigger] Starting batch processing chain...');
 
-    if (result.hasMore && result.taskId) {
-      console.log(`[Trigger] Batch completed, triggering next batch for task ${result.taskId}`);
+    // Process batches in a loop until done or timeout
+    let batchCount = 0;
+    const maxBatchesPerInvocation = 3; // Process up to 3 batches per trigger (safety limit)
 
-      // Chain the next batch by calling ourselves via HTTP
-      const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || process.env.VERCEL_URL
-        ? `https://${process.env.VERCEL_URL}`
-        : 'http://localhost:3000';
+    while (batchCount < maxBatchesPerInvocation) {
+      console.log(`[Trigger] Processing batch #${batchCount + 1}...`);
 
-      // Fire and forget - don't wait for response
-      fetch(`${baseUrl}/api/cron/sync-to-github`, {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${process.env.CRON_SECRET || 'internal'}`,
-        },
-      }).catch((error) => {
-        console.error('[Trigger] Failed to chain next batch:', error);
-      });
-    } else {
-      console.log('[Trigger] All batches completed or no more work');
+      const result = await processSyncTaskBatch();
+
+      if (!result.taskId) {
+        console.log('[Trigger] No active tasks found');
+        break;
+      }
+
+      console.log(`[Trigger] Batch #${batchCount + 1} completed for task ${result.taskId}, hasMore: ${result.hasMore}`);
+
+      if (!result.hasMore) {
+        console.log('[Trigger] All batches completed!');
+        break;
+      }
+
+      batchCount++;
+    }
+
+    // If we hit the limit and there's still more work, trigger via HTTP
+    if (batchCount >= maxBatchesPerInvocation) {
+      console.log('[Trigger] Hit batch limit, triggering continuation via HTTP...');
+      await triggerContinuation();
     }
   } catch (error) {
-    console.error('[Trigger] Error processing batch:', error);
+    console.error('[Trigger] Error in batch processing chain:', error);
+  }
+}
+
+/**
+ * Trigger continuation via HTTP for remaining work
+ */
+async function triggerContinuation() {
+  try {
+    const baseUrl = process.env.VERCEL_URL
+      ? `https://${process.env.VERCEL_URL}`
+      : process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
+
+    console.log(`[Trigger] Calling continuation URL: ${baseUrl}/api/cron/sync-to-github`);
+
+    const response = await fetch(`${baseUrl}/api/cron/sync-to-github`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${process.env.CRON_SECRET || 'internal'}`,
+      },
+    });
+
+    if (!response.ok) {
+      console.error(`[Trigger] Continuation call failed: ${response.status} ${response.statusText}`);
+    } else {
+      console.log('[Trigger] Continuation triggered successfully');
+    }
+  } catch (error) {
+    console.error('[Trigger] Failed to trigger continuation:', error);
   }
 }
