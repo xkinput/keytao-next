@@ -362,26 +362,24 @@ export default function InstallPage() {
       const zipContent = await zip.loadAsync(blob)
 
       // Check and request write permission for the directory
-      try {
-        type DirectoryHandleWithPermission = FileSystemDirectoryHandle & {
-          queryPermission?(descriptor: { mode: 'read' | 'readwrite' }): Promise<'granted' | 'denied' | 'prompt'>
-          requestPermission?(descriptor: { mode: 'read' | 'readwrite' }): Promise<'granted' | 'denied'>
-        }
-        const dirHandle = selectedDirectory as DirectoryHandleWithPermission
+      type DirectoryHandleWithPermission = FileSystemDirectoryHandle & {
+        queryPermission?(descriptor: { mode: 'read' | 'readwrite' }): Promise<'granted' | 'denied' | 'prompt'>
+        requestPermission?(descriptor: { mode: 'read' | 'readwrite' }): Promise<'granted' | 'denied'>
+      }
+      const dirHandle = selectedDirectory as DirectoryHandleWithPermission
 
-        // Try to check permission first
-        const permission = await dirHandle.queryPermission?.({ mode: 'readwrite' })
+      if (dirHandle.queryPermission) {
+        const permission = await dirHandle.queryPermission({ mode: 'readwrite' })
         if (permission === 'prompt') {
           const newPermission = await dirHandle.requestPermission?.({ mode: 'readwrite' })
           if (newPermission !== 'granted') {
-            throw new Error('需要目录写入权限才能安装')
+            throw new Error('需要目录写入权限才能安装，请在浏览器弹窗中允许访问')
           }
         } else if (permission === 'denied') {
-          throw new Error('没有目录写入权限，请重新选择目录')
+          throw new Error('没有目录写入权限，请重新选择可写目录')
         }
-      } catch (permErr) {
-        // If permission API is not available, try to proceed anyway
-        console.warn('Permission check not available, attempting to write:', permErr)
+      } else {
+        console.warn('Permission API not available, attempting to write directly')
       }
 
       // Extract files
@@ -417,12 +415,36 @@ export default function InstallPage() {
             }
           }
 
-          // Write file content
-          const fileHandle = await currentDir.getFileHandle(fileName, { create: true })
-          const writable = await fileHandle.createWritable()
           const content = await file.async('blob')
-          await writable.write(content)
-          await writable.close()
+
+          const writeFile = async () => {
+            const fileHandle = await currentDir.getFileHandle(fileName, { create: true })
+            const writable = await fileHandle.createWritable()
+            await writable.write(content)
+            await writable.close()
+          }
+
+          try {
+            await writeFile()
+          } catch (writeErr) {
+            const errName = writeErr instanceof Error ? writeErr.name : ''
+            const errMessage = writeErr instanceof Error ? writeErr.message.toLowerCase() : ''
+            const isReadOnlyError =
+              errName === 'NoModificationAllowedError' ||
+              errName === 'NotAllowedError' ||
+              errMessage.includes('read-only')
+
+            if (!isReadOnlyError) {
+              throw writeErr
+            }
+
+            try {
+              await currentDir.removeEntry(fileName)
+              await writeFile()
+            } catch {
+              throw new Error(`文件 ${actualPath} 为只读且无法覆盖，请检查目录权限或手动删除后重试`)
+            }
+          }
         }
 
         processedCount++
