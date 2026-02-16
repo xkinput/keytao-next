@@ -19,7 +19,7 @@ export default function ImportPage() {
   const { token, isAuthenticated } = useAuthStore()
 
   // Check ROOT admin permission
-  const { data: adminCheck, isLoading } = useAPI<{
+  const { data: adminCheck, isLoading, mutate: refreshStats } = useAPI<{
     isRootAdmin: boolean
     phrasesByType: Record<string, number>
   }>(
@@ -261,6 +261,8 @@ export default function ImportPage() {
       alert('导入过程出错')
     } finally {
       setImporting(false)
+      // Refresh stats after import completes
+      refreshStats()
     }
   }
 
