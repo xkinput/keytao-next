@@ -26,6 +26,7 @@ interface SyncProgressModalProps {
   onClose: () => void
   token: string
   onComplete: () => void
+  retryTaskId?: string // Optional: if provided, retry this task instead of creating new
 }
 
 export function SyncProgressModal({
@@ -33,6 +34,7 @@ export function SyncProgressModal({
   onClose,
   token,
   onComplete,
+  retryTaskId,
 }: SyncProgressModalProps) {
   const [status, setStatus] = useState<'preparing' | 'processing' | 'finalizing' | 'completed' | 'error'>('preparing')
   const [taskId, setTaskId] = useState<string>('')
@@ -48,13 +50,18 @@ export function SyncProgressModal({
 
   const progress = totalCount > 0 ? Math.floor((processedCount / totalCount) * 100) : 0
 
-  // Prepare sync task
+  // Prepare sync task (or retry existing task)
   const prepare = async () => {
     try {
       setStatus('preparing')
       setError(null)
 
-      const response = await fetch('/api/admin/sync-to-github/prepare', {
+      // Use retry endpoint if retryTaskId is provided
+      const url = retryTaskId
+        ? `/api/admin/sync-to-github/retry/${retryTaskId}`
+        : '/api/admin/sync-to-github/prepare'
+
+      const response = await fetch(url, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${token}`,
@@ -175,20 +182,35 @@ export function SyncProgressModal({
     }
   }
 
-  const handleClose = () => {
+  // Reset state when modal closes
+  const handleModalClose = () => {
     if (status === 'processing' && processedCount < totalCount) {
       if (!confirm('同步尚未完成，确定要关闭吗？\n\n你可以稍后在任务列表中重试。')) {
         return
       }
     }
+    // Reset state
+    setStatus('preparing')
+    setTaskId('')
+    setFiles([])
+    setSummary('')
+    setProcessedCount(0)
+    setTotalCount(0)
+    setCurrentBatch(0)
+    setError(null)
+    setPrUrl(null)
+    setIsProcessing(false)
     onClose()
   }
+
+  const handleClose = handleModalClose
 
   const handleContinue = () => {
     processNextBatch()
   }
 
   // Auto start preparation when modal opens
+  // Reset state when modal opens for a new/different task
   if (isOpen && status === 'preparing' && !taskId) {
     prepare()
   }

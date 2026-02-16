@@ -68,10 +68,10 @@ export default function SyncPage() {
   const { token } = useAuthStore()
   const [currentPage, setCurrentPage] = useState(1)
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false)
+  const [retryTaskId, setRetryTaskId] = useState<string | undefined>(undefined)
   const [selectedTask, setSelectedTask] = useState<SyncTask | null>(null)
   const [isBatchModalOpen, setIsBatchModalOpen] = useState(false)
   const [cancellingTaskId, setCancellingTaskId] = useState<string | null>(null)
-  const [retryingTaskId, setRetryingTaskId] = useState<string | null>(null)
 
   // Check if user is admin
   const { data: adminCheck } = useAPI(
@@ -179,35 +179,10 @@ export default function SyncPage() {
     }
   }
 
-  const handleRetryTask = async (taskId: string) => {
-    if (!confirm('确定要重试这个任务吗？\n\n任务将从头开始执行。')) {
-      return
-    }
-
-    setRetryingTaskId(taskId)
-
-    try {
-      const response = await fetch(`/api/admin/sync-to-github/retry/${taskId}`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      })
-
-      const result = await response.json()
-
-      if (!response.ok || !result.success) {
-        throw new Error(result.error || '重试任务失败')
-      }
-
-      // Refresh task list
-      mutate()
-      mutateStats()
-    } catch (error) {
-      alert(error instanceof Error ? error.message : '重试任务失败')
-    } finally {
-      setRetryingTaskId(null)
-    }
+  const handleRetryTask = (taskId: string) => {
+    // Open sync progress modal in retry mode
+    setRetryTaskId(taskId)
+    setIsSyncModalOpen(true)
   }
 
   const syncTableColumns = [
@@ -433,7 +408,6 @@ export default function SyncPage() {
                                 variant="light"
                                 color="success"
                                 onPress={() => handleRetryTask(task.id)}
-                                isLoading={retryingTaskId === task.id}
                               >
                                 重试
                               </Button>
@@ -528,9 +502,13 @@ export default function SyncPage() {
           {/* Sync Progress Modal */}
           <SyncProgressModal
             isOpen={isSyncModalOpen}
-            onClose={() => setIsSyncModalOpen(false)}
+            onClose={() => {
+              setIsSyncModalOpen(false)
+              setRetryTaskId(undefined)
+            }}
             token={token || ''}
             onComplete={handleSyncComplete}
+            retryTaskId={retryTaskId}
           />
         </main>
       </div>
