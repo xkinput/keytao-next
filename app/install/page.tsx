@@ -34,7 +34,6 @@ interface RimeDownloadInfo {
   commands?: string[]
   nixosNote?: string
   nixosUrl?: string
-  tutorialUrl?: string
   configPath?: string
   appStoreNote?: string
 }
@@ -52,6 +51,7 @@ export default function InstallPage() {
   const [installProgress, setInstallProgress] = useState(0)
   const [installStatus, setInstallStatus] = useState<string>('')
   const [installSuccess, setInstallSuccess] = useState(false)
+  const [hasWriteSupport, setHasWriteSupport] = useState(true)
 
   useEffect(() => {
     detectOS()
@@ -105,7 +105,17 @@ export default function InstallPage() {
       browser = `Firefox ${version}`
     }
 
-    const apiSupport = 'showDirectoryPicker' in window ? '✓ 支持' : '✗ 不支持'
+    // Check File System API support with write capability
+    let apiSupport = '✗ 不支持'
+    let writeSupport = false
+    if ('showDirectoryPicker' in window) {
+      // Check if createWritable is available on FileSystemFileHandle
+      writeSupport = typeof FileSystemFileHandle !== 'undefined' &&
+        'createWritable' in FileSystemFileHandle.prototype
+      apiSupport = writeSupport ? '✓ 完全支持 (读写)' : '⚠ 部分支持 (仅读取)'
+    }
+
+    setHasWriteSupport(writeSupport)
     setBrowserInfo(`${browser} (File System API: ${apiSupport})`)
   }
 
@@ -180,8 +190,7 @@ export default function InstallPage() {
           description: 'Android 平台的 Rime 输入法',
           url: 'https://github.com/osfans/trime',
           installMethod: '从 GitHub 下载 APK 安装包或通过 F-Droid 安装',
-          configPath: '/sdcard/rime 或内部存储的 rime 目录',
-          tutorialUrl: 'https://telegra.ph/Android-安装键道同文输入法图文教程-12-25'
+          configPath: '/sdcard/rime 或内部存储的 rime 目录'
         }
       case 'ios':
         return {
@@ -190,8 +199,7 @@ export default function InstallPage() {
           url: 'https://github.com/jimmy54/iRime',
           installMethod: '从 App Store 下载安装',
           appStoreNote: '在 App Store 搜索 "iRime" 下载安装',
-          configPath: 'iRime 应用内通过 iCloud 或文件管理导入',
-          tutorialUrl: 'https://telegra.ph/iRime-如何导入输入方案---以键道为例-12-25'
+          configPath: 'iRime 应用内通过 iCloud 或文件管理导入'
         }
       default:
         return null
@@ -557,22 +565,6 @@ export default function InstallPage() {
                           </div>
                         )}
 
-                        {rimeInfo.tutorialUrl && (
-                          <div>
-                            <p className="text-sm font-semibold mb-2">
-                              📖 安装教程：
-                            </p>
-                            <Link
-                              href={rimeInfo.tutorialUrl}
-                              isExternal
-                              showAnchorIcon
-                              className="text-sm font-medium"
-                            >
-                              查看详细图文教程
-                            </Link>
-                          </div>
-                        )}
-
                         <Alert
                           color="warning"
                           description="安装完成后，请重启输入法或重新登录系统，确保输入法正常工作后再继续下一步。"
@@ -627,40 +619,6 @@ export default function InstallPage() {
                 />
               )}
 
-              {/* Mobile Info */}
-              {(osType === 'android' || osType === 'ios') && (
-                <Alert
-                  color="primary"
-                  title="移动设备提示"
-                  description={
-                    <div className="text-sm">
-                      <p className="mb-2">部分移动浏览器支持文件系统访问，您可以尝试下方的安装功能。</p>
-                      <p>如遇到浏览器不支持的情况，请使用手动安装方式：</p>
-                      <ul className="list-disc list-inside space-y-1 text-xs ml-2 mt-1">
-                        {osType === 'android' && (
-                          <>
-                            <li>确保已安装同文输入法（Trime）</li>
-                            <li>从 <Link href="https://github.com/xkinput/KeyTao/releases" isExternal showAnchorIcon className="text-xs">GitHub Releases</Link> 下载最新方案文件</li>
-                            <li>将文件解压并拷贝到 Rime 配置目录</li>
-                            <li>在输入法设置中点击&ldquo;重新部署&rdquo;</li>
-                            <li>详见 <Link href="https://telegra.ph/Android-安装键道同文输入法图文教程-12-25" isExternal showAnchorIcon className="text-xs">完整安装教程</Link></li>
-                          </>
-                        )}
-                        {osType === 'ios' && (
-                          <>
-                            <li>确保已安装 iRime 输入法</li>
-                            <li>从 <Link href="https://github.com/xkinput/KeyTao/releases" isExternal showAnchorIcon className="text-xs">GitHub Releases</Link> 下载方案文件</li>
-                            <li>通过 iCloud Drive 或文件共享导入方案</li>
-                            <li>详见 <Link href="https://telegra.ph/iRime-如何导入输入方案---以键道为例-12-25" isExternal showAnchorIcon className="text-xs">iRime 导入教程</Link></li>
-                          </>
-                        )}
-                      </ul>
-                    </div>
-                  }
-                  className="mb-3"
-                />
-              )}
-
               {/* Installation Warning */}
               <Alert
                 color="danger"
@@ -684,6 +642,33 @@ export default function InstallPage() {
                 />
               )}
 
+              {!hasWriteSupport && (
+                <>
+                  <Alert
+                    color="danger"
+                    title="权限不完整，无法安装"
+                    description={
+                      <>
+                        您的浏览器不支持文件写入功能。<br />
+                        <strong>请使用支持 File System Access API 的浏览器</strong>（如 Chrome 86+、Edge 86+）或使用 <strong>GitHub 同步功能</strong>进行安装。
+                      </>
+                    }
+                    className="mb-3"
+                  />
+                  <Alert
+                    title="📦 手动安装方式"
+                    description={
+                      <div className="text-xs space-y-1">
+                        <p>1. 前往 <Link href="https://github.com/xkinput/KeyTao/releases" isExternal showAnchorIcon className="text-xs">​GitHub Releases</Link> 下载对应系统的压缩包</p>
+                        <p>2. 解压压缩包到 Rime 配置目录中</p>
+                        <p>3. 重新部署 Rime 输入法即可</p>
+                      </div>
+                    }
+                    className="mb-3"
+                  />
+                </>
+              )}
+
               <p className="text-sm text-default-600 mb-2">
                 选择一个目录，KeyTao 输入法方案将被安装到该目录
               </p>
@@ -697,7 +682,7 @@ export default function InstallPage() {
                   color="primary"
                   onPress={selectDirectory}
                   isLoading={isLoading}
-                  isDisabled={isLoading || isInstalling}
+                  isDisabled={!hasWriteSupport || isLoading || isInstalling}
                   className="flex-1 sm:flex-none"
                 >
                   {selectedDirectory ? '重新选择目录' : '选择安装目录'}
