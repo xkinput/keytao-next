@@ -87,7 +87,7 @@ export default function SyncPage() {
   )
 
   // Get stats including pending sync batches count
-  const { data: statsData } = useAPI<StatsResponse>(
+  const { data: statsData, mutate: mutateStats } = useAPI<StatsResponse>(
     token ? '/api/admin/stats' : null
   )
 
@@ -116,8 +116,9 @@ export default function SyncPage() {
         throw new Error(result.error || '触发同步失败')
       }
 
-      // Refresh task list
+      // Refresh task list and stats
       mutate()
+      mutateStats()
     } catch (error) {
       setTriggerError(error instanceof Error ? error.message : '触发同步失败')
     } finally {
@@ -184,7 +185,10 @@ export default function SyncPage() {
                 isIconOnly
                 variant="flat"
                 size="sm"
-                onPress={() => mutate()}
+                onPress={() => {
+                  mutate()
+                  mutateStats()
+                }}
               >
                 <RefreshCw className="w-4 h-4" />
               </Button>
