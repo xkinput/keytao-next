@@ -28,6 +28,7 @@ import { useAPI } from '@/lib/hooks/useSWR'
 import { useAuthStore } from '@/lib/store/auth'
 import { format } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
+import { SyncProgressModal } from '@/app/components/SyncProgressModal'
 
 interface SyncTask {
   id: string
@@ -66,8 +67,7 @@ interface StatsResponse {
 export default function SyncPage() {
   const { token } = useAuthStore()
   const [currentPage, setCurrentPage] = useState(1)
-  const [isTriggering, setIsTriggering] = useState(false)
-  const [triggerError, setTriggerError] = useState<string | null>(null)
+  const [isSyncModalOpen, setIsSyncModalOpen] = useState(false)
   const [selectedTask, setSelectedTask] = useState<SyncTask | null>(null)
   const [isBatchModalOpen, setIsBatchModalOpen] = useState(false)
   const [cancellingTaskId, setCancellingTaskId] = useState<string | null>(null)
@@ -100,32 +100,14 @@ export default function SyncPage() {
 
   const showSkeleton = isLoading && !tasksData
 
-  const handleTriggerSync = async () => {
-    setIsTriggering(true)
-    setTriggerError(null)
+  const handleTriggerSync = () => {
+    setIsSyncModalOpen(true)
+  }
 
-    try {
-      const response = await fetch('/api/admin/sync-to-github/trigger', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      })
-
-      const result = await response.json()
-
-      if (!response.ok || !result.success) {
-        throw new Error(result.error || '触发同步失败')
-      }
-
-      // Refresh task list and stats
-      mutate()
-      mutateStats()
-    } catch (error) {
-      setTriggerError(error instanceof Error ? error.message : '触发同步失败')
-    } finally {
-      setIsTriggering(false)
-    }
+  const handleSyncComplete = () => {
+    // Refresh task list and stats
+    mutate()
+    mutateStats()
   }
 
   const getStatusChip = (status: SyncTask['status']) => {
@@ -272,22 +254,13 @@ export default function SyncPage() {
                 <Button
                   color="primary"
                   onPress={handleTriggerSync}
-                  isLoading={isTriggering}
                   isDisabled={!!runningTask || !statsData || statsData.pendingSyncBatches === 0}
                 >
-                  触发同步
+                  同步到 GitHub
                 </Button>
               )}
             </div>
           </div>
-
-          {triggerError && (
-            <Card className="mb-6 bg-danger-50 border-danger">
-              <CardBody>
-                <p className="text-danger">{triggerError}</p>
-              </CardBody>
-            </Card>
-          )}
 
           {/* Current Sync Status */}
           {runningTask && (
@@ -551,6 +524,14 @@ export default function SyncPage() {
               </ModalFooter>
             </ModalContent>
           </Modal>
+
+          {/* Sync Progress Modal */}
+          <SyncProgressModal
+            isOpen={isSyncModalOpen}
+            onClose={() => setIsSyncModalOpen(false)}
+            token={token || ''}
+            onComplete={handleSyncComplete}
+          />
         </main>
       </div>
     </div>
