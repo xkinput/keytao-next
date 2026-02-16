@@ -159,6 +159,7 @@ export class GithubSyncService {
 
   /**
    * Get file content from repository
+   * Handles both small and large files (> 1MB)
    */
   async getFileContent(branch: string, path: string): Promise<string | null> {
     try {
@@ -169,10 +170,33 @@ export class GithubSyncService {
         ref: branch,
       });
 
+      // Handle directory response
+      if (Array.isArray(data)) {
+        return null;
+      }
+
+      // For small files (< 1MB), content is returned directly
       if ('content' in data && data.content) {
         // GitHub API returns base64 encoded content
         return Buffer.from(data.content, 'base64').toString('utf-8');
       }
+
+      // For large files (> 1MB), content is null, use Git Blob API
+      if ('sha' in data && data.sha) {
+        console.log(`[getFileContent] Large file detected: ${path}, using Blob API`);
+
+        const blobResponse = await this.octokit.git.getBlob({
+          owner: this.owner,
+          repo: this.repo,
+          file_sha: data.sha,
+        });
+
+        if (blobResponse.data.content) {
+          // Blob API also returns base64 encoded content
+          return Buffer.from(blobResponse.data.content, 'base64').toString('utf-8');
+        }
+      }
+
       return null;
     } catch (error: any) {
       if (error.status === 404) {
