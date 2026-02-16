@@ -43,7 +43,19 @@ interface SyncTask {
   batches: Array<{
     id: string
     description: string
+    stats: {
+      add: number
+      change: number
+      delete: number
+    }
+    totalPullRequests: number
   }>
+  totalStats: {
+    add: number
+    change: number
+    delete: number
+    total: number
+  }
 }
 
 interface TasksResponse {
@@ -286,11 +298,37 @@ export default function SyncPage() {
 
                   {runningTask.batches.length > 0 && (
                     <div>
-                      <span className="text-sm text-default-600">包含批次:</span>
-                      <div className="mt-2 space-y-1">
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="text-sm text-default-600">包含批次:</span>
+                        {runningTask.totalStats && runningTask.totalStats.total > 0 && (
+                          <span className="text-xs text-default-500">
+                            (共 {runningTask.totalStats.total} 个修改)
+                          </span>
+                        )}
+                      </div>
+                      <div className="mt-2 space-y-2">
                         {runningTask.batches.map((batch) => (
-                          <div key={batch.id} className="text-sm">
-                            • {batch.description}
+                          <div key={batch.id} className="flex items-center gap-2">
+                            <span className="text-sm">• {batch.description}</span>
+                            {batch.stats && batch.totalPullRequests > 0 && (
+                              <div className="flex gap-1">
+                                {batch.stats.add > 0 && (
+                                  <Chip size="sm" color="success" variant="flat" className="text-xs">
+                                    +{batch.stats.add}
+                                  </Chip>
+                                )}
+                                {batch.stats.change > 0 && (
+                                  <Chip size="sm" color="warning" variant="flat" className="text-xs">
+                                    ~{batch.stats.change}
+                                  </Chip>
+                                )}
+                                {batch.stats.delete > 0 && (
+                                  <Chip size="sm" color="danger" variant="flat" className="text-xs">
+                                    -{batch.stats.delete}
+                                  </Chip>
+                                )}
+                              </div>
+                            )}
                           </div>
                         ))}
                       </div>
@@ -366,14 +404,21 @@ export default function SyncPage() {
                         </TableCell>
                         <TableCell>
                           {task.batches.length > 0 ? (
-                            <Button
-                              size="sm"
-                              variant="light"
-                              color="primary"
-                              onPress={() => handleOpenBatchModal(task)}
-                            >
-                              {task.batches.length} 个批次
-                            </Button>
+                            <div className="flex flex-col gap-1">
+                              <Button
+                                size="sm"
+                                variant="light"
+                                color="primary"
+                                onPress={() => handleOpenBatchModal(task)}
+                              >
+                                {task.batches.length} 个批次
+                              </Button>
+                              {task.totalStats && task.totalStats.total > 0 && (
+                                <span className="text-xs text-default-500">
+                                  共 {task.totalStats.total} 个修改
+                                </span>
+                              )}
+                            </div>
                           ) : (
                             <span className="text-default-400">0</span>
                           )}
@@ -467,7 +512,7 @@ export default function SyncPage() {
                     {selectedTask.batches.map((batch, index) => (
                       <Card key={batch.id} className="border-1 border-default-200 shadow-sm">
                         <CardBody className="py-3">
-                          <div className="flex items-center justify-between">
+                          <div className="flex items-start justify-between gap-4">
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2 mb-1">
                                 <span className="text-xs text-default-500">
@@ -477,9 +522,31 @@ export default function SyncPage() {
                                   {batch.id.slice(0, 8)}...
                                 </code>
                               </div>
-                              <p className="text-sm font-medium text-default-700 truncate">
+                              <p className="text-sm font-medium text-default-700 mb-2">
                                 {batch.description || '无描述'}
                               </p>
+                              {batch.stats && batch.totalPullRequests > 0 && (
+                                <div className="flex flex-wrap gap-2 text-xs">
+                                  {batch.stats.add > 0 && (
+                                    <Chip size="sm" color="success" variant="flat">
+                                      +{batch.stats.add} 添加
+                                    </Chip>
+                                  )}
+                                  {batch.stats.change > 0 && (
+                                    <Chip size="sm" color="warning" variant="flat">
+                                      ~{batch.stats.change} 修改
+                                    </Chip>
+                                  )}
+                                  {batch.stats.delete > 0 && (
+                                    <Chip size="sm" color="danger" variant="flat">
+                                      -{batch.stats.delete} 删除
+                                    </Chip>
+                                  )}
+                                  <span className="text-default-500 self-center">
+                                    (共 {batch.totalPullRequests} 个)
+                                  </span>
+                                </div>
+                              )}
                             </div>
                             <Button
                               as={Link}
@@ -487,7 +554,7 @@ export default function SyncPage() {
                               size="sm"
                               color="primary"
                               variant="flat"
-                              className="ml-4 shrink-0"
+                              className="shrink-0"
                             >
                               查看详情
                             </Button>
