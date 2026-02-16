@@ -74,21 +74,15 @@ export async function POST(
     }
 
     // Check if task has batches
-    if (task.batches.length === 0) {
-      return NextResponse.json(
-        { success: false, error: '任务没有关联的批次' },
-        { status: 400 }
-      );
+    const isManualSync = task.batches.length === 0;
+
+    if (isManualSync) {
+      console.log(`[Retry] Manual sync task ${taskId} - no batches`);
+    } else {
+      console.log(`[Retry] Task ${taskId} has ${task.batches.length} batches`);
     }
 
     const allPullRequests = task.batches.flatMap((batch) => batch.pullRequests);
-
-    if (allPullRequests.length === 0) {
-      return NextResponse.json(
-        { success: false, error: '没有已批准的 Pull Request' },
-        { status: 400 }
-      );
-    }
 
     console.log(`[Retry] Resetting task ${taskId}...`);
 
@@ -127,7 +121,9 @@ export async function POST(
     console.log(`[Retry] Generated ${fileNames.length} dictionary files from ${phrases.length} phrases`);
 
     // Generate sync summary
-    const summary = generateSyncSummary(allPullRequests, task.batches);
+    const summary = isManualSync
+      ? `## 词库完整同步（重试）\n\n本次为管理员手动触发的完整词库同步。\n\n### 同步统计\n\n- 总计: **${phrases.length}** 条词条\n\n---\n\n_此PR由KeyTao管理系统自动生成_`
+      : generateSyncSummary(allPullRequests, task.batches);
     console.log(`[Retry] Generated summary length: ${summary.length}`);
     console.log(`[Retry] Summary preview:\n${summary.slice(0, 300)}`);
 

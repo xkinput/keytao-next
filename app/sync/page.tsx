@@ -222,7 +222,7 @@ export default function SyncPage() {
                     variant="flat"
                     size="sm"
                   >
-                    {statsData.pendingSyncBatches > 0 ? `${statsData.pendingSyncBatches} 个` : '无待同步批次'}
+                    {statsData.pendingSyncBatches > 0 ? `${statsData.pendingSyncBatches} 个` : '无'}
                   </Chip>
                 </div>
               )}
@@ -241,13 +241,26 @@ export default function SyncPage() {
                 <Button
                   color="primary"
                   onPress={handleTriggerSync}
-                  isDisabled={!!runningTask || !statsData || statsData.pendingSyncBatches === 0}
+                  isDisabled={!!runningTask}
                 >
-                  同步到 GitHub
+                  {statsData && statsData.pendingSyncBatches > 0
+                    ? '同步到 GitHub'
+                    : '手动完整同步'}
                 </Button>
               )}
             </div>
           </div>
+
+          {/* Manual sync info card */}
+          {isAdmin && statsData && statsData.pendingSyncBatches === 0 && !runningTask && (
+            <Card className="mb-6 border border-primary-200 bg-primary-50/50 dark:bg-primary-900/10">
+              <CardBody className="py-4">
+                <p className="text-sm text-default-700">
+                  💡 当前没有待审批的批次。点击「手动完整同步」可以将词库的当前完整状态同步到 GitHub（适用于修复同步问题或更新配置）。
+                </p>
+              </CardBody>
+            </Card>
+          )}
 
           {/* Current Sync Status */}
           {runningTask && (
@@ -420,7 +433,9 @@ export default function SyncPage() {
                               )}
                             </div>
                           ) : (
-                            <span className="text-default-400">0</span>
+                            <Chip size="sm" variant="flat" color="default">
+                              手动完整同步
+                            </Chip>
                           )}
                         </TableCell>
                         <TableCell>

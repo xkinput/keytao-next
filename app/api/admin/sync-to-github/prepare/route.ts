@@ -25,7 +25,7 @@ export async function POST() {
 
     console.log('[Prepare] Creating sync task...');
 
-    // Find approved batches
+    // Find approved batches (optional - can sync without batches)
     const batches = await prisma.batch.findMany({
       where: {
         status: 'Approved',
@@ -50,20 +50,15 @@ export async function POST() {
       },
     });
 
-    if (batches.length === 0) {
-      return NextResponse.json(
-        { success: false, error: '没有需要同步的批次' },
-        { status: 400 }
-      );
-    }
-
     const allPullRequests = batches.flatMap((batch) => batch.pullRequests);
 
-    if (allPullRequests.length === 0) {
-      return NextResponse.json(
-        { success: false, error: '没有已批准的 Pull Request' },
-        { status: 400 }
-      );
+    // Allow manual sync even without batches
+    const isManualSync = batches.length === 0;
+
+    if (isManualSync) {
+      console.log('[Prepare] Manual sync triggered - no pending batches');
+    } else {
+      console.log(`[Prepare] Found ${batches.length} batches with ${allPullRequests.length} pull requests`);
     }
 
     // Generate dictionary files from current Phrase table state (complete final state)
@@ -101,27 +96,28 @@ export async function POST() {
     console.log(`[Prepare] Generated ${fileNames.length} dictionary files from ${phrases.length} phrases`);
 
     // Generate sync summary
-    const summary = generateSyncSummary(allPullRequests, batches);
+    const summary = isManualSync
+      ? `## 词库完整同步\n\n本次为管理员手动触发的完整词库同步。\n\n### 同步统计\n\n- 总计: **${phrases.length}** 条词条\n\n---\n\n_此PR由KeyTao管理系统自动生成_`
+      : generateSyncSummary(allPullRequests, batches);
     console.log(`[Prepare] Generated summary length: ${summary.length}`);
-    console.log(`[Prepare] Summary preview:\n${summary.slice(0, 300)}`);
 
     // Create task
     const task = await prisma.syncTask.create({
       data: {
         status: SyncTaskStatus.Pending,
-        totalItems: allPullRequests.length,
-        batches: {
+        totalItems: allPullRequests.length || phrases.length,
+        batches: batches.length > 0 ? {
           connect: batches.map((batch) => ({ id: batch.id })),
-        },
+        } : undefined,
       },
     });
 
-    console.log(`[Prepare] Task ${task.id} created with ${fileNames.length} files`);
+    console.log(`[Prepare] Task ${task.id} created with ${fileNames.length} files${isManualSync ? ' (manual sync)' : ''}`);
 
     // Prepare file data for frontend
     const files = fileNames.map((fileName) => ({
       name: fileName,
-      content: mergedDictFiles.get(fileName)!,
+      content: dictFiles.get(fileName)!,
     }));
 
     return NextResponse.json({
@@ -144,4 +140,3 @@ export async function POST() {
     );
   }
 }
-d
