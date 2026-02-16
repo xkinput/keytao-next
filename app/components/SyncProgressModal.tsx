@@ -11,10 +11,9 @@ import {
   Progress,
   Card,
   CardBody,
-  Chip,
   Link,
 } from '@heroui/react'
-import { CheckCircle2, AlertCircle, ExternalLink } from 'lucide-react'
+import { CheckCircle2, AlertCircle } from 'lucide-react'
 
 interface SyncFile {
   name: string
@@ -46,10 +45,17 @@ export function SyncProgressModal({
   const [error, setError] = useState<string | null>(null)
   const [prUrl, setPrUrl] = useState<string | null>(null)
   const [isProcessing, setIsProcessing] = useState(false)
-  const [autoMode, setAutoMode] = useState(true)
-  const [hasStarted, setHasStarted] = useState(false) // Track if preparation has started
+  const [hasStarted, setHasStarted] = useState(false)
+  const [githubBranch, setGithubBranch] = useState<string | null>(null)
 
   const progress = totalCount > 0 ? Math.floor((processedCount / totalCount) * 100) : 0
+
+  // Generate GitHub branch URL
+  const githubOwner = 'xkinput'
+  const githubRepo = 'KeyTao'
+  const githubBranchUrl = githubBranch
+    ? `https://github.com/${githubOwner}/${githubRepo}/tree/${githubBranch}`
+    : null
 
   // Prepare sync task (or retry existing task)
   const prepare = async () => {
@@ -82,10 +88,8 @@ export function SyncProgressModal({
       setTotalCount(result.totalFiles)
       setStatus('processing')
 
-      // Auto start if in auto mode
-      if (autoMode) {
-        processNextBatch(result.taskId, result.files, 0)
-      }
+      // Auto start processing
+      processNextBatch(result.taskId, result.files, 0)
     } catch (err) {
       setError(err instanceof Error ? err.message : '准备同步失败')
       setStatus('error')
@@ -137,12 +141,22 @@ export function SyncProgressModal({
         throw new Error(result.error || '提交文件失败')
       }
 
+      // Store branch info if returned
+      if (result.branch && !githubBranch) {
+        setGithubBranch(result.branch)
+      }
+
       setProcessedCount(endIdx)
 
-      // Continue if in auto mode and not finished
-      if (autoMode && endIdx < fileList.length) {
-        setTimeout(() => processNextBatch(tid, fileList, endIdx), 500)
+      // Check if all files are processed
+      if (endIdx >= fileList.length) {
+        // All files processed, finalize
+        await finalize(tid)
+        return
       }
+
+      // Continue automatically
+      setTimeout(() => processNextBatch(tid, fileList, endIdx), 500)
     } catch (err) {
       setError(err instanceof Error ? err.message : '提交文件失败')
       setStatus('error')
@@ -202,21 +216,19 @@ export function SyncProgressModal({
     setError(null)
     setPrUrl(null)
     setIsProcessing(false)
-    setHasStarted(false) // Reset started flag
+    setHasStarted(false)
+    setGithubBranch(null)
     onClose()
   }
 
   const handleClose = handleModalClose
-
-  const handleContinue = () => {
-    processNextBatch()
-  }
 
   // Use useEffect to trigger preparation when modal opens
   useEffect(() => {
     if (isOpen && !hasStarted) {
       prepare()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, retryTaskId]) // Trigger when modal opens or retry task changes
 
   return (
@@ -269,40 +281,41 @@ export function SyncProgressModal({
                 </CardBody>
               </Card>
 
-              <div className="flex items-center gap-2">
-                <Chip size="sm" color={autoMode ? 'primary' : 'default'}>
-                  {autoMode ? '自动模式' : '手动模式'}
-                </Chip>
-                <Button
-                  size="sm"
-                  variant="flat"
-                  onPress={() => setAutoMode(!autoMode)}
-                >
-                  切换到{autoMode ? '手动' : '自动'}模式
-                </Button>
-              </div>
-
-              {!autoMode && processedCount < totalCount && (
-                <Button
-                  color="primary"
-                  onPress={handleContinue}
-                  isLoading={isProcessing}
-                  fullWidth
-                >
-                  继续处理下一批 ({Math.min(5, totalCount - processedCount)} 个文件)
-                </Button>
+              {githubBranchUrl && (
+                <Card>
+                  <CardBody className="py-3">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-default-500">分支:</span>
+                      <Link
+                        href={githubBranchUrl}
+                        target="_blank"
+                        isExternal
+                        className="text-xs"
+                      >
+                        {githubBranch}
+                      </Link>
+                    </div>
+                  </CardBody>
+                </Card>
               )}
             </div>
           )}
 
           {status === 'finalizing' && (
-            <div className="text-center py-8">
+            <div className="text-center py-8 space-y-4">
               <Progress
                 isIndeterminate
                 aria-label="创建 PR..."
                 className="max-w-md mx-auto"
               />
-              <p className="text-sm text-default-600 mt-4">正在创建 Pull Request...</p>
+              <div>
+                <p className="text-sm text-default-600">正在创建 Pull Request...</p>
+                {processedCount > 0 && (
+                  <p className="text-xs text-default-500 mt-2">
+                    已成功提交 {processedCount} 个文件
+                  </p>
+                )}
+              </div>
             </div>
           )}
 
@@ -316,15 +329,33 @@ export function SyncProgressModal({
                 </p>
               </div>
               {prUrl && (
-                <Button
-                  as={Link}
-                  href={prUrl}
-                  target="_blank"
-                  color="primary"
-                  endContent={<ExternalLink className="w-4 h-4" />}
-                >
-                  查看 Pull Request
-                </Button>
+                <div className="space-y-2">
+                  <Link
+                    href={prUrl}
+                    target="_blank"
+                    isExternal
+                    showAnchorIcon
+                    color="primary"
+                  >
+                    查看 Pull Request
+                  </Link>
+                  <p className="text-xs text-default-400 break-all">
+                    {prUrl}
+                  </p>
+                </div>
+              )}
+              {githubBranchUrl && (
+                <div className="pt-2 border-t border-default-200">
+                  <Link
+                    href={githubBranchUrl}
+                    target="_blank"
+                    isExternal
+                    showAnchorIcon
+                    className="text-xs text-default-500"
+                  >
+                    查看分支: {githubBranch}
+                  </Link>
+                </div>
               )}
             </div>
           )}

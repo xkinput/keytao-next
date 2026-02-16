@@ -117,6 +117,7 @@ export async function POST(request: NextRequest) {
       success: true,
       progress,
       message: `已提交 ${processedCount}/${totalCount} 个文件`,
+      branch, // Return branch name for UI display
     });
   } catch (error) {
     console.error('[CommitBatch] Error:', error);
