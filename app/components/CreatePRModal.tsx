@@ -528,23 +528,23 @@ export default function CreatePRModal({
           withAuth: true
         })
       } else {
-        // Create multiple PRs
-        for (const item of data.items) {
-          await apiRequest('/api/pull-requests', {
-            method: 'POST',
-            body: {
+        // Create multiple PRs in batch
+        await apiRequest('/api/pull-requests/batch', {
+          method: 'POST',
+          body: {
+            items: data.items.map(item => ({
               action: item.action,
               word: item.word,
               oldWord: item.action === 'Change' ? item.oldWord : undefined,
               code: item.code,
               type: item.action !== 'Delete' ? item.type : undefined,
               weight: item.weight ? parseInt(item.weight) : (item.action !== 'Delete' ? getDefaultWeight(item.type as PhraseType) : undefined),
-              remark: item.remark || undefined,
-              batchId
-            },
-            withAuth: true
-          })
-        }
+              remark: item.remark || undefined
+            })),
+            batchId
+          },
+          withAuth: true
+        })
       }
 
       // Success! Show toast and close

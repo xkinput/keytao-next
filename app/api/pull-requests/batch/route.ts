@@ -14,9 +14,12 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json()
-    const { changes, batchDescription, issueId } = body
+    const { changes, items, batchDescription, batchId, issueId } = body
 
-    if (!changes || !Array.isArray(changes) || changes.length === 0) {
+    // Support both 'changes' and 'items' for backward compatibility
+    const prItems = items || changes
+
+    if (!prItems || !Array.isArray(prItems) || prItems.length === 0) {
       return NextResponse.json(
         { error: '缺少修改列表' },
         { status: 400 }
@@ -24,7 +27,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Validate all changes using unified conflict detection
-    const items = changes.map((change: any, idx: number) => ({
+    const validationItems = prItems.map((change: any, idx: number) => ({
       id: idx.toString(),
       action: change.action as 'Create' | 'Change' | 'Delete',
       word: change.word || '',
@@ -34,7 +37,7 @@ export async function POST(request: NextRequest) {
       weight: change.weight || undefined
     }))
 
-    const results = await checkBatchConflictsWithWeight(items)
+    const results = await checkBatchConflictsWithWeight(validationItems)
 
     // Check for unresolved conflicts
     const unresolvedConflicts = results
@@ -56,22 +59,36 @@ export async function POST(request: NextRequest) {
 
     // Create batch and PRs in transaction
     const result = await prisma.$transaction(async (tx) => {
-      // Create batch
-      const batch = await tx.batch.create({
-        data: {
-          description: batchDescription || '批量修改',
-          creatorId: session.id,
-          issueId: issueId || undefined,
-          status: 'Draft'
+      // Use existing batch or create new one
+      let batch
+      if (batchId) {
+        batch = await tx.batch.findUnique({ where: { id: batchId } })
+        if (!batch) {
+          throw new Error('批次不存在')
         }
-      })
+        if (batch.creatorId !== session.id) {
+          throw new Error('无权限')
+        }
+      } else {
+        batch = await tx.batch.create({
+          data: {
+            description: batchDescription || (prItems.length === 1
+              ? `修改词条: ${prItems[0].word}`
+              : `批量修改 ${prItems.length} 个词条`),
+            creatorId: session.id,
+            issueId: issueId || undefined,
+            status: 'Draft'
+          }
+        })
+      }
 
       // Create all PRs
       const prs = await Promise.all(
-        changes.map((change: any) =>
+        prItems.map((change: any) =>
           tx.pullRequest.create({
             data: {
               word: change.word,
+              oldWord: change.oldWord || undefined,
               code: change.code,
               action: change.action as PullRequestType,
               phraseId: change.phraseId || undefined,
