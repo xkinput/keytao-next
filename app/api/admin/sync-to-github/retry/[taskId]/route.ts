@@ -14,7 +14,7 @@ export const maxDuration = 10;
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: { taskId: string } }
+  { params }: { params: Promise<{ taskId: string }> }
 ) {
   try {
     // Verify admin permission
@@ -23,7 +23,7 @@ export async function POST(
       return authResult.response;
     }
 
-    const { taskId } = params;
+    const { taskId } = await params;
 
     // Check if task exists
     const task = await prisma.syncTask.findUnique({
