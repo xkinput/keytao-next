@@ -26,7 +26,7 @@ import { apiRequest } from '@/lib/hooks/useSWR'
 import { getPhraseTypeOptions, getDefaultWeight, checkTypeMismatch, detectPhraseType, type PhraseType } from '@/lib/constants/phraseTypes'
 import { CODE_PATTERN } from '@/lib/constants/codeValidation'
 import { useUIStore } from '@/lib/store/ui'
-import { Trash2, FileText, ChevronUp, ChevronDown, Plus, Edit2, AlertTriangle } from 'lucide-react'
+import { Trash2, FileText, ChevronUp, ChevronDown, Plus, Edit2, AlertTriangle, Eye, Check, Lightbulb, Search } from 'lucide-react'
 import CodePhrasesPopover from './CodePhrasesPopover'
 
 interface CreatePRModalProps {
@@ -436,21 +436,21 @@ export default function CreatePRModal({
         const actualWeight = match ? match[1] : (meta.conflict.currentPhrase.weight + 1).toString();
 
         itemsNeedingConfirmation.push(
-          `📍 项目 #${i + 1} - 创建重码警告:\n` +
+          `▶ 项目 #${i + 1} - 创建重码警告:\n` +
           `   编码: ${item.code}\n` +
           `   现有词条: ${meta.conflict.currentPhrase.word} (权重: ${meta.conflict.currentPhrase.weight})\n` +
           `   新增词条: ${item.word} (权重: ${actualWeight})\n` +
-          `   ⚠️ 这将创建重码（同一编码对应多个词条）！`
+          `   ! 这将创建重码（同一编码对应多个词条）！`
         )
       }
 
       // Check for Change action - warn about removal
       if (item.action === 'Change' && item.oldWord) {
         itemsNeedingConfirmation.push(
-          `📍 项目 #${i + 1} - 修改操作警告:\n` +
+          `▸ 项目 #${i + 1} - 修改操作警告:\n` +
           `   将移除: "${item.oldWord}" @ "${item.code}"\n` +
           `   替换为: "${item.word}" @ "${item.code}"\n` +
-          `   💡 如果 "${item.oldWord}" 仍然需要，请考虑:\n` +
+          `   i 如果 "${item.oldWord}" 仍然需要，请考虑:\n` +
           `      1. 为它创建新的词条并分配其他编码\n` +
           `      2. 或者使用"创建"操作添加新词，而不是"修改"`
         )
@@ -460,7 +460,7 @@ export default function CreatePRModal({
     // Show confirmation dialog if needed
     if (itemsNeedingConfirmation.length > 0) {
       const message =
-        '⚠️ 重要提示 - 请仔细阅读以下警告\n\n' +
+        '! 重要提示 - 请仔细阅读以下警告\n\n' +
         itemsNeedingConfirmation.join('\n\n' + '─'.repeat(50) + '\n\n') +
         '确认要继续提交吗？'
 
@@ -816,6 +816,20 @@ export default function CreatePRModal({
                                               codeField.onChange(v)
                                               updateMeta(field.id, { hasChecked: false, conflict: null })
                                             }}
+                                            endContent={
+                                              codeField.value && (
+                                                <CodePhrasesPopover code={codeField.value}>
+                                                  <Button
+                                                    size="sm"
+                                                    variant="light"
+                                                    isIconOnly
+                                                    className="min-w-unit-6 w-6 h-6"
+                                                  >
+                                                    <Eye className="w-4 h-4" />
+                                                  </Button>
+                                                </CodePhrasesPopover>
+                                              )
+                                            }
                                           />
                                         )}
                                       />
@@ -886,6 +900,20 @@ export default function CreatePRModal({
                                             codeField.onChange(v)
                                             updateMeta(field.id, { hasChecked: false, conflict: null })
                                           }}
+                                          endContent={
+                                            codeField.value && (
+                                              <CodePhrasesPopover code={codeField.value}>
+                                                <Button
+                                                  size="sm"
+                                                  variant="light"
+                                                  isIconOnly
+                                                  className="min-w-unit-6 w-6 h-6"
+                                                >
+                                                  <Eye className="w-4 h-4" />
+                                                </Button>
+                                              </CodePhrasesPopover>
+                                            )
+                                          }
                                         />
                                       )}
                                     />
@@ -1005,16 +1033,11 @@ export default function CreatePRModal({
                               {meta.conflict.hasConflict ? (
                                 <div>
                                   <div className="flex items-center gap-2 mb-2">
-                                    <Chip color="danger" variant="flat" size="sm">
-                                      ⚠️ 冲突
+                                    <Chip color="danger" variant="flat" size="sm" startContent={<AlertTriangle className="w-3 h-3" />}>
+                                      冲突
                                     </Chip>
-                                    <CodePhrasesPopover code={watch(`items.${index}.code`)}>
-                                      <Button size="sm" variant="light" className="text-xs h-6">
-                                        查看编码
-                                      </Button>
-                                    </CodePhrasesPopover>
+                                    <p className="text-small">{meta.conflict.impact}</p>
                                   </div>
-                                  <p className="text-small mb-2">{meta.conflict.impact}</p>
                                   {meta.conflict.currentPhrase && (
                                     <div className="mb-2 p-2 bg-default-100 rounded text-small">
                                       当前: {meta.conflict.currentPhrase.word} @ {meta.conflict.currentPhrase.code} (权重: {meta.conflict.currentPhrase.weight})
@@ -1044,19 +1067,23 @@ export default function CreatePRModal({
                                 meta.conflict.suggestions.some((sug) => sug.action === 'Resolved') ? (
                                   <div>
                                     <div className="flex items-center gap-2 mb-2">
-                                      <Chip color="success" variant="flat" size="sm">✓ 已解决</Chip>
+                                      <Chip color="success" variant="flat" size="sm" startContent={<Check className="w-3 h-3" />}>
+                                        已解决
+                                      </Chip>
+                                      {meta.conflict.impact && (
+                                        <div className="flex items-center gap-1 text-small text-success-600 dark:text-success-400">
+                                          <Lightbulb className="w-3 h-3" />
+                                          <span>{meta.conflict.impact}</span>
+                                        </div>
+                                      )}
                                     </div>
-                                    {meta.conflict.impact && (
-                                      <p className="text-small text-success-600 dark:text-success-400 mb-2">
-                                        💡 {meta.conflict.impact}
-                                      </p>
-                                    )}
                                     {meta.conflict.suggestions.length > 0 && (
                                       <div className="mt-2 space-y-1">
                                         {meta.conflict.suggestions.map((sug, idx) => (
                                           <div key={idx} className="p-2 bg-success-50 dark:bg-success-100/10 rounded text-small">
-                                            <p className="font-medium text-success-700 dark:text-success-400">
-                                              ✓ {sug.reason}
+                                            <p className="font-medium text-success-700 dark:text-success-400 flex items-center gap-1">
+                                              <Check className="w-3 h-3" />
+                                              {sug.reason}
                                             </p>
                                           </div>
                                         ))}
@@ -1066,18 +1093,13 @@ export default function CreatePRModal({
                                 ) : (
                                   <div>
                                     <div className="flex items-center gap-2 mb-2">
-                                      <Chip color="warning" variant="flat" size="sm">
-                                        ⚠️ 重码警告
+                                      <Chip color="warning" variant="flat" size="sm" startContent={<AlertTriangle className="w-3 h-3" />}>
+                                        重码警告
                                       </Chip>
-                                      <CodePhrasesPopover code={watch(`items.${index}.code`)}>
-                                        <Button size="sm" variant="light" className="text-xs h-6">
-                                          查看编码
-                                        </Button>
-                                      </CodePhrasesPopover>
+                                      <p className="text-small text-warning-600 dark:text-warning-400">
+                                        {meta.conflict.impact || '此编码已存在其他词条，将创建重码'}
+                                      </p>
                                     </div>
-                                    <p className="text-small mb-2 text-warning-600 dark:text-warning-400">
-                                      {meta.conflict.impact || '此编码已存在其他词条，将创建重码'}
-                                    </p>
                                     <div className="mb-2 p-2 bg-warning-50 dark:bg-warning-100/10 rounded text-small">
                                       <p className="font-medium text-warning-700 dark:text-warning-400">现有词条:</p>
                                       <p>{meta.conflict.currentPhrase!.word} @ {meta.conflict.currentPhrase!.code} (权重: {meta.conflict.currentPhrase!.weight})</p>
@@ -1115,20 +1137,23 @@ export default function CreatePRModal({
                               ) : (
                                 <div>
                                   <div className="flex items-center gap-2 mb-2">
-                                    <Chip color="success" variant="flat" size="sm">✓</Chip>
-                                    <span className="text-small">无冲突</span>
+                                    <Chip color="success" variant="flat" size="sm" startContent={<Check className="w-3 h-3" />}>
+                                      无冲突
+                                    </Chip>
                                   </div>
                                   {meta.conflict.impact && (
-                                    <p className="text-small text-success-600 dark:text-success-400">
-                                      💡 {meta.conflict.impact}
-                                    </p>
+                                    <div className="flex items-center gap-1 text-small text-success-600 dark:text-success-400">
+                                      <Lightbulb className="w-3 h-3" />
+                                      <span>{meta.conflict.impact}</span>
+                                    </div>
                                   )}
                                   {meta.conflict.suggestions.length > 0 && (
                                     <div className="mt-2 space-y-1">
                                       {meta.conflict.suggestions.map((sug, idx) => (
                                         <div key={idx} className="p-2 bg-success-50 dark:bg-success-100/10 rounded text-small">
-                                          <p className="font-medium text-success-700 dark:text-success-400">
-                                            {sug.action === 'Resolved' ? '✓ 已解决' : sug.action}
+                                          <p className="font-medium text-success-700 dark:text-success-400 flex items-center gap-1">
+                                            {sug.action === 'Resolved' && <Check className="w-3 h-3" />}
+                                            {sug.action === 'Resolved' ? '已解决' : sug.action}
                                           </p>
                                           <p className="text-default-600 dark:text-default-400">{sug.reason}</p>
                                         </div>
@@ -1153,8 +1178,9 @@ export default function CreatePRModal({
                     onPress={handleCheckAllConflicts}
                     isLoading={checkingAll}
                     className="flex-1"
+                    startContent={!checkingAll && <Search className="w-4 h-4" />}
                   >
-                    🔍 检测所有冲突
+                    检测所有冲突
                   </Button>
                   {conflictStats.hasChecked && (
                     <>
@@ -1164,8 +1190,8 @@ export default function CreatePRModal({
                         </Chip>
                       )}
                       {conflictStats.conflictCount === 0 ? (
-                        <Chip color="success" variant="flat" size="sm">
-                          ✓ 无冲突
+                        <Chip color="success" variant="flat" size="sm" startContent={<Check className="w-3 h-3" />}>
+                          无冲突
                         </Chip>
                       ) : (
                         <Chip color="danger" variant="flat" size="sm">
