@@ -9,7 +9,7 @@ export async function GET() {
           Accept: 'application/vnd.github.v3+json',
           'User-Agent': 'KeyTao-Next',
         },
-        next: { revalidate: 3600 }, // cache for 1 hour
+        next: { revalidate: 600 }, // cache for 10 minutes
       }
     )
 
