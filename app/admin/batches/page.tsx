@@ -129,13 +129,6 @@ export default function AdminBatchesPage() {
                       </span>
                     </div>
                   </div>
-                  <Button
-                    size="sm"
-                    variant="flat"
-                    color="primary"
-                  >
-                    查看详情
-                  </Button>
                 </CardHeader>
               </Card>
             ))
