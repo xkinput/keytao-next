@@ -26,7 +26,7 @@ import { apiRequest } from '@/lib/hooks/useSWR'
 import { getPhraseTypeOptions, getDefaultWeight, checkTypeMismatch, detectPhraseType, type PhraseType } from '@/lib/constants/phraseTypes'
 import { CODE_PATTERN } from '@/lib/constants/codeValidation'
 import { useUIStore } from '@/lib/store/ui'
-import { Trash2, FileText, ChevronUp, ChevronDown, Plus, Edit2, AlertTriangle, Eye, Check, Lightbulb, Search } from 'lucide-react'
+import { Trash2, FileText, CornerUpLeft, CornerDownLeft, ChevronUp, ChevronDown, Plus, Edit2, AlertTriangle, Eye, Check, Lightbulb, Search } from 'lucide-react'
 import CodePhrasesPopover from './CodePhrasesPopover'
 import WordCodesPopover from './WordCodesPopover'
 
@@ -64,6 +64,7 @@ interface ConflictInfo {
     word: string
     code: string
     weight: number
+    type?: string
   }
   impact?: string
   suggestions: Array<{
@@ -126,7 +127,7 @@ export default function CreatePRModal({
     }
   })
 
-  const { fields, append, remove } = useFieldArray({
+  const { fields, append, remove, insert } = useFieldArray({
     control,
     name: 'items'
   })
@@ -272,6 +273,36 @@ export default function CreatePRModal({
     }
   }
 
+  // Add item above
+  const handleAddItemAbove = (index: number) => {
+    insert(index, defaultFormItem)
+    setTimeout(() => {
+      const newField = fields[index]
+      if (newField) {
+        updateMeta(newField.id, {
+          conflict: null,
+          hasChecked: false,
+          checking: false
+        })
+      }
+    }, 0)
+  }
+
+  // Add item below
+  const handleAddItemBelow = (index: number) => {
+    insert(index + 1, defaultFormItem)
+    setTimeout(() => {
+      const newField = fields[index + 1]
+      if (newField) {
+        updateMeta(newField.id, {
+          conflict: null,
+          hasChecked: false,
+          checking: false
+        })
+      }
+    }, 0)
+  }
+
   // Parse dictionary format
   const handleParseDictionary = () => {
     if (!dictInput.trim()) {
@@ -401,6 +432,47 @@ export default function CreatePRModal({
       openAlert(message, '检测失败')
     } finally {
       setCheckingAll(false)
+    }
+  }
+
+  // Auto-check conflict for a single item (used when filling Change action)
+  const autoCheckConflictForItem = async (itemIndex: number, fieldId: string) => {
+    const currentData = getValues(`items.${itemIndex}`)
+    const meta = getMeta(fieldId)
+
+    // Only auto-check for Change action when oldWord and code are filled
+    if (currentData.action !== 'Change' || !currentData.oldWord || !currentData.code || meta.hasChecked) {
+      return
+    }
+
+    updateMeta(fieldId, { checking: true })
+    try {
+      const result = await apiRequest('/api/pull-requests/check-conflicts-batch', {
+        method: 'POST',
+        body: {
+          items: [{
+            id: fieldId,
+            action: 'Change',
+            word: currentData.word,
+            oldWord: currentData.oldWord,
+            code: currentData.code,
+            weight: currentData.weight ? parseInt(currentData.weight) : undefined,
+            type: currentData.type
+          }]
+        },
+        withAuth: true
+      }) as { results: Array<{ id: string; conflict: ConflictInfo }> }
+
+      const conflictData = result.results[0]
+      if (conflictData) {
+        updateMeta(fieldId, {
+          conflict: conflictData.conflict,
+          hasChecked: true,
+          checking: false
+        })
+      }
+    } catch {
+      updateMeta(fieldId, { checking: false })
     }
   }
 
@@ -697,16 +769,44 @@ export default function CreatePRModal({
                     >
                       <CardHeader className="flex justify-between">
                         <span className="font-semibold">修改 #{index + 1}</span>
-                        {!isEditMode && fields.length > 1 && (
-                          <Button
-                            size="sm"
-                            color="danger"
-                            variant="light"
-                            onPress={() => handleRemoveItem(index)}
-                            startContent={<Trash2 className='w-4' />}
-                          >
-                            删除
-                          </Button>
+                        {!isEditMode && (
+                          <div className="flex gap-1 items-center">
+                            <div className="flex flex-col gap-0.5">
+                              <Tooltip content="上方添加" placement="top">
+                                <Button
+                                  size="sm"
+                                  variant="light"
+                                  isIconOnly
+                                  className="min-w-unit-7 w-unit-7 h-unit-7"
+                                  onPress={() => handleAddItemAbove(index)}
+                                >
+                                  <CornerUpLeft className='w-3' />
+                                </Button>
+                              </Tooltip>
+                              <Tooltip content="下方添加" placement="bottom">
+                                <Button
+                                  size="sm"
+                                  variant="light"
+                                  isIconOnly
+                                  className="min-w-unit-7 w-unit-7 h-unit-7"
+                                  onPress={() => handleAddItemBelow(index)}
+                                >
+                                  <CornerDownLeft className='w-3' />
+                                </Button>
+                              </Tooltip>
+                            </div>
+                            {fields.length > 1 && (
+                              <Button
+                                size="sm"
+                                color="danger"
+                                variant="light"
+                                isIconOnly
+                                onPress={() => handleRemoveItem(index)}
+                              >
+                                <Trash2 className='w-4' />
+                              </Button>
+                            )}
+                          </div>
                         )}
                       </CardHeader>
                       <CardBody className="gap-3">
@@ -723,10 +823,101 @@ export default function CreatePRModal({
                               classNames={{
                                 wrapper: "gap-3",
                               }}
-                              onValueChange={(value) => {
+                              onValueChange={async (value) => {
                                 actionField.onChange(value)
                                 // Reset check state when action changes
                                 updateMeta(field.id, { hasChecked: false, conflict: null })
+
+                                const currentData = getValues(`items.${index}`)
+
+                                // Auto-fill oldWord when switching to Change action
+                                if (value === 'Change' && currentData.code) {
+                                  // Query the first phrase for this code
+                                  if (!currentData.oldWord) {
+                                    try {
+                                      const response = await fetch(`/api/phrases/by-code?code=${encodeURIComponent(currentData.code)}&page=1`)
+                                      if (response.ok) {
+                                        const data = await response.json()
+                                        if (data.phrases && data.phrases.length > 0) {
+                                          // Auto-fill with the first phrase's word
+                                          const firstPhrase = data.phrases.find((p: { code: string; word: string }) => p.code === currentData.code)
+                                          if (firstPhrase) {
+                                            setValue(`items.${index}.oldWord`, firstPhrase.word)
+                                          }
+                                        }
+                                      }
+                                    } catch (err) {
+                                      console.error('Failed to fetch phrase by code:', err)
+                                    }
+                                  }
+
+                                  // Always check conflict for Change action when code is present
+                                  setTimeout(async () => {
+                                    const updatedData = getValues(`items.${index}`)
+                                    updateMeta(field.id, { checking: true })
+                                    try {
+                                      const result = await apiRequest('/api/pull-requests/check-conflicts-batch', {
+                                        method: 'POST',
+                                        body: {
+                                          items: [{
+                                            id: field.id,
+                                            action: 'Change',
+                                            word: updatedData.word,
+                                            oldWord: updatedData.oldWord || '',
+                                            code: updatedData.code,
+                                            weight: updatedData.weight ? parseInt(updatedData.weight) : undefined,
+                                            type: updatedData.type
+                                          }]
+                                        },
+                                        withAuth: true
+                                      }) as { results: Array<{ id: string; conflict: ConflictInfo }> }
+
+                                      const conflictData = result.results[0]
+                                      if (conflictData) {
+                                        updateMeta(field.id, {
+                                          conflict: conflictData.conflict,
+                                          hasChecked: true,
+                                          checking: false
+                                        })
+                                      }
+                                    } catch {
+                                      updateMeta(field.id, { checking: false })
+                                    }
+                                  }, 100)
+                                }
+
+                                // Auto-check conflict for Create and Delete actions
+                                if ((value === 'Create' || value === 'Delete') && currentData.word && currentData.code) {
+                                  updateMeta(field.id, { checking: true })
+                                  try {
+                                    const result = await apiRequest('/api/pull-requests/check-conflicts-batch', {
+                                      method: 'POST',
+                                      body: {
+                                        items: [{
+                                          id: field.id,
+                                          action: value,
+                                          word: currentData.word,
+                                          oldWord: undefined,
+                                          code: currentData.code,
+                                          weight: currentData.weight ? parseInt(currentData.weight) : undefined,
+                                          type: currentData.type
+                                        }]
+                                      },
+                                      withAuth: true
+                                    }) as { results: Array<{ id: string; conflict: ConflictInfo }> }
+
+                                    const conflictData = result.results[0]
+                                    if (conflictData) {
+                                      updateMeta(field.id, {
+                                        conflict: conflictData.conflict,
+                                        hasChecked: true,
+                                        checking: false
+                                      })
+                                    }
+                                  } catch {
+                                    updateMeta(field.id, { checking: false })
+                                  }
+                                }
                               }}
                             >
                               <Radio
@@ -805,6 +996,7 @@ export default function CreatePRModal({
                                               oldWordField.onChange(v)
                                               updateMeta(field.id, { hasChecked: false, conflict: null })
                                             }}
+                                            onBlur={() => autoCheckConflictForItem(index, field.id)}
                                             endContent={
                                               oldWordField.value && (
                                                 <WordCodesPopover word={oldWordField.value}>
@@ -846,6 +1038,7 @@ export default function CreatePRModal({
                                               codeField.onChange(v)
                                               updateMeta(field.id, { hasChecked: false, conflict: null })
                                             }}
+                                            onBlur={() => autoCheckConflictForItem(index, field.id)}
                                             endContent={
                                               codeField.value && (
                                                 <CodePhrasesPopover code={codeField.value}>
@@ -1021,6 +1214,38 @@ export default function CreatePRModal({
                                         }}
                                       />
                                     </div>
+
+                                    {/* Original type info for Change action */}
+                                    {(() => {
+                                      const currentAction = watch(`items.${index}.action`)
+                                      if (currentAction === 'Change' && meta.conflict?.currentPhrase?.type) {
+                                        const currentType = watch(`items.${index}.type`) as PhraseType
+                                        const originalType = meta.conflict.currentPhrase.type
+                                        const originalTypeLabel = getPhraseTypeOptions().find(opt => opt.value === originalType)?.label || originalType
+                                        const currentTypeLabel = getPhraseTypeOptions().find(opt => opt.value === currentType)?.label || currentType
+                                        const isTypeChanged = originalType !== currentType
+
+                                        return (
+                                          <Card className={isTypeChanged ? "border-primary bg-primary-50/50 dark:bg-primary-100/5" : "border-default-200 bg-default-50"}>
+                                            <CardBody className="py-2 px-3">
+                                              <div className="flex items-center gap-2">
+                                                <FileText className="w-4 h-4 text-default-500 shrink-0" />
+                                                <p className="text-sm text-default-700 dark:text-default-400">
+                                                  原类型: <span className="font-semibold">{originalTypeLabel}</span>
+                                                  {isTypeChanged && (
+                                                    <>
+                                                      {' → '}
+                                                      <span className="font-semibold text-primary">{currentTypeLabel}</span>
+                                                    </>
+                                                  )}
+                                                </p>
+                                              </div>
+                                            </CardBody>
+                                          </Card>
+                                        )
+                                      }
+                                      return null
+                                    })()}
 
                                     {/* Type mismatch warning */}
                                     {(() => {

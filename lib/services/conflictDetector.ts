@@ -19,6 +19,7 @@ export interface ConflictInfo {
     code: string
     weight: number
     userId: number
+    type?: string
   }
   impact?: string
   suggestions: CodeSuggestion[]
@@ -90,7 +91,8 @@ export class ConflictDetector {
               word: newWordExists.word,
               code: newWordExists.code,
               weight: newWordExists.weight,
-              userId: newWordExists.userId
+              userId: newWordExists.userId,
+              type: newWordExists.type
             },
             impact: `编码 "${change.code}" 下已存在词 "${change.word}"`,
             suggestions: [{
@@ -111,7 +113,8 @@ export class ConflictDetector {
           word: oldPhrase.word,
           code: oldPhrase.code,
           weight: oldPhrase.weight,
-          userId: oldPhrase.userId
+          userId: oldPhrase.userId,
+          type: oldPhrase.type
         },
         suggestions: []
       }
@@ -148,7 +151,8 @@ export class ConflictDetector {
           word: phraseToDelete.word,
           code: phraseToDelete.code,
           weight: phraseToDelete.weight,
-          userId: phraseToDelete.userId
+          userId: phraseToDelete.userId,
+          type: phraseToDelete.type
         },
         suggestions: []
       }
@@ -174,7 +178,8 @@ export class ConflictDetector {
           word: exactMatch.word,
           code: exactMatch.code,
           weight: exactMatch.weight,
-          userId: exactMatch.userId
+          userId: exactMatch.userId,
+          type: exactMatch.type
         },
         impact: `词条 "${change.word}" 与编码 "${change.code}" 的组合已存在，不能重复添加`,
         suggestions: [{
@@ -210,7 +215,8 @@ export class ConflictDetector {
           word: true,
           code: true,
           weight: true,
-          userId: true
+          userId: true,
+          type: true
         }
       })
     ])
@@ -239,7 +245,8 @@ export class ConflictDetector {
           word: existingCode.word,
           code: existingCode.code,
           weight: existingCode.weight,
-          userId: existingCode.userId
+          userId: existingCode.userId,
+          type: existingCode.type
         },
         impact: `编码 "${change.code}" 已被词条 "${existingCode.word}" 占用，将创建重码${extraWarning}`,
         suggestions
@@ -255,7 +262,8 @@ export class ConflictDetector {
         word: existingWord!.word,
         code: existingWord!.code,
         weight: existingWord!.weight,
-        userId: existingWord!.userId
+        userId: existingWord!.userId,
+        type: existingWord!.type
       },
       impact: `词条 "${change.word}" 已存在于编码 "${existingWord!.code}"，将创建多编码词条`,
       suggestions: []
