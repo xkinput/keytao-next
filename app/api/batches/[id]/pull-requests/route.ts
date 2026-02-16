@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma'
 import { conflictDetector } from '@/lib/services/conflictDetector'
 import { PullRequestType } from '@prisma/client'
 import { getDefaultWeight, type PhraseType } from '@/lib/constants/phraseTypes'
+import { calculateWeightForType } from '@/lib/services/batchConflictService'
 
 // PUT /api/batches/:id/pull-requests - Batch sync PRs (Create/Update/Delete)
 export async function PUT(
@@ -68,18 +69,25 @@ export async function PUT(
         // 2. Process Upserts (Update & Create)
         // We need to calculate weights dynamically based on the current DB state adjusted by this batch.
 
-        // Cache current DB phrase counts for relevant codes
+        // Cache current DB phrase counts for relevant codes AND types
         const codes = new Set(items.map(i => i.code))
+        const types = new Set(items.map(i => i.type).filter(Boolean) as string[])
+
         const existingPhrases = await prisma.phrase.findMany({
-            where: { code: { in: Array.from(codes) } },
-            select: { code: true, word: true }
+            where: {
+                code: { in: Array.from(codes) },
+                type: { in: Array.from(types) }
+            },
+            select: { code: true, type: true, word: true }
         })
 
+        // Group by code+type combination
         const dbPhrasesMap = new Map<string, string[]>()
         existingPhrases.forEach(p => {
-            const list = dbPhrasesMap.get(p.code) || []
+            const key = `${p.code}:${p.type}`
+            const list = dbPhrasesMap.get(key) || []
             list.push(p.word)
-            dbPhrasesMap.set(p.code, list)
+            dbPhrasesMap.set(key, list)
         })
 
         const results = []
@@ -98,23 +106,26 @@ export async function PUT(
             // (Though weight is mostly relevant for Create)
 
             // Track which words are being removed by this batch (Delete/Change actions)
-            // Map<Code, Set<Word>>
+            // Map<Code:Type, Set<Word>>
             const batchRemovals = new Map<string, Set<string>>()
             items.forEach(item => {
+                if (!item.type) return
+                const key = `${item.code}:${item.type}`
+
                 if (item.action === 'Delete' && item.word) {
-                    const set = batchRemovals.get(item.code) || new Set()
+                    const set = batchRemovals.get(key) || new Set()
                     set.add(item.word)
-                    batchRemovals.set(item.code, set)
+                    batchRemovals.set(key, set)
                 }
                 if (item.action === 'Change' && item.oldWord) {
-                    const set = batchRemovals.get(item.code) || new Set()
+                    const set = batchRemovals.get(key) || new Set()
                     set.add(item.oldWord)
-                    batchRemovals.set(item.code, set)
+                    batchRemovals.set(key, set)
                 }
             })
 
-            // Track newly added words to properly increment weight if multiple additions to same code
-            const batchAdditions = new Map<string, number>() // Code -> Count of *new* items added
+            // Track newly added words to properly increment weight if multiple additions to same code+type
+            const batchAdditions = new Map<string, number>() // Code:Type -> Count of *new* items added
 
             for (const item of items) {
                 // Find Phrase ID if possible (for Change/Delete)
@@ -132,11 +143,12 @@ export async function PUT(
                 if (item.action === 'Create' && item.type) {
                     // Only auto-calc if weight is NOT provided
                     if (finalWeight === undefined || finalWeight === null) {
-                        const baseList = dbPhrasesMap.get(item.code) || []
+                        const codeTypeKey = `${item.code}:${item.type}`
+                        const baseList = dbPhrasesMap.get(codeTypeKey) || []
                         const initialCount = baseList.length
 
                         // Count how many base phrases are removed by this batch
-                        const removedWords = batchRemovals.get(item.code)
+                        const removedWords = batchRemovals.get(codeTypeKey)
                         let removedCount = 0
                         if (removedWords) {
                             // Count overlap between DB phrases and Batch Removals
@@ -144,18 +156,15 @@ export async function PUT(
                         }
 
                         // Count how many we have already added in this loop
-                        const alreadyAddedCount = batchAdditions.get(item.code) || 0
+                        const alreadyAddedCount = batchAdditions.get(codeTypeKey) || 0
 
                         const effectiveCount = initialCount - removedCount + alreadyAddedCount
 
-                        if (effectiveCount > 0) {
-                            finalWeight = getDefaultWeight(item.type as PhraseType) + effectiveCount
-                        } else {
-                            finalWeight = getDefaultWeight(item.type as PhraseType)
-                        }
+                        // Use unified weight calculation function
+                        finalWeight = calculateWeightForType(item.type as PhraseType, effectiveCount)
 
                         // Setup for next item
-                        batchAdditions.set(item.code, alreadyAddedCount + 1)
+                        batchAdditions.set(codeTypeKey, alreadyAddedCount + 1)
                     }
                 }
 

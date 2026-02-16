@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { checkRootAdminPermission } from '@/lib/adminAuth'
-import { getDefaultWeight, isValidPhraseType, PHRASE_TYPE_CONFIGS } from '@/lib/constants/phraseTypes'
+import { isValidPhraseType, PHRASE_TYPE_CONFIGS, type PhraseType } from '@/lib/constants/phraseTypes'
 import { CODE_PATTERN, MAX_CODE_LENGTH } from '@/lib/constants/codeValidation'
+import { calculateWeightForType } from '@/lib/services/batchConflictService'
 
 interface ImportResult {
   success: boolean
@@ -162,9 +163,10 @@ export async function POST(request: NextRequest) {
         // Get unique codes to query
         const uniqueCodes = Array.from(new Set(itemsToInsert.map(item => item.code)))
 
-        // Batch query: count existing phrases per code
+        // Batch query: count existing phrases per code AND type
+        // Different types should have independent weight calculation
         const codeGroups = await prisma.phrase.groupBy({
-          by: ['code'],
+          by: ['code', 'type'],
           where: {
             code: { in: uniqueCodes }
           },
@@ -173,21 +175,23 @@ export async function POST(request: NextRequest) {
           }
         })
 
-        const codeCountMap = new Map<string, number>(
-          codeGroups.map(g => [g.code, g._count.code])
+        const codeTypeCountMap = new Map<string, number>(
+          codeGroups.map(g => [`${g.code}:${g.type}`, g._count.code])
         )
 
         // Calculate weights for items to insert, considering batch order
-        const baseWeight = getDefaultWeight(phraseType)
-        const batchCodeCount = new Map<string, number>()
+        const batchCodeTypeCount = new Map<string, number>()
 
         const phrasesToCreate = itemsToInsert.map(item => {
-          const existingCount = codeCountMap.get(item.code) || 0
-          const batchCount = batchCodeCount.get(item.code) || 0
-          const weight = baseWeight + existingCount + batchCount
+          const codeTypeKey = `${item.code}:${phraseType}`
+          const existingCount = codeTypeCountMap.get(codeTypeKey) || 0
+          const batchCount = batchCodeTypeCount.get(codeTypeKey) || 0
 
-          // Increment batch counter for this code
-          batchCodeCount.set(item.code, batchCount + 1)
+          // Use unified weight calculation function
+          const weight = calculateWeightForType(phraseType as PhraseType, existingCount, batchCount)
+
+          // Increment batch counter for this code+type combination
+          batchCodeTypeCount.set(codeTypeKey, batchCount + 1)
 
           return {
             word: item.word,
@@ -223,9 +227,12 @@ export async function POST(request: NextRequest) {
           console.warn('Batch insert failed, falling back to individual inserts:', err)
 
           for (const item of itemsToInsert) {
-            const existingCount = codeCountMap.get(item.code) || 0
-            const batchCount = batchCodeCount.get(item.code) || 0
-            const weight = baseWeight + existingCount + batchCount
+            const codeTypeKey = `${item.code}:${phraseType}`
+            const existingCount = codeTypeCountMap.get(codeTypeKey) || 0
+            const batchCount = batchCodeTypeCount.get(codeTypeKey) || 0
+
+            // Use unified weight calculation function
+            const weight = calculateWeightForType(phraseType as PhraseType, existingCount, batchCount)
 
             try {
               await prisma.phrase.create({
@@ -245,7 +252,7 @@ export async function POST(request: NextRequest) {
                 code: item.code
               })
 
-              batchCodeCount.set(item.code, batchCount + 1)
+              batchCodeTypeCount.set(codeTypeKey, batchCount + 1)
             } catch (err: unknown) {
               const error = err as { code?: string; meta?: { target?: string[] }; message?: string }
               const lineNumber = startIndex + item.index + 1

@@ -78,7 +78,9 @@ export default function ImportPage() {
         // Remove YAML frontmatter and filter comment lines
         const cleanedText = removeYamlFrontmatter(text)
         const validLines = filterValidLines(cleanedText.split('\n'))
-        const filteredContent = validLines.join('\n')
+        // Remove weight column (keep only word and code)
+        const linesWithoutWeight = removeWeightColumn(validLines)
+        const filteredContent = linesWithoutWeight.join('\n')
         setContent(filteredContent)
 
         // Auto-detect phrase type based on filename
@@ -139,6 +141,17 @@ export default function ImportPage() {
       const trimmed = line.trim()
       // Filter out empty lines and comment lines (starting with #)
       return trimmed && !trimmed.startsWith('#')
+    })
+  }
+
+  const removeWeightColumn = (lines: string[]): string[] => {
+    return lines.map(line => {
+      const parts = line.split('\t')
+      // Only keep first two columns: word and code
+      if (parts.length >= 2) {
+        return `${parts[0]}\t${parts[1]}`
+      }
+      return line
     })
   }
 
@@ -314,7 +327,7 @@ export default function ImportPage() {
                     或直接粘贴内容
                   </label>
                   <Textarea
-                    placeholder="每行一条，格式：词条[Tab]编码&#10;# 开头的注释行和空行会被自动过滤"
+                    placeholder="每行一条，格式：词条[Tab]编码&#10;权重会根据已有词条自动计算（即使输入有权重列也会被忽略）&#10;# 开头的注释行和空行会被自动过滤"
                     value={content}
                     onValueChange={setContent}
                     minRows={10}

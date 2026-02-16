@@ -27,6 +27,24 @@ export interface BatchConflictResult {
 }
 
 /**
+ * Calculate weight for a phrase based on existing count
+ * This is the core weight calculation logic used across the codebase
+ * 
+ * @param type - Phrase type (Single, Phrase, etc.)
+ * @param existingCount - Number of existing phrases with same code+type in database
+ * @param batchCount - Number of phrases with same code+type already processed in current batch
+ * @returns The calculated weight
+ */
+export function calculateWeightForType(
+  type: PhraseType,
+  existingCount: number,
+  batchCount: number = 0
+): number {
+  const baseWeight = getDefaultWeight(type)
+  return baseWeight + existingCount + batchCount
+}
+
+/**
  * Calculate dynamic weight considering batch operations before this item
  * This simulates how the word count will change after executing previous operations
  */
