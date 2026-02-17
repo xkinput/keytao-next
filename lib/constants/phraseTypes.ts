@@ -7,7 +7,7 @@ export type PhraseType =
   | 'Supplement'   // 补充
   | 'Symbol'       // 符号
   | 'Link'         // 链接
-  | 'CSS'          // 声笔笔两字词（Consonant Stroke Stroke）
+  | 'CSS'          // 声笔笔（Consonant Stroke Stroke）
   | 'CSSSingle'    // 声笔笔单字（Consonant Stroke Stroke Single）
   | 'English'      // 英文
 
@@ -60,14 +60,14 @@ export const PHRASE_TYPE_CONFIGS: Record<PhraseType, PhraseTypeConfig> = {
     type: 'CSS',
     label: '声笔笔',
     defaultWeight: 100,
-    description: '声笔笔两字词（Code-Shape-Shape）',
+    description: '声笔笔',
     rimeFileName: 'css'
   },
   CSSSingle: {
     type: 'CSSSingle',
     label: '声笔笔单字',
     defaultWeight: 10,
-    description: '声笔笔单字编码',
+    description: '声笔笔单字',
     rimeFileName: 'css-single'
   },
   English: {

@@ -35,7 +35,7 @@ enum PhraseType {
   Symbol
   /// 链接
   Link
-  /// 声笔笔两字词
+  /// 声笔笔
   CSS
   /// 声笔笔单字
   CSSSingle

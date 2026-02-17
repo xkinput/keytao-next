@@ -30,7 +30,7 @@ function phraseTypeToSuffix(type: PhraseType): string {
     Supplement: 'supplement',  // 补充
     Symbol: 'symbol',          // 符号
     Link: 'link',              // 链接
-    CSS: 'css',                // 声笔笔两字词
+    CSS: 'css',                // 声笔笔
     CSSSingle: 'css-single',   // 声笔笔单字
     English: 'english',        // 英文
   };
