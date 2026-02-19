@@ -201,6 +201,42 @@ export async function POST(request: NextRequest) {
       return NextResponse.json<BotCreatePRResponse>(responseData)
     }
 
+    // Check for duplicates in existing draft batch
+    if (batchId) {
+      const existingPRs = await prisma.pullRequest.findMany({
+        where: {
+          batchId: batchId
+        },
+        select: {
+          action: true,
+          word: true,
+          code: true
+        }
+      })
+
+      // Check each item for duplicates
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i]
+        const isDuplicate = existingPRs.some(
+          pr => pr.action === item.action &&
+            pr.word === item.word &&
+            pr.code === item.code
+        )
+
+        if (isDuplicate) {
+          const actionName = item.action === 'Create' ? '添加' :
+            item.action === 'Change' ? '修改' : '删除'
+          return NextResponse.json<BotCreatePRResponse>(
+            {
+              success: false,
+              message: `草稿批次中已存在相同的修改：${actionName}词条【${item.word}】(编码: ${item.code})\n\n请勿重复添加，可以直接提交审核哦～`
+            },
+            { status: 400 }
+          )
+        }
+      }
+    }
+
     // Create batch and PRs (same logic as frontend)
     const result = await prisma.$transaction(async (tx) => {
       // Use existing batch or create new one
