@@ -114,6 +114,10 @@ model User {
   status     UserStatus @default(ENABLE)
   signUpType SignUpType @default(USERNAME)
 
+  // Platform bindings
+  qqId       String? @unique
+  telegramId String? @unique
+
   // Relations
   roles                Role[]        @relation("UserRoles")
   issues               Issue[]       @relation("UserIssues")
@@ -123,6 +127,7 @@ model User {
   likedPullRequests    PullRequest[] @relation("PullRequestLikes")
   dislikedPullRequests PullRequest[] @relation("PullRequestDislikes")
   batches              Batch[]       @relation("UserBatches")
+  linkKeys             LinkKey[]     @relation("UserLinkKeys")
 
   @@map("users")
 }
@@ -387,4 +392,25 @@ model SyncTask {
   batches Batch[] @relation("SyncTaskBatches")
 
   @@map("sync_tasks")
+}
+
+/// Link key for platform binding
+model LinkKey {
+  id        String   @id @default(uuid())
+  key       String   @unique // 6-character binding code
+  createAt  DateTime @default(now())
+  expiresAt DateTime // 10 minutes expiration
+
+  // Associated user
+  user   User @relation("UserLinkKeys", fields: [userId], references: [id], onDelete: Cascade)
+  userId Int
+
+  // Status
+  isUsed     Boolean   @default(false)
+  usedAt     DateTime?
+  platform   String? // 'qq' or 'telegram'
+  platformId String? // Platform user ID when used
+
+  @@index([userId])
+  @@map("link_keys")
 }

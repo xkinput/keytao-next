@@ -7,6 +7,7 @@ import { useAPI, apiRequest } from '@/lib/hooks/useSWR'
 import { useAuthStore } from '@/lib/store/auth'
 import { BarChart3, FileText, GitPullRequest, Lock, Calendar, Clock, CheckCircle } from 'lucide-react'
 import { BATCH_STATUS_MAP, STATUS_COLOR_MAP } from '@/lib/constants/status'
+import { PlatformBindingCard } from '@/app/components/PlatformBindingCard'
 
 interface BatchStatus {
   Draft?: number
@@ -374,6 +375,9 @@ export default function ProfilePage() {
               )}
             </CardBody>
           </Card>
+
+          {/* Platform Binding Card */}
+          <PlatformBindingCard />
 
           {/* Change Password Card */}
           <Card>
