@@ -206,8 +206,8 @@ export async function POST(request: NextRequest) {
       const batch = await tx.batch.create({
         data: {
           description: items.length === 1
-            ? `机器人添加: ${items[0].word}`
-            : `机器人批量添加 ${items.length} 个词条`,
+            ? `键道助手添加: ${items[0].word}`
+            : `键道助手批量添加 ${items.length} 个词条`,
           creatorId: user.id,
           status: 'Draft'
         }
