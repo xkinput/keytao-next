@@ -18,6 +18,7 @@ export interface BotCreatePRRequest {
   platformId: string
   items: BotPRItem[]
   confirmed?: boolean // Set to true to confirm warnings
+  batchId?: string // Optional batch ID to append to existing batch
 }
 
 export interface BotConflictInfo {

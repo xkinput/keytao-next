@@ -25,12 +25,13 @@ export async function POST(request: NextRequest) {
     }
 
     const body: BotCreatePRRequest = await request.json()
-    const { platform, platformId, items, confirmed } = body
+    const { platform, platformId, items, confirmed, batchId } = body
 
     console.log('[Bot API] Received request:', {
       platform,
       platformId,
       confirmed,
+      batchId,
       itemsCount: items?.length,
       items: items?.map(i => ({ action: i.action, word: i.word, code: i.code }))
     })
@@ -202,16 +203,43 @@ export async function POST(request: NextRequest) {
 
     // Create batch and PRs (same logic as frontend)
     const result = await prisma.$transaction(async (tx) => {
-      // Create new batch
-      const batch = await tx.batch.create({
-        data: {
-          description: items.length === 1
-            ? `键道助手添加: ${items[0].word}`
-            : `键道助手批量添加 ${items.length} 个词条`,
-          creatorId: user.id,
-          status: 'Draft'
+      // Use existing batch or create new one
+      let batch
+      if (batchId) {
+        // Find existing batch
+        batch = await tx.batch.findUnique({
+          where: { id: batchId },
+          select: {
+            id: true,
+            creatorId: true,
+            status: true,
+            description: true
+          }
+        })
+
+        if (!batch) {
+          throw new Error('批次不存在')
         }
-      })
+
+        if (batch.creatorId !== user.id) {
+          throw new Error('无权限操作此批次')
+        }
+
+        if (batch.status !== 'Draft') {
+          throw new Error('批次已提交，无法继续添加')
+        }
+      } else {
+        // Create new batch
+        batch = await tx.batch.create({
+          data: {
+            description: items.length === 1
+              ? `键道助手添加: ${items[0].word}`
+              : `键道助手批量添加 ${items.length} 个词条`,
+            creatorId: user.id,
+            status: 'Draft'
+          }
+        })
+      }
 
       // Create all PRs
       const prs = await Promise.all(
