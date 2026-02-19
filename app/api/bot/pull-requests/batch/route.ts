@@ -163,6 +163,22 @@ export async function POST(request: NextRequest) {
         const isDuplicateCode = result.conflict.currentPhrase.code === item.code &&
           result.conflict.currentPhrase.word !== item.word
 
+        // For Delete action with multiple_code warning, fetch all codes for this word
+        let allCodes: Array<{ code: string; type: string; weight: number }> | undefined
+        if (item.action === 'Delete' && !isDuplicateCode) {
+          const allPhrasesForWord = await prisma.phrase.findMany({
+            where: {
+              word: item.word
+            },
+            select: {
+              code: true,
+              type: true,
+              weight: true
+            }
+          })
+          allCodes = allPhrasesForWord
+        }
+
         warnings.push({
           index: i,
           item,
@@ -172,7 +188,8 @@ export async function POST(request: NextRequest) {
             word: result.conflict.currentPhrase.word,
             code: result.conflict.currentPhrase.code,
             weight: result.conflict.currentPhrase.weight
-          }
+          },
+          ...(allCodes && { allCodes })
         })
       }
     }

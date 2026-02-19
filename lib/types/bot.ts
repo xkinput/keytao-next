@@ -38,6 +38,12 @@ export interface BotWarningInfo {
     code: string
     weight: number
   }
+  // For Delete action with multiple_code warning, list all codes for this word
+  allCodes?: Array<{
+    code: string
+    type: string
+    weight: number
+  }>
 }
 
 export interface BotCreatePRResponse {
