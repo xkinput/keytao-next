@@ -43,15 +43,29 @@ export async function POST(
       )
     }
 
-    const user = await prisma.user.findFirst({
-      where: {
-        [platformField]: platformId
+    let user
+    try {
+      user = await prisma.user.findFirst({
+        where: {
+          [platformField]: platformId
+        }
+      })
+    } catch (prismaError: any) {
+      console.error('[Bot API] Prisma error:', prismaError)
+
+      if (prismaError.code === 'P2022') {
+        return NextResponse.json(
+          { success: false, message: '系统配置错误，请联系管理员更新数据库' },
+          { status: 500 }
+        )
       }
-    })
+
+      throw prismaError
+    }
 
     if (!user) {
       return NextResponse.json(
-        { success: false, message: '未找到绑定账号' },
+        { success: false, message: '未找到绑定账号。\n\n请先使用 /bind 命令绑定你的平台账号到键道加词平台～' },
         { status: 404 }
       )
     }
@@ -148,10 +162,26 @@ export async function POST(
         status: updated.status
       }
     })
-  } catch (error) {
-    console.error('Bot submit batch error:', error)
+  } catch (error: any) {
+    console.error('[Bot API] Submit error:', error)
+
+    // Handle specific error types
+    if (error.code === 'P2022') {
+      return NextResponse.json(
+        { success: false, message: '数据库配置错误，请联系管理员检查数据库迁移状态' },
+        { status: 500 }
+      )
+    }
+
+    if (error.code === 'P2025') {
+      return NextResponse.json(
+        { success: false, message: '批次或用户不存在' },
+        { status: 404 }
+      )
+    }
+
     return NextResponse.json(
-      { success: false, message: '提交批次失败' },
+      { success: false, message: `提交失败：${error.message || '未知错误'}` },
       { status: 500 }
     )
   }

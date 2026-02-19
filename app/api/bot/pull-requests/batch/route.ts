@@ -58,23 +58,44 @@ export async function POST(request: NextRequest) {
 
     // Find user by platform ID
     const fieldName = platform === 'qq' ? 'qqId' : 'telegramId'
-    const user = await prisma.user.findFirst({
-      where: {
-        [fieldName]: platformId,
-        status: 'ENABLE'
-      },
-      select: {
-        id: true,
-        name: true,
-        nickname: true
+
+    let user
+    try {
+      user = await prisma.user.findFirst({
+        where: {
+          [fieldName]: platformId,
+          status: 'ENABLE'
+        },
+        select: {
+          id: true,
+          name: true,
+          nickname: true
+        }
+      })
+    } catch (prismaError: any) {
+      // Handle database schema errors (e.g., column doesn't exist)
+      console.error('[Bot API] Prisma error:', prismaError)
+
+      if (prismaError.code === 'P2022') {
+        // Column doesn't exist - probably need to run migrations
+        return NextResponse.json<BotCreatePRResponse>(
+          {
+            success: false,
+            message: '系统配置错误，请联系管理员更新数据库（需要运行 prisma migrate）'
+          },
+          { status: 500 }
+        )
       }
-    })
+
+      // Other Prisma errors
+      throw prismaError
+    }
 
     if (!user) {
       return NextResponse.json<BotCreatePRResponse>(
         {
           success: false,
-          message: '未找到绑定账号，请使用 /bind 命令绑定你的账号'
+          message: '未找到绑定账号。\n\n请先使用 /bind 命令绑定你的平台账号到键道加词平台～'
         },
         { status: 404 }
       )
@@ -247,12 +268,37 @@ export async function POST(request: NextRequest) {
     }
     console.log('[Bot API] Returning success response:', JSON.stringify(responseData, null, 2))
     return NextResponse.json<BotCreatePRResponse>(responseData)
-  } catch (error) {
-    console.error('Bot create PR error:', error)
+  } catch (error: any) {
+    console.error('[Bot API] Error:', error)
+
+    // Handle specific error types
+    if (error.code === 'P2022') {
+      // Prisma column not found
+      return NextResponse.json<BotCreatePRResponse>(
+        {
+          success: false,
+          message: '数据库配置错误，请联系管理员检查数据库迁移状态'
+        },
+        { status: 500 }
+      )
+    }
+
+    if (error.code === 'P2025') {
+      // Record not found
+      return NextResponse.json<BotCreatePRResponse>(
+        {
+          success: false,
+          message: '未找到绑定账号。\n\n请先使用 /bind 命令绑定你的平台账号到键道加词平台～'
+        },
+        { status: 404 }
+      )
+    }
+
+    // Generic error
     return NextResponse.json<BotCreatePRResponse>(
       {
         success: false,
-        message: '创建失败，请稍后重试'
+        message: `创建失败：${error.message || '未知错误'}`
       },
       { status: 500 }
     )
