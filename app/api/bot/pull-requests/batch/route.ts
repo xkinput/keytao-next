@@ -158,7 +158,7 @@ export async function POST(request: NextRequest) {
           error: result.conflict.impact || '操作冲突',
           reason: result.conflict.suggestions?.[0]?.reason || '未知原因'
         })
-      } else if (result.conflict.currentPhrase && !isResolved) {
+      } else if (result.conflict.currentPhrase && !isResolved && !(item.action === 'Change' && result.conflict.currentPhrase.word === item.oldWord)) {
         // Warning - needs confirmation
         const isDuplicateCode = result.conflict.currentPhrase.code === item.code &&
           result.conflict.currentPhrase.word !== item.word
