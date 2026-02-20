@@ -14,9 +14,9 @@ export function Providers({ children }: { children: React.ReactNode }) {
     <SWRConfig
       value={{
         dedupingInterval: 2000,
-        revalidateOnFocus: false,
-        revalidateOnReconnect: false,
-        revalidateIfStale: false,
+        revalidateOnFocus: true,
+        revalidateOnReconnect: true,
+        revalidateIfStale: true,
         shouldRetryOnError: false,
       }}
     >

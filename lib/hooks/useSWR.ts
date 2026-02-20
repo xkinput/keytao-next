@@ -105,9 +105,9 @@ export function useAPI<T = unknown>(
     ([url, token]: [string, string | null]) => fetcher(url, token, options),
     {
       refreshInterval: options?.refreshInterval ?? 0,
-      revalidateOnFocus: false,
-      revalidateOnReconnect: false,
-      revalidateIfStale: false,
+      revalidateOnFocus: true,
+      revalidateOnReconnect: true,
+      revalidateIfStale: true,
       dedupingInterval: 2000,
       keepPreviousData: options?.keepPreviousData ?? true,
     }
