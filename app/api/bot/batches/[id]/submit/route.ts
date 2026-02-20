@@ -24,7 +24,7 @@ export async function POST(
 
     const { id } = await params
     const body = await request.json()
-    const { platform, platformId } = body
+    const { platform, platformId, confirmed = false } = body
 
     // Validate parameters
     if (!platform || !platformId) {
@@ -138,11 +138,42 @@ export async function POST(
       return NextResponse.json(
         {
           success: false,
-          message: '批次中存在未解决的冲突',
+          message: '批次中存在未解决的冲突，无法提交',
           conflicts: unresolvedConflicts
         },
         { status: 400 }
       )
+    }
+
+    // Check for warnings (重码/多编码) — block until confirmed
+    if (!confirmed) {
+      const warnings = results
+        .filter((result, i) => {
+          const isResolved = result.conflict.suggestions?.some(sug => sug.action === 'Resolved')
+          const pr = batch.pullRequests[i]
+          // Skip Change items whose currentPhrase is the old word being replaced
+          const isChangeOldWord = pr.action === 'Change' &&
+            result.conflict.currentPhrase?.word === pr.oldWord
+          return result.conflict.currentPhrase && !isResolved && !isChangeOldWord
+        })
+        .map((result, _, arr) => ({
+          word: result.conflict.currentPhrase!.word,
+          code: result.conflict.code,
+          weight: result.conflict.currentPhrase!.weight,
+          impact: result.conflict.impact
+        }))
+
+      if (warnings.length > 0) {
+        return NextResponse.json(
+          {
+            success: false,
+            warnings,
+            requiresConfirmation: true,
+            message: `批次中存在 ${warnings.length} 个重码/多编码警告，确认后可继续提交`
+          },
+          { status: 400 }
+        )
+      }
     }
 
     // Update batch status to Submitted
