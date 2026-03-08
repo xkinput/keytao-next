@@ -90,7 +90,7 @@ export function SyncProgressModal({
       setStatus('processing')
 
       // Auto start processing - pass summary directly to avoid state update delay
-      processNextBatch(result.taskId, result.files, 0, result.summary)
+      processNextBatch(result.taskId, result.files, result.summary)
     } catch (err) {
       setError(err instanceof Error ? err.message : '准备同步失败')
       setStatus('error')
