@@ -39,6 +39,8 @@ export async function POST(request: NextRequest) {
         id: true,
         status: true,
         githubBranch: true,
+        processedFiles: true,
+        pendingFiles: true,
       },
     });
 
@@ -74,7 +76,7 @@ export async function POST(request: NextRequest) {
     // Create branch if not exists
     if (!branch) {
       console.log(`[CommitBatch] Creating GitHub branch for task ${taskId}`);
-      branch = githubService.generateBranchName();
+      branch = githubService.generateBranchName(taskId);
       await githubService.getOrCreateBranch(branch);
 
       await prisma.syncTask.update({
@@ -85,21 +87,33 @@ export async function POST(request: NextRequest) {
       console.log(`[CommitBatch] Branch created: ${branch}`);
     }
 
+    const fileCommits = files.map((file) => ({
+      path: `rime/${file.name}`,
+      content: file.content,
+    }));
+    const changedFiles = await githubService.filterChangedFiles(branch, fileCommits);
+
     // Commit files
     const commitMessage = `Update dictionaries - ${new Date().toISOString().split('T')[0]}`;
 
-    for (const file of files) {
-      console.log(`[CommitBatch] Committing file: ${file.name}`);
-
-      await githubService.commitFiles(
-        branch,
-        [{ path: `rime/${file.name}`, content: file.content }],
-        commitMessage
-      );
+    if (changedFiles.length > 0) {
+      console.log(`[CommitBatch] Committing ${changedFiles.length} files in one commit`);
+      await githubService.commitFiles(branch, changedFiles, commitMessage);
+    } else {
+      console.log('[CommitBatch] No content changes detected on branch, skipping commit');
     }
 
     // Calculate progress
     const progress = Math.floor((processedCount / totalCount) * 90); // 0-90%
+    const processedFileNames = Array.from(
+      new Set([
+        ...task.processedFiles,
+        ...files.map((file) => file.name),
+      ])
+    );
+    const pendingFileNames = task.pendingFiles.filter(
+      (fileName) => !files.some((file) => file.name === fileName)
+    );
 
     // Update task progress
     await prisma.syncTask.update({
@@ -108,6 +122,8 @@ export async function POST(request: NextRequest) {
         progress,
         message: `已提交 ${processedCount}/${totalCount} 个文件`,
         processedItems: processedCount,
+        processedFiles: processedFileNames,
+        pendingFiles: pendingFileNames,
       },
     });
 
@@ -118,6 +134,7 @@ export async function POST(request: NextRequest) {
       progress,
       message: `已提交 ${processedCount}/${totalCount} 个文件`,
       branch, // Return branch name for UI display
+      processedCount,
     });
   } catch (error) {
     console.error('[CommitBatch] Error:', error);

@@ -7,8 +7,10 @@ import { checkAdminPermission } from '@/lib/adminAuth';
 import { prisma } from '@/lib/prisma';
 import {
   convertPhrasesToRimeDicts,
+  getAffectedPhraseTypesFromPullRequests,
   generateSyncSummary,
 } from '@/lib/services/rimeConverter';
+import { createGithubSyncService } from '@/lib/services/githubSync';
 import { SyncTaskStatus, PhraseStatus } from '@prisma/client';
 import { NextResponse } from 'next/server';
 
@@ -61,6 +63,17 @@ export async function POST() {
       console.log(`[Prepare] Found ${batches.length} batches with ${allPullRequests.length} pull requests`);
     }
 
+    const affectedTypes = isManualSync
+      ? []
+      : getAffectedPhraseTypesFromPullRequests(allPullRequests);
+
+    if (!isManualSync && affectedTypes.length === 0) {
+      return NextResponse.json(
+        { success: false, error: '没有识别到需要同步的词库类型' },
+        { status: 400 }
+      );
+    }
+
     // Generate dictionary files from current Phrase table state (complete final state)
     // This ensures deleted items are removed and changed items are updated correctly
     console.log('[Prepare] Generating dictionary from Phrase table...');
@@ -68,6 +81,7 @@ export async function POST() {
     const phrases = await prisma.phrase.findMany({
       where: {
         status: PhraseStatus.Finish,
+        ...(isManualSync ? {} : { type: { in: affectedTypes } }),
       },
       orderBy: [
         { type: 'asc' },
@@ -83,7 +97,16 @@ export async function POST() {
       );
     }
 
-    const dictFiles = convertPhrasesToRimeDicts(phrases);
+    const dictFiles = convertPhrasesToRimeDicts(
+      phrases,
+      undefined,
+      isManualSync
+        ? undefined
+        : {
+            includeTypes: affectedTypes,
+            includeEmptyTypes: true,
+          }
+    );
 
     if (dictFiles.size === 0) {
       return NextResponse.json(
@@ -92,8 +115,24 @@ export async function POST() {
       );
     }
 
-    const fileNames = Array.from(dictFiles.keys());
-    console.log(`[Prepare] Generated ${fileNames.length} dictionary files from ${phrases.length} phrases`);
+    const githubService = createGithubSyncService();
+    const changedFiles = await githubService.filterChangedFiles(
+      githubService.getBaseBranchName(),
+      Array.from(dictFiles.entries()).map(([fileName, content]) => ({
+        path: `rime/${fileName}`,
+        content,
+      }))
+    );
+
+    if (changedFiles.length === 0) {
+      return NextResponse.json(
+        { success: false, error: '没有需要同步的词库文件' },
+        { status: 400 }
+      );
+    }
+
+    const fileNames = changedFiles.map((file) => file.path.replace(/^rime\//, ''));
+    console.log(`[Prepare] Generated ${dictFiles.size} candidate dictionary files, ${fileNames.length} changed files from ${phrases.length} phrases`);
 
     // Generate sync summary
     const summary = isManualSync
@@ -106,6 +145,8 @@ export async function POST() {
       data: {
         status: SyncTaskStatus.Pending,
         totalItems: allPullRequests.length || phrases.length,
+        pendingFiles: fileNames,
+        processedFiles: [],
         batches: batches.length > 0 ? {
           connect: batches.map((batch) => ({ id: batch.id })),
         } : undefined,
@@ -115,9 +156,9 @@ export async function POST() {
     console.log(`[Prepare] Task ${task.id} created with ${fileNames.length} files${isManualSync ? ' (manual sync)' : ''}`);
 
     // Prepare file data for frontend
-    const files = fileNames.map((fileName) => ({
-      name: fileName,
-      content: dictFiles.get(fileName)!,
+    const files = changedFiles.map((file) => ({
+      name: file.path.replace(/^rime\//, ''),
+      content: file.content,
     }));
 
     return NextResponse.json({

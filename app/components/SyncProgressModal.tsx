@@ -101,7 +101,6 @@ export function SyncProgressModal({
   const processNextBatch = async (
     tid: string = taskId,
     fileList: SyncFile[] = files,
-    processed: number = processedCount,
     summaryText: string = summary
   ) => {
     if (isProcessing) return
@@ -110,18 +109,12 @@ export function SyncProgressModal({
       setIsProcessing(true)
       setError(null)
 
-      const batchSize = 5
-      const startIdx = processed
-      const endIdx = Math.min(startIdx + batchSize, fileList.length)
-      const batch = fileList.slice(startIdx, endIdx)
-
-      if (batch.length === 0) {
-        // All files processed, finalize
+      if (fileList.length === 0) {
         await finalize(tid, summaryText)
         return
       }
 
-      setCurrentBatch(Math.floor(processed / batchSize) + 1)
+      setCurrentBatch(1)
 
       const response = await fetch('/api/admin/sync-to-github/commit-batch', {
         method: 'POST',
@@ -131,8 +124,8 @@ export function SyncProgressModal({
         },
         body: JSON.stringify({
           taskId: tid,
-          files: batch,
-          processedCount: endIdx,
+          files: fileList,
+          processedCount: fileList.length,
           totalCount: fileList.length,
         }),
       })
@@ -148,17 +141,8 @@ export function SyncProgressModal({
         setGithubBranch(result.branch)
       }
 
-      setProcessedCount(endIdx)
-
-      // Check if all files are processed
-      if (endIdx >= fileList.length) {
-        // All files processed, finalize
-        await finalize(tid, summaryText)
-        return
-      }
-
-      // Continue automatically
-      setTimeout(() => processNextBatch(tid, fileList, endIdx, summaryText), 500)
+      setProcessedCount(result.processedCount ?? fileList.length)
+      await finalize(tid, summaryText)
     } catch (err) {
       setError(err instanceof Error ? err.message : '提交文件失败')
       setStatus('error')
@@ -278,7 +262,7 @@ export function SyncProgressModal({
                     />
                     {currentBatch > 0 && (
                       <p className="text-xs text-default-500">
-                        第 {currentBatch} 批 (每批 5 个文件)
+                        第 {currentBatch} 批，本次会一次性提交全部变更文件
                       </p>
                     )}
                   </div>

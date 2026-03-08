@@ -19,6 +19,11 @@ export interface RimeDict {
   entries: RimeEntry[];
 }
 
+interface ConvertPhrasesOptions {
+  includeTypes?: PhraseType[];
+  includeEmptyTypes?: boolean;
+}
+
 /**
  * Convert PhraseType enum to file suffix
  * Aligned with KeyTao rime dictionary naming convention
@@ -52,6 +57,23 @@ function phraseTypeToDisplayName(type: PhraseType): string {
     English: '英文',
   };
   return typeMap[type];
+}
+
+/**
+ * Get affected phrase types from pull requests
+ */
+export function getAffectedPhraseTypesFromPullRequests(
+  pullRequests: PullRequest[]
+): PhraseType[] {
+  const types = new Set<PhraseType>();
+
+  for (const pullRequest of pullRequests) {
+    if (pullRequest.type) {
+      types.add(pullRequest.type);
+    }
+  }
+
+  return Array.from(types);
 }
 
 /**
@@ -232,16 +254,19 @@ export function convertToRimeDicts(
  */
 export function convertPhrasesToRimeDicts(
   phrases: Phrase[],
-  version?: string
+  version?: string,
+  options: ConvertPhrasesOptions = {}
 ): Map<string, string> {
   const result = new Map<string, string>();
   const grouped = groupPhrasesByType(phrases);
   const dateVersion = version || format(new Date(), 'yyyy.MM.dd');
+  const targetTypes = options.includeTypes || Array.from(grouped.keys());
 
-  for (const [type, typePhrases] of grouped.entries()) {
+  for (const type of targetTypes) {
+    const typePhrases = grouped.get(type) || [];
     const entries: RimeEntry[] = typePhrases.map(phraseToRimeEntry);
 
-    if (entries.length === 0) {
+    if (entries.length === 0 && !options.includeEmptyTypes) {
       continue;
     }
 

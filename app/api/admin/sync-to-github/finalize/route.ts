@@ -40,6 +40,7 @@ export async function POST(request: NextRequest) {
         status: true,
         githubBranch: true,
         totalItems: true,
+        processedFiles: true,
       },
     });
 
@@ -62,6 +63,26 @@ export async function POST(request: NextRequest) {
         { success: false, error: '任务已取消' },
         { status: 400 }
       );
+    }
+
+    if (task.processedFiles.length === 0) {
+      await prisma.syncTask.update({
+        where: { id: taskId },
+        data: {
+          status: SyncTaskStatus.Completed,
+          progress: 100,
+          message: '没有需要同步的文件',
+          completedAt: new Date(),
+          processedItems: 0,
+        },
+      });
+
+      return NextResponse.json({
+        success: true,
+        prUrl: null,
+        prNumber: null,
+        noChanges: true,
+      });
     }
 
     // Create PR

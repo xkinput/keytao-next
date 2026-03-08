@@ -30,6 +30,13 @@ export interface CreatePRResult {
   branch: string;
 }
 
+function isGitHubStatusError(error: unknown, status: number): boolean {
+  return typeof error === 'object'
+    && error !== null
+    && 'status' in error
+    && error.status === status;
+}
+
 /**
  * Github Sync Service Class
  */
@@ -70,9 +77,26 @@ export class GithubSyncService {
   /**
    * Generate branch name with date
    */
-  generateBranchName(): string {
+  generateBranchName(suffix?: string): string {
     const date = format(new Date(), 'yyyy-MM-dd');
-    return `update-dict-${date}`;
+    if (!suffix) {
+      return `update-dict-${date}`;
+    }
+
+    const normalizedSuffix = suffix
+      .toLowerCase()
+      .replace(/[^a-z0-9-]/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '')
+      .slice(0, 24);
+
+    return normalizedSuffix
+      ? `update-dict-${date}-${normalizedSuffix}`
+      : `update-dict-${date}`;
+  }
+
+  getBaseBranchName(): string {
+    return this.baseBranch;
   }
 
   /**
@@ -112,8 +136,8 @@ export class GithubSyncService {
         branch: branchName,
       });
       return true;
-    } catch (error: any) {
-      if (error.status === 404) {
+    } catch (error: unknown) {
+      if (isGitHubStatusError(error, 404)) {
         return false;
       }
       throw error;
@@ -149,8 +173,8 @@ export class GithubSyncService {
         return data.sha;
       }
       return null;
-    } catch (error: any) {
-      if (error.status === 404) {
+    } catch (error: unknown) {
+      if (isGitHubStatusError(error, 404)) {
         return null;
       }
       throw error;
@@ -198,12 +222,29 @@ export class GithubSyncService {
       }
 
       return null;
-    } catch (error: any) {
-      if (error.status === 404) {
+    } catch (error: unknown) {
+      if (isGitHubStatusError(error, 404)) {
         return null;
       }
       throw error;
     }
+  }
+
+  /**
+   * Filter out files whose content is unchanged against the given ref
+   */
+  async filterChangedFiles(ref: string, files: FileCommit[]): Promise<FileCommit[]> {
+    const changedFiles: FileCommit[] = [];
+
+    for (const file of files) {
+      const existingContent = await this.getFileContent(ref, file.path);
+
+      if (existingContent !== file.content) {
+        changedFiles.push(file);
+      }
+    }
+
+    return changedFiles;
   }
 
   /**
@@ -215,39 +256,52 @@ export class GithubSyncService {
     message: string,
     onProgress?: (current: number, total: number) => void | Promise<void>
   ): Promise<void> {
-    const total = files.length
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i]
-      const existingSha = await this.getFileSha(branch, file.path);
-      const content = Buffer.from(file.content, 'utf-8').toString('base64');
+    if (files.length === 0) {
+      return;
+    }
 
-      if (existingSha) {
-        // Update existing file
-        await this.octokit.repos.createOrUpdateFileContents({
-          owner: this.owner,
-          repo: this.repo,
-          path: file.path,
-          message,
-          content,
-          branch,
-          sha: existingSha,
-        });
-      } else {
-        // Create new file
-        await this.octokit.repos.createOrUpdateFileContents({
-          owner: this.owner,
-          repo: this.repo,
-          path: file.path,
-          message,
-          content,
-          branch,
-        });
-      }
+    const { data: branchData } = await this.octokit.repos.getBranch({
+      owner: this.owner,
+      repo: this.repo,
+      branch,
+    });
 
-      // Report progress after each file
-      if (onProgress) {
-        await onProgress(i + 1, total)
-      }
+    const baseCommitSha = branchData.commit.sha;
+    const { data: baseCommit } = await this.octokit.git.getCommit({
+      owner: this.owner,
+      repo: this.repo,
+      commit_sha: baseCommitSha,
+    });
+
+    const { data: newTree } = await this.octokit.git.createTree({
+      owner: this.owner,
+      repo: this.repo,
+      base_tree: baseCommit.tree.sha,
+      tree: files.map((file) => ({
+        path: file.path,
+        mode: '100644' as const,
+        type: 'blob' as const,
+        content: file.content,
+      })),
+    });
+
+    const { data: newCommit } = await this.octokit.git.createCommit({
+      owner: this.owner,
+      repo: this.repo,
+      message,
+      tree: newTree.sha,
+      parents: [baseCommitSha],
+    });
+
+    await this.octokit.git.updateRef({
+      owner: this.owner,
+      repo: this.repo,
+      ref: `heads/${branch}`,
+      sha: newCommit.sha,
+    });
+
+    if (onProgress) {
+      await onProgress(files.length, files.length);
     }
   }
 

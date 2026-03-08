@@ -61,3 +61,43 @@ export interface BotCreatePRResponse {
   warnings?: BotWarningInfo[]
   requiresConfirmation?: boolean
 }
+
+export interface BotLookupPhrase {
+  word: string
+  code: string
+  weight: number
+  type: string
+  remark: string | null
+}
+
+export interface BotBatchLookupByWordRequest {
+  words: string[]
+}
+
+export interface BotBatchLookupByCodeRequest {
+  codes: string[]
+}
+
+export interface BotBatchLookupByWordItem {
+  word: string
+  phrases: BotLookupPhrase[]
+}
+
+export interface BotBatchLookupByCodeItem {
+  code: string
+  phrases: BotLookupPhrase[]
+}
+
+export interface BotBatchLookupByWordResponse {
+  success: boolean
+  count: number
+  results: BotBatchLookupByWordItem[]
+  message?: string
+}
+
+export interface BotBatchLookupByCodeResponse {
+  success: boolean
+  count: number
+  results: BotBatchLookupByCodeItem[]
+  message?: string
+}
