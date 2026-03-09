@@ -32,6 +32,13 @@ export default function RegisterPage() {
     e.preventDefault()
     setError('')
 
+    const trimmedEmail = email.trim()
+
+    if (!trimmedEmail) {
+      setError('邮箱不能为空')
+      return
+    }
+
     // Validate password match
     if (password !== confirmPassword) {
       setError('两次输入的密码不一致')
@@ -45,7 +52,7 @@ export default function RegisterPage() {
         '/api/auth/register',
         {
           method: 'POST',
-          body: { name, password, nickname, email },
+          body: { name, password, nickname, email: trimmedEmail },
           withAuth: false
         }
       )
@@ -128,10 +135,11 @@ export default function RegisterPage() {
 
             <Input
               label="邮箱"
-              placeholder="请输入邮箱（可选）"
+              placeholder="请输入邮箱"
               type="email"
               value={email}
               onValueChange={setEmail}
+              isRequired
               variant="bordered"
             />
 

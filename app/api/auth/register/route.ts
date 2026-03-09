@@ -6,16 +6,32 @@ import { signToken, validatePassword } from '@/lib/auth'
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { name, password, nickname, email } = body
+    const normalizedName = typeof body.name === 'string' ? body.name.trim() : ''
+    const normalizedNickname = typeof body.nickname === 'string' ? body.nickname.trim() : ''
+    const normalizedEmail = typeof body.email === 'string' ? body.email.trim() : ''
 
-    if (!name) {
+    if (!normalizedName) {
       return NextResponse.json(
         { error: '用户名不能为空' },
         { status: 400 }
       )
     }
 
-    const passwordValidation = validatePassword(password)
+    if (!normalizedEmail) {
+      return NextResponse.json(
+        { error: '邮箱不能为空' },
+        { status: 400 }
+      )
+    }
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+      return NextResponse.json(
+        { error: '邮箱格式不正确' },
+        { status: 400 }
+      )
+    }
+
+    const passwordValidation = validatePassword(body.password)
     if (!passwordValidation.valid) {
       return NextResponse.json(
         { error: passwordValidation.error },
@@ -26,8 +42,8 @@ export async function POST(request: NextRequest) {
     const existingUser = await prisma.user.findFirst({
       where: {
         OR: [
-          { name },
-          ...(email ? [{ email }] : [])
+          { name: normalizedName },
+          { email: normalizedEmail }
         ]
       }
     })
@@ -50,14 +66,14 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const hashedPassword = hashSync(password, genSaltSync(12))
+    const hashedPassword = hashSync(body.password, genSaltSync(12))
 
     const user = await prisma.user.create({
       data: {
-        name,
+        name: normalizedName,
         password: hashedPassword,
-        nickname: nickname || name,
-        email,
+        nickname: normalizedNickname || normalizedName,
+        email: normalizedEmail,
         status: 'ENABLE',
         signUpType: 'USERNAME',
         roles: {
