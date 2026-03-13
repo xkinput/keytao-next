@@ -158,26 +158,16 @@ export async function POST(request: NextRequest) {
           error: result.conflict.impact || '操作冲突',
           reason: result.conflict.suggestions?.[0]?.reason || '未知原因'
         })
-      } else if (result.conflict.currentPhrase && !isResolved && !(item.action === 'Change' && result.conflict.currentPhrase.word === item.oldWord)) {
-        // Warning - needs confirmation
+      } else if (
+        result.conflict.currentPhrase &&
+        !isResolved &&
+        // Delete: user explicitly specified word+code, no confirmation needed
+        item.action !== 'Delete' &&
+        !(item.action === 'Change' && result.conflict.currentPhrase.word === item.oldWord)
+      ) {
+        // Warning - needs confirmation (Create/Change only)
         const isDuplicateCode = result.conflict.currentPhrase.code === item.code &&
           result.conflict.currentPhrase.word !== item.word
-
-        // For Delete action with multiple_code warning, fetch all codes for this word
-        let allCodes: Array<{ code: string; type: string; weight: number }> | undefined
-        if (item.action === 'Delete' && !isDuplicateCode) {
-          const allPhrasesForWord = await prisma.phrase.findMany({
-            where: {
-              word: item.word
-            },
-            select: {
-              code: true,
-              type: true,
-              weight: true
-            }
-          })
-          allCodes = allPhrasesForWord
-        }
 
         warnings.push({
           index: i,
@@ -188,8 +178,7 @@ export async function POST(request: NextRequest) {
             word: result.conflict.currentPhrase.word,
             code: result.conflict.currentPhrase.code,
             weight: result.conflict.currentPhrase.weight
-          },
-          ...(allCodes && { allCodes })
+          }
         })
       }
     }

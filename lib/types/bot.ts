@@ -101,3 +101,52 @@ export interface BotBatchLookupByCodeResponse {
   results: BotBatchLookupByCodeItem[]
   message?: string
 }
+
+// ── Batch draft add ──────────────────────────────────────────────────────────
+
+export interface BotBatchDraftItem {
+  word: string
+  code: string
+  action?: 'Create' | 'Change' | 'Delete'
+  oldWord?: string
+  type?: string
+  remark?: string
+}
+
+export interface BotBatchDraftRequest {
+  platform: 'qq' | 'telegram'
+  platformId: string
+  items: BotBatchDraftItem[]
+  batchId?: string
+}
+
+export interface BotBatchDraftFailedItem {
+  index: number
+  word: string
+  code: string
+  reason: string
+}
+
+export interface BotDraftSnapshotItem {
+  id: number
+  action: string
+  word: string
+  code: string
+  type: string
+  status: string
+  hasWarning?: boolean
+  warningNote?: string
+}
+
+export interface BotBatchDraftResponse {
+  success: boolean
+  message: string
+  batchId?: string
+  successCount: number
+  failedCount: number
+  skippedCount: number
+  failed: BotBatchDraftFailedItem[]
+  skipped: BotBatchDraftFailedItem[]
+  draftItems: BotDraftSnapshotItem[]
+  draftTotal: number
+}
