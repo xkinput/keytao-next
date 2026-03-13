@@ -78,13 +78,35 @@ export async function GET(request: NextRequest) {
       })
     }
 
+    // Calculate dynamic weights and conflicts (same as web batch detail page)
+    const { checkBatchConflictsWithWeight } = await import('@/lib/services/batchConflictService')
+    const prItems = batch.pullRequests.map(pr => ({
+      id: String(pr.id),
+      action: pr.action as 'Create' | 'Change' | 'Delete',
+      word: pr.word || '',
+      oldWord: pr.oldWord || undefined,
+      code: pr.code || '',
+      type: (pr.type || 'Phrase') as any,
+      weight: pr.weight || undefined,
+    }))
+    const conflictResults = prItems.length > 0 ? await checkBatchConflictsWithWeight(prItems) : []
+
+    const enrichedItems = batch.pullRequests.map(pr => {
+      const conflictResult = conflictResults.find(r => r.id === String(pr.id))
+      return {
+        ...pr,
+        weight: conflictResult?.calculatedWeight ?? pr.weight,
+        conflictInfo: conflictResult?.conflict ?? null,
+      }
+    })
+
     return NextResponse.json({
       success: true,
       batchId: batch.id,
-      items: batch.pullRequests,
-      count: batch.pullRequests.length,
-      message: batch.pullRequests.length > 0
-        ? `草稿批次包含 ${batch.pullRequests.length} 个条目`
+      items: enrichedItems,
+      count: enrichedItems.length,
+      message: enrichedItems.length > 0
+        ? `草稿批次包含 ${enrichedItems.length} 个条目`
         : '草稿批次为空'
     })
   } catch (error) {
