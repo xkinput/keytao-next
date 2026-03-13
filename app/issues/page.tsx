@@ -8,6 +8,7 @@ import {
   Chip,
   useDisclosure,
   Avatar,
+  Pagination,
 } from '@heroui/react'
 import { RefreshCw } from 'lucide-react'
 import { useIsAuthenticated } from '@/lib/hooks/useAuth'
@@ -221,22 +222,12 @@ export default function HomePage() {
         </div>
 
         {data?.pagination && data.pagination.totalPages > 1 && (
-          <div className="mt-6 flex justify-center gap-2">
-            <Button
-              isDisabled={data.pagination.page === 1}
-              onPress={() => setPage(data.pagination.page - 1)}
-            >
-              上一页
-            </Button>
-            <span className="flex items-center px-4">
-              {data.pagination.page} / {data.pagination.totalPages}
-            </span>
-            <Button
-              isDisabled={data.pagination.page === data.pagination.totalPages}
-              onPress={() => setPage(data.pagination.page + 1)}
-            >
-              下一页
-            </Button>
+          <div className="mt-6 flex justify-center">
+            <Pagination
+              total={data.pagination.totalPages}
+              page={data.pagination.page}
+              onChange={setPage}
+            />
           </div>
         )}
       </main>

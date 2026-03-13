@@ -9,7 +9,8 @@ import {
   Button,
   Chip,
   Tabs,
-  Tab
+  Tab,
+  Pagination
 } from '@heroui/react'
 import { RefreshCw, AlertTriangle, Link as LinkIcon } from 'lucide-react'
 import { useAPI } from '@/lib/hooks/useSWR'
@@ -200,22 +201,12 @@ export default function PullRequestsPage() {
         </div>
 
         {data?.pagination && data.pagination.totalPages > 1 && (
-          <div className="mt-6 flex justify-center gap-2">
-            <Button
-              isDisabled={data.pagination.page === 1}
-              onPress={() => handlePageChange(data.pagination.page - 1)}
-            >
-              上一页
-            </Button>
-            <span className="flex items-center px-4">
-              {data.pagination.page} / {data.pagination.totalPages}
-            </span>
-            <Button
-              isDisabled={data.pagination.page === data.pagination.totalPages}
-              onPress={() => handlePageChange(data.pagination.page + 1)}
-            >
-              下一页
-            </Button>
+          <div className="mt-6 flex justify-center">
+            <Pagination
+              total={data.pagination.totalPages}
+              page={data.pagination.page}
+              onChange={handlePageChange}
+            />
           </div>
         )}
       </main>

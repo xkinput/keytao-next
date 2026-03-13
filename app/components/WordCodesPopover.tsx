@@ -14,9 +14,8 @@ import {
   Chip,
   Spinner,
   Input,
-  Button
+  Pagination
 } from '@heroui/react'
-import { ChevronLeft, ChevronRight } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { getPhraseTypeLabel, type PhraseType } from '@/lib/constants/phraseTypes'
 
@@ -176,29 +175,12 @@ export default function WordCodesPopover({
                   共 {pagination.total} 个编码
                 </p>
                 {pagination.totalPages > 1 && (
-                  <div className="flex items-center gap-2">
-                    <Button
-                      size="sm"
-                      variant="flat"
-                      isIconOnly
-                      isDisabled={page === 1}
-                      onPress={() => handlePageChange(page - 1)}
-                    >
-                      <ChevronLeft size={14} />
-                    </Button>
-                    <span className="text-tiny text-default-600">
-                      {page} / {pagination.totalPages}
-                    </span>
-                    <Button
-                      size="sm"
-                      variant="flat"
-                      isIconOnly
-                      isDisabled={page === pagination.totalPages}
-                      onPress={() => handlePageChange(page + 1)}
-                    >
-                      <ChevronRight size={14} />
-                    </Button>
-                  </div>
+                  <Pagination
+                    size="sm"
+                    total={pagination.totalPages}
+                    page={page}
+                    onChange={handlePageChange}
+                  />
                 )}
               </div>
               <Table
