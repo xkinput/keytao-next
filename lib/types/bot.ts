@@ -46,6 +46,14 @@ export interface BotWarningInfo {
   }>
 }
 
+export interface BotDeleteNoteInfo {
+  index: number
+  word: string
+  code: string
+  weight: number
+  type?: string
+}
+
 export interface BotCreatePRResponse {
   success: boolean
   message: string
@@ -53,6 +61,9 @@ export interface BotCreatePRResponse {
   // On success
   batchId?: string
   pullRequestCount?: number
+
+  // Informational notes about Delete operations (non-blocking)
+  notes?: BotDeleteNoteInfo[]
 
   // On conflict
   conflicts?: BotConflictInfo[]

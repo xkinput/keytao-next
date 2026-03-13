@@ -4,7 +4,7 @@ import { prisma } from '@/lib/prisma'
 import { checkBatchConflictsWithWeight } from '@/lib/services/batchConflictService'
 import { PullRequestType } from '@prisma/client'
 import { PhraseType } from '@/lib/constants/phraseTypes'
-import type { BotCreatePRRequest, BotCreatePRResponse, BotConflictInfo, BotWarningInfo } from '@/lib/types/bot'
+import type { BotCreatePRRequest, BotCreatePRResponse, BotConflictInfo, BotWarningInfo, BotDeleteNoteInfo } from '@/lib/types/bot'
 
 /**
  * Bot API: Create PRs in batch
@@ -139,9 +139,10 @@ export async function POST(request: NextRequest) {
     // Run conflict detection
     const results = await checkBatchConflictsWithWeight(validationItems)
 
-    // Categorize results: conflicts (真冲突) vs warnings (重码警告)
+    // Categorize results: conflicts (真冲突) vs warnings (重码警告) vs notes (删除信息)
     const conflicts: BotConflictInfo[] = []
     const warnings: BotWarningInfo[] = []
+    const notes: BotDeleteNoteInfo[] = []
 
     for (let i = 0; i < results.length; i++) {
       const result = results[i]
@@ -158,11 +159,18 @@ export async function POST(request: NextRequest) {
           error: result.conflict.impact || '操作冲突',
           reason: result.conflict.suggestions?.[0]?.reason || '未知原因'
         })
+      } else if (item.action === 'Delete' && result.conflict.currentPhrase) {
+        // Delete: non-blocking, but record what will be deleted for informational purposes
+        notes.push({
+          index: i,
+          word: result.conflict.currentPhrase.word,
+          code: result.conflict.currentPhrase.code,
+          weight: result.conflict.currentPhrase.weight,
+          type: result.conflict.currentPhrase.type ?? undefined,
+        })
       } else if (
         result.conflict.currentPhrase &&
         !isResolved &&
-        // Delete: user explicitly specified word+code, no confirmation needed
-        item.action !== 'Delete' &&
         !(item.action === 'Change' && result.conflict.currentPhrase.word === item.oldWord)
       ) {
         // Warning - needs confirmation (Create/Change only)
@@ -330,11 +338,12 @@ export async function POST(request: NextRequest) {
       return { batch, prs }
     })
 
-    const responseData = {
+    const responseData: BotCreatePRResponse = {
       success: true,
       batchId: result.batch.id,
       pullRequestCount: result.prs.length,
-      message: `成功创建批次，包含 ${result.prs.length} 个修改提议`
+      message: `成功创建批次，包含 ${result.prs.length} 个修改提议`,
+      ...(notes.length > 0 && { notes }),
     }
     console.log('[Bot API] Returning success response:', JSON.stringify(responseData, null, 2))
     return NextResponse.json<BotCreatePRResponse>(responseData)
