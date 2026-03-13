@@ -9,6 +9,10 @@ import type {
   BotBatchDraftResponse,
   BotBatchDraftFailedItem,
   BotDraftSnapshotItem,
+  BotBatchDeleteDraftRequest,
+  BotBatchDeleteDraftResponse,
+  BotBatchDeleteDraftDeletedItem,
+  BotBatchDeleteDraftFailedItem,
 } from '@/lib/types/bot'
 
 /**
@@ -233,4 +237,139 @@ function inferType(word: string, code: string, explicit?: string): PhraseType {
   if (/[a-zA-Z]/.test(word)) return 'English'
   if (word.length === 1 && /[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]/.test(word)) return 'Single'
   return 'Phrase'
+}
+
+/**
+ * Bot API: Batch delete items from draft batch
+ * DELETE /api/bot/pull-requests/batch-draft
+ *
+ * Body: { platform, platformId, ids: number[] }
+ * Only deletes items that belong to the caller and are in Draft status.
+ */
+export async function DELETE(request: NextRequest) {
+  try {
+    if (!await verifyBotToken()) {
+      return NextResponse.json<BotBatchDeleteDraftResponse>(
+        { success: false, message: '未授权', successCount: 0, failedCount: 0, deleted: [], failed: [], draftItems: [], draftTotal: 0 },
+        { status: 401 }
+      )
+    }
+
+    const body: BotBatchDeleteDraftRequest = await request.json()
+    const { platform, platformId, ids } = body
+
+    if (!platform || !platformId || !ids || !Array.isArray(ids) || ids.length === 0) {
+      return NextResponse.json<BotBatchDeleteDraftResponse>(
+        { success: false, message: '缺少必需参数', successCount: 0, failedCount: 0, deleted: [], failed: [], draftItems: [], draftTotal: 0 },
+        { status: 400 }
+      )
+    }
+
+    if (!['qq', 'telegram'].includes(platform)) {
+      return NextResponse.json<BotBatchDeleteDraftResponse>(
+        { success: false, message: '不支持的平台', successCount: 0, failedCount: 0, deleted: [], failed: [], draftItems: [], draftTotal: 0 },
+        { status: 400 }
+      )
+    }
+
+    const fieldName = platform === 'qq' ? 'qqId' : 'telegramId'
+    const user = await prisma.user.findFirst({
+      where: { [fieldName]: platformId, status: 'ENABLE' },
+      select: { id: true }
+    })
+
+    if (!user) {
+      return NextResponse.json<BotBatchDeleteDraftResponse>(
+        { success: false, message: '未找到绑定账号，请先使用 /bind 命令绑定', successCount: 0, failedCount: 0, deleted: [], failed: [], draftItems: [], draftTotal: 0 },
+        { status: 404 }
+      )
+    }
+
+    // Fetch all requested PRs with batch info
+    const prs = await prisma.pullRequest.findMany({
+      where: { id: { in: ids } },
+      select: {
+        id: true,
+        action: true,
+        word: true,
+        code: true,
+        userId: true,
+        batchId: true,
+        batch: { select: { id: true, status: true } },
+      },
+    })
+
+    const prMap = new Map(prs.map(pr => [pr.id, pr]))
+    const deleted: BotBatchDeleteDraftDeletedItem[] = []
+    const failed: BotBatchDeleteDraftFailedItem[] = []
+    const toDeleteIds: number[] = []
+    let batchId: string | undefined
+
+    for (const id of ids) {
+      const pr = prMap.get(id)
+      if (!pr) {
+        failed.push({ id, reason: '条目不存在' })
+        continue
+      }
+      if (pr.userId !== user.id) {
+        failed.push({ id, reason: '无权限删除此条目' })
+        continue
+      }
+      if (pr.batch?.status !== 'Draft') {
+        failed.push({ id, reason: '只能删除草稿状态的条目' })
+        continue
+      }
+      toDeleteIds.push(id)
+      deleted.push({ id, word: pr.word ?? '', code: pr.code ?? '', action: pr.action })
+      batchId = batchId ?? (pr.batchId ?? undefined)
+    }
+
+    if (toDeleteIds.length > 0) {
+      await prisma.pullRequest.deleteMany({ where: { id: { in: toDeleteIds } } })
+    }
+
+    // Fetch updated draft snapshot
+    const updatedBatch = batchId
+      ? await prisma.batch.findUnique({
+        where: { id: batchId },
+        select: {
+          pullRequests: {
+            orderBy: { createAt: 'asc' },
+            select: { id: true, action: true, word: true, code: true, type: true, status: true },
+          },
+        },
+      })
+      : null
+
+    const draftItems: BotDraftSnapshotItem[] = (updatedBatch?.pullRequests ?? []).map(pr => ({
+      id: pr.id,
+      action: pr.action,
+      word: pr.word ?? '',
+      code: pr.code ?? '',
+      type: pr.type ?? 'Phrase',
+      status: pr.status,
+    }))
+
+    const parts: string[] = [`成功删除 ${deleted.length} 条`]
+    if (failed.length > 0) parts.push(`失败 ${failed.length} 条`)
+
+    return NextResponse.json<BotBatchDeleteDraftResponse>({
+      success: true,
+      message: parts.join('，'),
+      ...(batchId && { batchId }),
+      successCount: deleted.length,
+      failedCount: failed.length,
+      deleted,
+      failed,
+      draftItems,
+      draftTotal: draftItems.length,
+    })
+  } catch (error: unknown) {
+    console.error('[Bot API] batch-draft DELETE error:', error)
+    const msg = error instanceof Error ? error.message : '未知错误'
+    return NextResponse.json<BotBatchDeleteDraftResponse>(
+      { success: false, message: `批量删除失败：${msg}`, successCount: 0, failedCount: 0, deleted: [], failed: [], draftItems: [], draftTotal: 0 },
+      { status: 500 }
+    )
+  }
 }

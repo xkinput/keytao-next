@@ -161,3 +161,33 @@ export interface BotBatchDraftResponse {
   draftItems: BotDraftSnapshotItem[]
   draftTotal: number
 }
+
+export interface BotBatchDeleteDraftRequest {
+  platform: 'qq' | 'telegram'
+  platformId: string
+  ids: number[]
+}
+
+export interface BotBatchDeleteDraftDeletedItem {
+  id: number
+  word: string
+  code: string
+  action: string
+}
+
+export interface BotBatchDeleteDraftFailedItem {
+  id: number
+  reason: string
+}
+
+export interface BotBatchDeleteDraftResponse {
+  success: boolean
+  message: string
+  batchId?: string
+  successCount: number
+  failedCount: number
+  deleted: BotBatchDeleteDraftDeletedItem[]
+  failed: BotBatchDeleteDraftFailedItem[]
+  draftItems: BotDraftSnapshotItem[]
+  draftTotal: number
+}
