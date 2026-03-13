@@ -144,7 +144,8 @@ export async function POST(request: NextRequest) {
       }
 
       // Warning (重码) or clean → write (warnings auto-confirmed for bulk operations)
-      toWrite.push({ item, conflictReason: result.conflict.impact || undefined })
+      const isResolved = result.conflict.suggestions?.some(s => s.action === 'Resolved')
+      toWrite.push({ item, conflictReason: isResolved ? undefined : result.conflict.impact || undefined })
       // Mark this as "now in draft" so subsequent items in same request see it
       existingPRs.push({ action: item.action, word: item.word, code: item.code })
     }

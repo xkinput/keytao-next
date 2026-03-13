@@ -306,7 +306,9 @@ export async function POST(request: NextRequest) {
               userId: user.id,
               batchId: batch.id,
               hasConflict: false,
-              conflictReason: results[idx]?.conflict?.impact || null,
+              conflictReason: results[idx]?.conflict?.suggestions?.some(s => s.action === 'Resolved')
+                ? null
+                : results[idx]?.conflict?.impact || null,
             }
           })
         )
