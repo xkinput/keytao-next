@@ -112,7 +112,7 @@ export async function POST(request: NextRequest) {
 
     const failed: BotBatchDraftFailedItem[] = []
     const skipped: BotBatchDraftFailedItem[] = []
-    const toWrite: typeof normalizedItems = []
+    const toWrite: Array<{ item: typeof normalizedItems[0]; conflictReason?: string }> = []
 
     for (let i = 0; i < normalizedItems.length; i++) {
       const item = normalizedItems[i]
@@ -144,7 +144,7 @@ export async function POST(request: NextRequest) {
       }
 
       // Warning (重码) or clean → write (warnings auto-confirmed for bulk operations)
-      toWrite.push(item)
+      toWrite.push({ item, conflictReason: result.conflict.impact || undefined })
       // Mark this as "now in draft" so subsequent items in same request see it
       existingPRs.push({ action: item.action, word: item.word, code: item.code })
     }
@@ -152,7 +152,7 @@ export async function POST(request: NextRequest) {
     // Write all accepted items in one transaction
     if (toWrite.length > 0) {
       await prisma.$transaction(
-        toWrite.map(item =>
+        toWrite.map(({ item, conflictReason }) =>
           prisma.pullRequest.create({
             data: {
               word: item.word,
@@ -164,6 +164,7 @@ export async function POST(request: NextRequest) {
               userId: user.id,
               batchId: batchId!,
               hasConflict: false,
+              conflictReason: conflictReason ?? null,
             },
           })
         )

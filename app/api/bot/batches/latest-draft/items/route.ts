@@ -62,7 +62,8 @@ export async function GET(request: NextRequest) {
             remark: true,
             weight: true,
             status: true,
-            createAt: true
+            createAt: true,
+            conflictReason: true
           }
         }
       }

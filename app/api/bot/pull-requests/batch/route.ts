@@ -293,7 +293,7 @@ export async function POST(request: NextRequest) {
 
       // Create all PRs
       const prs = await Promise.all(
-        items.map((item) =>
+        items.map((item, idx) =>
           tx.pullRequest.create({
             data: {
               word: item.word,
@@ -305,7 +305,8 @@ export async function POST(request: NextRequest) {
               type: (item.type || 'Phrase') as PhraseType,
               userId: user.id,
               batchId: batch.id,
-              hasConflict: false
+              hasConflict: false,
+              conflictReason: results[idx]?.conflict?.impact || null,
             }
           })
         )
