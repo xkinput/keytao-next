@@ -81,6 +81,16 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Delete the empty draft batch (if any) before reverting the submitted one
+    await prisma.batch.deleteMany({
+      where: {
+        creatorId: user.id,
+        status: 'Draft',
+        description: { startsWith: '键道助手' },
+        pullRequests: { none: {} },
+      },
+    })
+
     // Revert to Draft
     const updated = await prisma.batch.update({
       where: { id: batch.id },
