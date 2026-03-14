@@ -63,6 +63,24 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Block recall if there's already a draft batch with content
+    const existingDraft = await prisma.batch.findFirst({
+      where: {
+        creatorId: user.id,
+        status: 'Draft',
+        description: { startsWith: '键道助手' },
+        pullRequests: { some: {} },
+      },
+      select: { id: true },
+    })
+
+    if (existingDraft) {
+      return NextResponse.json(
+        { success: false, message: '当前草稿批次已有内容，无法撤回之前的提交。请先清空或提交当前草稿。' },
+        { status: 400 }
+      )
+    }
+
     // Revert to Draft
     const updated = await prisma.batch.update({
       where: { id: batch.id },
