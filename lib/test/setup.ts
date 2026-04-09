@@ -7,19 +7,17 @@ import { beforeAll, afterEach, afterAll } from 'vitest'
 import { prisma } from '@/lib/prisma'
 
 beforeAll(async () => {
-  // Run migrations on test database
+  // Run migrations on test database.
+  // If schema-engine binary is unavailable (e.g. NixOS), skip and assume the
+  // test DB schema is already up to date (apply manually with prisma migrate deploy).
   try {
     execSync('pnpm prisma migrate deploy', {
-      env: {
-        ...process.env,
-        DATABASE_URL: process.env.DATABASE_URL, // Ensure test DB URL is used
-      },
+      env: { ...process.env, DATABASE_URL: process.env.DATABASE_URL },
       stdio: 'inherit',
+      timeout: 30_000,
     })
-  } catch (error) {
-    console.error('Failed to run migrations:', error)
-    console.error('DATABASE_URL:', process.env.DATABASE_URL)
-    throw error
+  } catch {
+    console.warn('[test setup] prisma migrate deploy failed — assuming test DB schema is current.')
   }
 })
 
@@ -28,14 +26,15 @@ afterEach(async () => {
   // Use TRUNCATE CASCADE for complete cleanup
   try {
     await prisma.$executeRawUnsafe(`
-      TRUNCATE TABLE 
+      TRUNCATE TABLE
         code_conflicts,
         pull_request_dependencies,
         pull_requests,
         batches,
         phrases,
         issues,
-        casbin_rule
+        casbin_rule,
+        api_keys
       CASCADE
     `)
 

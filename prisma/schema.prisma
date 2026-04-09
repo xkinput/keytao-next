@@ -128,6 +128,7 @@ model User {
   dislikedPullRequests PullRequest[] @relation("PullRequestDislikes")
   batches              Batch[]       @relation("UserBatches")
   linkKeys             LinkKey[]     @relation("UserLinkKeys")
+  apiKeys              ApiKey[]      @relation("UserApiKeys")
 
   @@map("users")
 }
@@ -392,6 +393,23 @@ model SyncTask {
   batches Batch[] @relation("SyncTaskBatches")
 
   @@map("sync_tasks")
+}
+
+/// Developer API key
+model ApiKey {
+  id           Int       @id @default(autoincrement())
+  key          String    @unique
+  name         String
+  enabled      Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  lastUsedAt   DateTime?
+  requestCount Int       @default(0)
+
+  user   User @relation("UserApiKeys", fields: [userId], references: [id], onDelete: Cascade)
+  userId Int
+
+  @@index([userId])
+  @@map("api_keys")
 }
 
 /// Link key for platform binding

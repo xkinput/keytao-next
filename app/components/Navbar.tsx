@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useCallback, memo, useState, useRef } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import { Button, Dropdown, DropdownTrigger, DropdownMenu, DropdownItem, DropdownSection } from '@heroui/react'
-import { Menu, User, Database, Shield, ChevronDown, Edit, Download, BookOpen } from 'lucide-react'
+import { Menu, User, Database, Shield, ChevronDown, Edit, Download, BookOpen, Code } from 'lucide-react'
 import { useAuthStore } from '@/lib/store/auth'
 import { useAPI } from '@/lib/hooks/useSWR'
 import Logo from './Logo'
@@ -122,6 +122,14 @@ function Navbar() {
       icon: BookOpen,
       items: [
         { label: '文档', href: docsUrl, isExternal: true },
+      ]
+    },
+    {
+      key: 'developer',
+      label: '开发者',
+      icon: Code,
+      items: [
+        { label: 'API 文档', href: '/developer' },
       ]
     },
     {
