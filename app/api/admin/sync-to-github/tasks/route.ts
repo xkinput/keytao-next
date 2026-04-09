@@ -71,6 +71,7 @@ export async function GET(request: NextRequest) {
           id: batch.id,
           description: batch.description,
           stats,
+          creator: batch.creator,
           totalPullRequests: batch.pullRequests.length,
         };
       });
