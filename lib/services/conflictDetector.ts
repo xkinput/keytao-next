@@ -31,6 +31,7 @@ export interface CodeSuggestion {
   fromCode?: string
   toCode?: string
   reason: string
+  resolverIndex?: number  // Index of the resolver PR in the batch items array
 }
 
 export class ConflictDetector {

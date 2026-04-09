@@ -315,6 +315,18 @@ export async function checkBatchConflictsWithWeight(
       continue
     }
 
+    // For 多编码词 case (phrase at a different code):
+    // check if a batch operation frees that word from the other code
+    if (phrase.code !== result.conflict.code) {
+      const crossKey = `${phrase.code}:${phrase.word}`
+      if (deleteMap.has(crossKey) || changeMap.has(crossKey)) {
+        // The word is being removed from that code — no longer a multi-code situation
+        result.conflict.impact = undefined
+        result.conflict.currentPhrase = undefined
+      }
+      continue
+    }
+
     const phraseKey = `${phrase.code}:${phrase.word}`
     let resolved = false
     let resolverIndex = -1
@@ -351,12 +363,13 @@ export async function checkBatchConflictsWithWeight(
 
           // Mark as resolved (no conflict, 重码 is allowed)
           result.conflict.hasConflict = false
-          result.conflict.impact = `编码 "${currentItem.code}" 已被词条 "${finalWord}" 占用，将创建重码（建议权重: ${result.calculatedWeight || '未计算'}）`
+          result.conflict.impact = `编码 "${currentItem.code}" 已被词条 "${changeEntry.item.oldWord}" 占用，将创建重码（建议权重: ${result.calculatedWeight || '未计算'}）`
           result.conflict.suggestions = [
             {
               action: 'Resolved',
               word: changeEntry.item.oldWord || '',
-              reason: `已第 ${changeEntry.index + 1} 个操作中将 "${changeEntry.item.oldWord}" 修改为 "${finalWord}"，释放了词名`,
+              reason: `第 ${changeEntry.index + 1} 个操作将 "${changeEntry.item.oldWord}" 修改为 "${finalWord}"，释放了词名`,
+              resolverIndex: changeEntry.index,
             },
           ]
 
@@ -380,6 +393,7 @@ export async function checkBatchConflictsWithWeight(
           action: 'Resolved',
           word: items[resolverIndex].word,
           reason: `${timing}第 ${resolverIndex + 1} 个操作中${reason}`,
+          resolverIndex,
         },
       ]
     }

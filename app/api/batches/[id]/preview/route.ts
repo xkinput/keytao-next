@@ -11,14 +11,18 @@ interface PreviewPhrase {
 
 interface DiffItem {
     type: 'add' | 'remove' | 'modify'
-    phrase?: PreviewPhrase // for add/remove
-    before?: PreviewPhrase // for modify
-    after?: PreviewPhrase // for modify
+    phrase?: PreviewPhrase
+    before?: PreviewPhrase
+    after?: PreviewPhrase
 }
 
-interface CodeChangeGroup {
-    code: string
+interface TypeChangeGroup {
+    phraseType: string
+    codes: string[]
     diffs: DiffItem[]
+    before: PreviewPhrase[]
+    after: PreviewPhrase[]
+    beforeStartLine: number
 }
 
 interface RejectedOperation {
@@ -30,9 +34,75 @@ interface RejectedOperation {
     reason: string
 }
 
+function sortPhrases(phrases: PreviewPhrase[]): PreviewPhrase[] {
+    return [...phrases].sort((a, b) => {
+        if (b.weight !== a.weight) return b.weight - a.weight
+        return a.word.localeCompare(b.word, 'zh')
+    })
+}
+
+const CONTEXT_SIZE = 3
+
+// Count how many phrases come before `p` in the global sort order (code ASC, weight DESC)
+// Only counts same type and Finish status to match the exported phrase library
+async function fetchStartLine(p: PreviewPhrase): Promise<number> {
+    const count = await prisma.phrase.count({
+        where: {
+            type: p.type as any,
+            status: 'Finish',
+            OR: [
+                { code: { lt: p.code } },
+                { code: p.code, weight: { gt: p.weight } }
+            ]
+        }
+    })
+    return count + 1 + 12
+}
+
+async function fetchTypeContext(
+    affectedCodes: string[], // must be sorted
+    type: string
+): Promise<{ ctxBefore: PreviewPhrase[]; middlePhrases: Map<string, PreviewPhrase[]>; ctxAfter: PreviewPhrase[] }> {
+    const minCode = affectedCodes[0]
+    const maxCode = affectedCodes[affectedCodes.length - 1]
+    const toPhrase = (p: { word: string; code: string; type: string; weight: number; remark: string | null }): PreviewPhrase => ({
+        word: p.word, code: p.code, type: p.type, weight: p.weight, remark: p.remark || undefined
+    })
+    const sel = { word: true, code: true, type: true, weight: true, remark: true } as const
+    const [beforeRows, middleRows, afterRows] = await Promise.all([
+        prisma.phrase.findMany({
+            where: { code: { lt: minCode }, type: type as any, status: 'Finish' },
+            orderBy: [{ code: 'desc' }, { weight: 'desc' }],
+            take: CONTEXT_SIZE,
+            select: sel
+        }),
+        minCode !== maxCode ? prisma.phrase.findMany({
+            where: { code: { gt: minCode, lt: maxCode }, type: type as any, status: 'Finish' },
+            orderBy: [{ code: 'asc' }, { weight: 'desc' }],
+            select: sel
+        }) : Promise.resolve([]),
+        prisma.phrase.findMany({
+            where: { code: { gt: maxCode }, type: type as any, status: 'Finish' },
+            orderBy: [{ code: 'asc' }, { weight: 'desc' }],
+            take: CONTEXT_SIZE,
+            select: sel
+        })
+    ])
+    const middlePhrases = new Map<string, PreviewPhrase[]>()
+    for (const p of middleRows) {
+        if (!middlePhrases.has(p.code)) middlePhrases.set(p.code, [])
+        middlePhrases.get(p.code)!.push(toPhrase(p))
+    }
+    return {
+        ctxBefore: beforeRows.reverse().map(toPhrase),
+        middlePhrases,
+        ctxAfter: afterRows.map(toPhrase)
+    }
+}
+
 // GET /api/batches/:id/preview - Preview batch execution result
 export async function GET(
-    request: NextRequest,
+    _request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) {
     try {
@@ -51,37 +121,29 @@ export async function GET(
             return NextResponse.json({ error: '批次不存在' }, { status: 404 })
         }
 
-        // 1. Collect all codes involved
         const codes = new Set<string>()
         batch.pullRequests.forEach(pr => {
             if (pr.code) codes.add(pr.code)
         })
 
-        // Early return if no codes to process
         if (codes.size === 0) {
             return NextResponse.json({
                 preview: {
                     changes: [],
                     rejected: [],
-                    summary: {
-                        added: 0,
-                        modified: 0,
-                        deleted: 0,
-                        rejected: 0
-                    }
+                    summary: { added: 0, modified: 0, deleted: 0, rejected: 0 }
                 }
             })
         }
 
         const isExecuted = ['Approved', 'Published'].includes(batch.status)
-        const changes: CodeChangeGroup[] = []
+        const changes: TypeChangeGroup[] = []
         const rejected: RejectedOperation[] = []
         let addedCount = 0
         let removedCount = 0
         let modifiedCount = 0
 
         if (isExecuted) {
-            // For executed batches, calculate dynamic weights first
             const { checkBatchConflictsWithWeight } = await import('@/lib/services/batchConflictService')
             const prItems = batch.pullRequests
                 .filter(pr => pr.word && pr.code)
@@ -104,92 +166,140 @@ export async function GET(
                 }
             })
 
-            // For executed batches, generate diffs directly from PRs history
-            // Group PRs by code
+            // Fetch current DB state (= after execution)
+            const currentPhrases = await prisma.phrase.findMany({
+                where: { code: { in: Array.from(codes) } }
+            })
+
+            const afterStateMap = new Map<string, PreviewPhrase[]>()
+            Array.from(codes).forEach(code => {
+                afterStateMap.set(code, sortPhrases(
+                    currentPhrases
+                        .filter(p => p.code === code)
+                        .map(p => ({ word: p.word, code: p.code, type: p.type, weight: p.weight, remark: p.remark || undefined }))
+                ))
+            })
+
+            // Reconstruct before state by reverse-applying PRs
+            const beforeStateMap = new Map<string, PreviewPhrase[]>()
+            Array.from(codes).forEach(code => {
+                beforeStateMap.set(code, [...(afterStateMap.get(code) || [])])
+            })
+
+            for (const pr of batch.pullRequests) {
+                if (!pr.code) continue
+                const beforeList = beforeStateMap.get(pr.code) || []
+
+                switch (pr.action) {
+                    case 'Create':
+                        // Reverse: remove the created word from before
+                        if (pr.word) {
+                            const idx = beforeList.findIndex(p => p.word === pr.word)
+                            if (idx !== -1) beforeList.splice(idx, 1)
+                        }
+                        break
+                    case 'Delete':
+                        // Reverse: add back the deleted word to before
+                        if (pr.word) {
+                            beforeList.push({
+                                word: pr.word,
+                                code: pr.code,
+                                type: pr.type || 'Phrase',
+                                weight: pr.weight || 0,
+                                remark: pr.remark || undefined
+                            })
+                        }
+                        break
+                    case 'Change':
+                        // Reverse: swap newWord back to oldWord in before
+                        if (pr.word && pr.oldWord) {
+                            const idx = beforeList.findIndex(p => p.word === pr.word)
+                            if (idx !== -1) {
+                                beforeList[idx] = { ...beforeList[idx], word: pr.oldWord }
+                            }
+                        }
+                        break
+                }
+                beforeStateMap.set(pr.code, beforeList)
+            }
+
+            // Group PRs by code for diffs
             const prsByCode = new Map<string, typeof batch.pullRequests>()
             batch.pullRequests.forEach(pr => {
                 if (!pr.code) return
-                if (!prsByCode.has(pr.code)) {
-                    prsByCode.set(pr.code, [])
-                }
+                if (!prsByCode.has(pr.code)) prsByCode.set(pr.code, [])
                 prsByCode.get(pr.code)!.push(pr)
             })
 
-            const sortedCodes = Array.from(codes).sort()
-            for (const code of sortedCodes) {
-                const prs = prsByCode.get(code) || []
+            // Group affected codes by type
+            const typeCodeMapEx = new Map<string, Set<string>>()
+            batch.pullRequests.forEach(pr => {
+                if (!pr.code) return
+                const t = pr.type || 'Phrase'
+                if (!typeCodeMapEx.has(t)) typeCodeMapEx.set(t, new Set())
+                typeCodeMapEx.get(t)!.add(pr.code)
+            })
+
+            for (const [phraseType, codeSet] of typeCodeMapEx) {
+                const affectedCodes = Array.from(codeSet).sort()
                 const diffs: DiffItem[] = []
 
-                for (const pr of prs) {
-                    switch (pr.action) {
-                        case 'Create':
-                            if (pr.word) {
-                                // Use dynamic weight from weightMap
-                                const finalWeight = weightMap.get(pr.id) ?? pr.weight ?? 0
-                                diffs.push({
-                                    type: 'add',
-                                    phrase: {
-                                        word: pr.word,
-                                        code: code,
-                                        type: pr.type || 'Phrase',
-                                        weight: finalWeight,
-                                        remark: pr.remark || undefined
-                                    }
-                                })
-                                addedCount++
-                            }
-                            break
-                        case 'Change':
-                            if (pr.word && pr.oldWord) {
-                                // Use dynamic weight from weightMap
-                                const finalWeight = weightMap.get(pr.id) ?? pr.weight ?? 0
-                                diffs.push({
-                                    type: 'modify',
-                                    before: {
-                                        word: pr.oldWord,
-                                        code: code,
-                                        type: 'Unknown', // We don't verify old type in history mode
-                                        weight: 0, // We don't verify old weight
-                                    },
-                                    after: {
-                                        word: pr.word,
-                                        code: code,
-                                        type: pr.type || 'Phrase',
-                                        weight: finalWeight,
-                                        remark: pr.remark || undefined
-                                    }
-                                })
-                                modifiedCount++
-                            }
-                            break
-                        case 'Delete':
-                            if (pr.word) {
-                                diffs.push({
-                                    type: 'remove',
-                                    phrase: {
-                                        word: pr.word,
-                                        code: code,
-                                        type: pr.type || 'Phrase',
-                                        weight: 0,
-                                        remark: pr.remark || undefined
-                                    }
-                                })
-                                removedCount++
-                            }
-                            break
+                for (const code of affectedCodes) {
+                    const prs = prsByCode.get(code) || []
+                    for (const pr of prs) {
+                        switch (pr.action) {
+                            case 'Create':
+                                if (pr.word) {
+                                    const finalWeight = weightMap.get(pr.id) ?? pr.weight ?? 0
+                                    diffs.push({ type: 'add', phrase: { word: pr.word, code, type: pr.type || 'Phrase', weight: finalWeight, remark: pr.remark || undefined } })
+                                    addedCount++
+                                }
+                                break
+                            case 'Change':
+                                if (pr.word && pr.oldWord) {
+                                    const finalWeight = weightMap.get(pr.id) ?? pr.weight ?? 0
+                                    diffs.push({ type: 'modify', before: { word: pr.oldWord, code, type: 'Phrase', weight: 0 }, after: { word: pr.word, code, type: pr.type || 'Phrase', weight: finalWeight, remark: pr.remark || undefined } })
+                                    modifiedCount++
+                                }
+                                break
+                            case 'Delete':
+                                if (pr.word) {
+                                    diffs.push({ type: 'remove', phrase: { word: pr.word, code, type: pr.type || 'Phrase', weight: 0, remark: pr.remark || undefined } })
+                                    removedCount++
+                                }
+                                break
+                        }
                     }
                 }
+
                 if (diffs.length > 0) {
-                    changes.push({ code, diffs })
+                    const { ctxBefore, middlePhrases, ctxAfter } = await fetchTypeContext(affectedCodes, phraseType)
+                    const allCodesInRange = new Set([...affectedCodes, ...middlePhrases.keys()])
+                    const sortedRange = Array.from(allCodesInRange).sort()
+                    const beforeArr: PreviewPhrase[] = [...ctxBefore]
+                    const afterArr: PreviewPhrase[] = [...ctxBefore]
+                    for (const code of sortedRange) {
+                        if (codeSet.has(code)) {
+                            beforeArr.push(...sortPhrases(beforeStateMap.get(code) || []))
+                            afterArr.push(...sortPhrases(afterStateMap.get(code) || []))
+                        } else {
+                            const middle = sortPhrases(middlePhrases.get(code) || [])
+                            beforeArr.push(...middle)
+                            afterArr.push(...middle)
+                        }
+                    }
+                    beforeArr.push(...ctxAfter)
+                    afterArr.push(...ctxAfter)
+                    const firstPhrase = beforeArr[0] ?? afterArr[0]
+                    const beforeStartLine = firstPhrase ? await fetchStartLine(firstPhrase) : 1
+                    changes.push({ phraseType, codes: affectedCodes, diffs, before: beforeArr, after: afterArr, beforeStartLine })
                 }
             }
 
         } else {
-            // For pending batches, use DB simulation logic with dynamic weight calculation
-            // Calculate dynamic weights first
             const { checkBatchConflictsWithWeight } = await import('@/lib/services/batchConflictService')
             const prItems = batch.pullRequests
-                .filter(pr => pr.word && pr.code) // Filter out invalid items
+                .filter(pr => pr.word && pr.code)
                 .map(pr => ({
                     id: String(pr.id),
                     action: pr.action,
@@ -197,13 +307,11 @@ export async function GET(
                     code: pr.code!,
                     oldWord: pr.oldWord || undefined,
                     weight: pr.weight || undefined,
-                    type: pr.type || 'Phrase', // Default to 'Phrase' if type is null
+                    type: pr.type || 'Phrase',
                 }))
             const conflictResults = await checkBatchConflictsWithWeight(prItems)
 
-            // Create weight map for dynamic weights
             const weightMap = new Map<number, number>()
-            // Create conflict map to filter out PRs with unresolved conflicts
             const conflictMap = new Map<number, boolean>()
             conflictResults.forEach(result => {
                 const prId = parseInt(result.id)
@@ -211,48 +319,32 @@ export async function GET(
                     if (result.calculatedWeight !== undefined) {
                         weightMap.set(prId, result.calculatedWeight)
                     }
-                    // Check if PR has unresolved conflict
                     const hasUnresolvedConflict = result.conflict.hasConflict &&
                         !result.conflict.suggestions?.some(s => s.action === 'Resolved')
                     conflictMap.set(prId, hasUnresolvedConflict)
                 }
             })
 
-            // 2. Fetch current state from DB (Before State)
             const existingPhrases = await prisma.phrase.findMany({
-                where: {
-                    code: { in: Array.from(codes) }
-                }
+                where: { code: { in: Array.from(codes) } }
             })
 
-            // Use Maps to track state during simulation
             const currentState = new Map<string, PreviewPhrase[]>()
             const originalState = new Map<string, PreviewPhrase[]>()
 
-            // Initialize states
             Array.from(codes).forEach(code => {
                 const phrases = existingPhrases
                     .filter(p => p.code === code)
-                    .map(p => ({
-                        word: p.word,
-                        code: p.code,
-                        type: p.type,
-                        weight: p.weight,
-                        remark: p.remark || undefined
-                    }))
+                    .map(p => ({ word: p.word, code: p.code, type: p.type, weight: p.weight, remark: p.remark || undefined }))
 
                 currentState.set(code, JSON.parse(JSON.stringify(phrases)))
                 originalState.set(code, JSON.parse(JSON.stringify(phrases)))
             })
 
-            // 3. Simulate PR execution (After State) with dynamic weights
-            // Skip PRs with unresolved conflicts but track them
             for (const pr of batch.pullRequests) {
                 if (!pr.code) continue
 
-                // Track PRs with unresolved conflicts
                 if (conflictMap.get(pr.id)) {
-                    // Find conflict info for this PR
                     const conflictInfo = conflictResults.find(r => parseInt(r.id) === pr.id)
                     const reason = conflictInfo?.conflict.impact ||
                         conflictInfo?.conflict.suggestions?.[0]?.reason ||
@@ -274,87 +366,93 @@ export async function GET(
                 switch (pr.action) {
                     case 'Create':
                         if (pr.word) {
-                            // Check if word+code combination already exists
                             const existingIndex = codePhrases.findIndex(p => p.word === pr.word && p.code === pr.code)
                             if (existingIndex === -1) {
-                                // Use dynamic weight from weightMap
                                 const finalWeight = weightMap.get(pr.id) ?? pr.weight ?? 0
-                                // Only add if word+code combination doesn't exist
-                                codePhrases.push({
-                                    word: pr.word,
-                                    code: pr.code,
-                                    type: pr.type || 'Phrase',
-                                    weight: finalWeight,
-                                    remark: pr.remark || undefined
-                                })
+                                codePhrases.push({ word: pr.word, code: pr.code, type: pr.type || 'Phrase', weight: finalWeight, remark: pr.remark || undefined })
                             }
                         }
                         break
-
                     case 'Change':
                         if (pr.oldWord && pr.word) {
                             const index = codePhrases.findIndex(p => p.word === pr.oldWord && p.code === pr.code)
                             if (index !== -1) {
-                                // Use dynamic weight from weightMap
                                 const finalWeight = weightMap.get(pr.id) ?? pr.weight ?? codePhrases[index].weight
-                                codePhrases[index] = {
-                                    ...codePhrases[index],
-                                    word: pr.word,
-                                    type: pr.type || codePhrases[index].type,
-                                    weight: finalWeight,
-                                    remark: pr.remark || codePhrases[index].remark
-                                }
+                                codePhrases[index] = { ...codePhrases[index], word: pr.word, type: pr.type || codePhrases[index].type, weight: finalWeight, remark: pr.remark || codePhrases[index].remark }
                             }
                         }
                         break
-
                     case 'Delete':
                         if (pr.word) {
                             const index = codePhrases.findIndex(p => p.word === pr.word && p.code === pr.code)
-                            if (index !== -1) {
-                                codePhrases.splice(index, 1)
-                            }
+                            if (index !== -1) codePhrases.splice(index, 1)
                         }
                         break
                 }
                 currentState.set(pr.code, codePhrases)
             }
 
-            // 4. Generate Diff grouped by code
-            const sortedCodes = Array.from(codes).sort()
+            // Group affected codes by type
+            const typeCodeMapPend = new Map<string, Set<string>>()
+            batch.pullRequests.forEach(pr => {
+                if (!pr.code || conflictMap.get(pr.id)) return
+                const t = pr.type || 'Phrase'
+                if (!typeCodeMapPend.has(t)) typeCodeMapPend.set(t, new Set())
+                typeCodeMapPend.get(t)!.add(pr.code)
+            })
 
-            for (const code of sortedCodes) {
-                const beforeList = originalState.get(code) || []
-                const afterList = currentState.get(code) || []
+            for (const [phraseType, codeSet] of typeCodeMapPend) {
+                const affectedCodes = Array.from(codeSet).sort()
                 const diffs: DiffItem[] = []
 
-                const afterWords = new Set(afterList.map(p => p.word))
-                const beforeWords = new Set(beforeList.map(p => p.word))
+                for (const code of affectedCodes) {
+                    const beforeList = originalState.get(code) || []
+                    const afterList = currentState.get(code) || []
+                    const afterWords = new Set(afterList.map(p => p.word))
+                    const beforeWords = new Set(beforeList.map(p => p.word))
 
-                // Removed
-                beforeList.forEach(p => {
-                    if (!afterWords.has(p.word)) {
-                        diffs.push({ type: 'remove', phrase: p })
-                        removedCount++
-                    } else {
-                        const newP = afterList.find(ap => ap.word === p.word)
-                        if (newP && (p.type !== newP.type || p.weight !== newP.weight || p.remark !== newP.remark)) {
-                            diffs.push({ type: 'modify', before: p, after: newP })
-                            modifiedCount++
+                    beforeList.forEach(p => {
+                        if (!afterWords.has(p.word)) {
+                            diffs.push({ type: 'remove', phrase: p })
+                            removedCount++
+                        } else {
+                            const newP = afterList.find(ap => ap.word === p.word)
+                            if (newP && (p.type !== newP.type || p.weight !== newP.weight || p.remark !== newP.remark)) {
+                                diffs.push({ type: 'modify', before: p, after: newP })
+                                modifiedCount++
+                            }
                         }
-                    }
-                })
+                    })
 
-                // Added
-                afterList.forEach(p => {
-                    if (!beforeWords.has(p.word)) {
-                        diffs.push({ type: 'add', phrase: p })
-                        addedCount++
-                    }
-                })
+                    afterList.forEach(p => {
+                        if (!beforeWords.has(p.word)) {
+                            diffs.push({ type: 'add', phrase: p })
+                            addedCount++
+                        }
+                    })
+                }
 
                 if (diffs.length > 0) {
-                    changes.push({ code, diffs })
+                    const { ctxBefore, middlePhrases, ctxAfter } = await fetchTypeContext(affectedCodes, phraseType)
+                    const allCodesInRange = new Set([...affectedCodes, ...middlePhrases.keys()])
+                    const sortedRange = Array.from(allCodesInRange).sort()
+                    const beforeArr: PreviewPhrase[] = [...ctxBefore]
+                    const afterArr: PreviewPhrase[] = [...ctxBefore]
+                    for (const code of sortedRange) {
+                        if (codeSet.has(code)) {
+                            beforeArr.push(...sortPhrases(originalState.get(code) || []))
+                            afterArr.push(...sortPhrases(currentState.get(code) || []))
+                        } else {
+                            const middle = sortPhrases(middlePhrases.get(code) || [])
+                            beforeArr.push(...middle)
+                            afterArr.push(...middle)
+                        }
+                    }
+                    beforeArr.push(...ctxAfter)
+                    afterArr.push(...ctxAfter)
+                    const firstPhrase = beforeArr[0] ?? afterArr[0]
+                    const beforeStartLine = firstPhrase ? await fetchStartLine(firstPhrase) : 1
+                    changes.push({ phraseType, codes: affectedCodes, diffs, before: beforeArr, after: afterArr, beforeStartLine })
                 }
             }
         }

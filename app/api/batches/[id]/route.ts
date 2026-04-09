@@ -4,7 +4,7 @@ import { prisma } from '@/lib/prisma'
 
 // GET /api/batches/:id - Get batch details
 export async function GET(
-  request: NextRequest,
+  _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
@@ -82,7 +82,31 @@ export async function GET(
       conflictResults = await checkBatchConflictsWithWeight(prItems)
     }
 
-    // Enrich PRs with dynamic weight and conflict information
+    // Compute dependencies dynamically from conflict results (avoids stale DB records)
+    const dynamicDepsOf = new Map<number, { dependsOn: { id: number; word: string; code: string } }[]>()
+    const dynamicDependedBy = new Map<number, { dependent: { id: number; word: string; code: string } }[]>()
+
+    for (let i = 0; i < conflictResults.length; i++) {
+      const resolvedSuggestion = conflictResults[i].conflict.suggestions?.find(
+        (s: any) => s.action === 'Resolved'
+      )
+      if (resolvedSuggestion?.resolverIndex === undefined) continue
+
+      const resolverPR = batch.pullRequests[resolvedSuggestion.resolverIndex]
+      const dependentPR = batch.pullRequests[i]
+      if (!resolverPR || !dependentPR || resolverPR.id === dependentPR.id) continue
+
+      const depEntry = { dependsOn: { id: resolverPR.id, word: resolverPR.word || '', code: resolverPR.code || '' } }
+      const byEntry = { dependent: { id: dependentPR.id, word: dependentPR.word || '', code: dependentPR.code || '' } }
+
+      if (!dynamicDepsOf.has(dependentPR.id)) dynamicDepsOf.set(dependentPR.id, [])
+      dynamicDepsOf.get(dependentPR.id)!.push(depEntry)
+
+      if (!dynamicDependedBy.has(resolverPR.id)) dynamicDependedBy.set(resolverPR.id, [])
+      dynamicDependedBy.get(resolverPR.id)!.push(byEntry)
+    }
+
+    // Enrich PRs with dynamic weight, conflict information, and fresh dependencies
     const enrichedPRs = batch.pullRequests.map(pr => {
       const conflictResult = conflictResults.find(r => r.id === String(pr.id))
       return {
@@ -90,6 +114,8 @@ export async function GET(
         // Use calculated weight for display (for Create operations, this is the real weight)
         weight: conflictResult?.calculatedWeight ?? pr.weight,
         conflictInfo: conflictResult?.conflict,
+        dependencies: dynamicDepsOf.get(pr.id) ?? [],
+        dependedBy: dynamicDependedBy.get(pr.id) ?? [],
       }
     })
 
@@ -150,7 +176,7 @@ export async function PATCH(
 
 // DELETE /api/batches/:id - Delete batch (draft only)
 export async function DELETE(
-  request: NextRequest,
+  _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {

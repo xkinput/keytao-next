@@ -1,9 +1,9 @@
 'use client'
 
-import { Card, CardBody, Chip, Spinner } from '@heroui/react'
+import { diffArrays } from 'diff'
+import { Chip, Spinner } from '@heroui/react'
 import { AlertTriangle, X } from 'lucide-react'
 import { useAPI } from '@/lib/hooks/useSWR'
-import CodePhrasesPopover from './CodePhrasesPopover'
 
 interface PreviewPhrase {
     word: string
@@ -20,9 +20,13 @@ interface DiffItem {
     after?: PreviewPhrase
 }
 
-interface CodeChangeGroup {
-    code: string
+interface TypeChangeGroup {
+    phraseType: string
+    codes: string[]
     diffs: DiffItem[]
+    before: PreviewPhrase[]
+    after: PreviewPhrase[]
+    beforeStartLine: number
 }
 
 interface PreviewStats {
@@ -42,13 +46,223 @@ interface RejectedOperation {
 }
 
 interface PreviewResult {
-    changes: CodeChangeGroup[]
+    changes: TypeChangeGroup[]
     rejected: RejectedOperation[]
     summary: PreviewStats
 }
 
 interface BatchPreviewProps {
     batchId: string
+}
+
+type UnifiedLine =
+    | { kind: 'context'; phrase: PreviewPhrase; oldLine: number; newLine: number }
+    | { kind: 'remove'; phrase: PreviewPhrase; oldLine: number }
+    | { kind: 'add'; phrase: PreviewPhrase; newLine: number }
+
+interface Hunk {
+    oldStart: number
+    oldCount: number
+    newStart: number
+    newCount: number
+    lines: UnifiedLine[]
+}
+
+const phraseKey = (p: PreviewPhrase) => `${p.word}@@${p.code}`
+
+function computeUnifiedDiff(before: PreviewPhrase[], after: PreviewPhrase[], contextSize = 3, startLine = 1): Hunk[] {
+    const beforeMap = new Map(before.map(p => [phraseKey(p), p]))
+    const afterMap = new Map(after.map(p => [phraseKey(p), p]))
+
+    // diffArrays on word@@code keys to get optimal Myers edit script
+    const changes = diffArrays(
+        before.map(phraseKey),
+        after.map(phraseKey)
+    )
+
+    const lines: UnifiedLine[] = []
+    let oldLine = startLine
+    let newLine = startLine
+
+    for (const change of changes) {
+        for (const key of change.value) {
+            if (change.removed) {
+                lines.push({ kind: 'remove', phrase: beforeMap.get(key)!, oldLine: oldLine++ })
+            } else if (change.added) {
+                lines.push({ kind: 'add', phrase: afterMap.get(key)!, newLine: newLine++ })
+            } else {
+                // same phrase in both — check if metadata changed
+                const b = beforeMap.get(key)!
+                const a = afterMap.get(key)!
+                if (b.type !== a.type || b.weight !== a.weight || b.remark !== a.remark) {
+                    lines.push({ kind: 'remove', phrase: b, oldLine: oldLine++ })
+                    lines.push({ kind: 'add', phrase: a, newLine: newLine++ })
+                } else {
+                    lines.push({ kind: 'context', phrase: b, oldLine: oldLine++, newLine: newLine++ })
+                }
+            }
+        }
+    }
+
+    // Find changed line indices
+    const changedIndices = new Set<number>()
+    lines.forEach((line, i) => {
+        if (line.kind !== 'context') changedIndices.add(i)
+    })
+
+    if (changedIndices.size === 0) return []
+
+    // Expand to include context
+    const included = new Set<number>()
+    changedIndices.forEach(i => {
+        for (let j = Math.max(0, i - contextSize); j <= Math.min(lines.length - 1, i + contextSize); j++) {
+            included.add(j)
+        }
+    })
+
+    // Group into contiguous hunks
+    const sorted = Array.from(included).sort((a, b) => a - b)
+    const hunks: Hunk[] = []
+    let hunkLines: UnifiedLine[] = []
+    let prevIdx = -2
+
+    for (const idx of sorted) {
+        if (idx !== prevIdx + 1 && hunkLines.length > 0) {
+            hunks.push(buildHunk(hunkLines))
+            hunkLines = []
+        }
+        hunkLines.push(lines[idx])
+        prevIdx = idx
+    }
+    if (hunkLines.length > 0) hunks.push(buildHunk(hunkLines))
+
+    return hunks
+}
+
+function buildHunk(lines: UnifiedLine[]): Hunk {
+    const first = lines[0]
+
+    const oldStart = first.kind === 'add' ? (lines.find(l => l.kind !== 'add') as Extract<UnifiedLine, { oldLine: number }>)?.oldLine ?? 1 : (first as Extract<UnifiedLine, { oldLine: number }>).oldLine
+    const newStart = first.kind === 'remove' ? (lines.find(l => l.kind !== 'remove') as Extract<UnifiedLine, { newLine: number }>)?.newLine ?? 1 : (first as Extract<UnifiedLine, { newLine: number }>).newLine
+
+    const oldCount = lines.filter(l => l.kind !== 'add').length
+    const newCount = lines.filter(l => l.kind !== 'remove').length
+
+    return { oldStart: oldStart ?? 1, newStart: newStart ?? 1, oldCount, newCount, lines }
+}
+
+function formatPhraseLine(p: PreviewPhrase): string {
+    const parts = [p.word.padEnd(12), p.code.padEnd(8), String(p.weight).padEnd(6)]
+    if (p.remark) parts.push(p.remark)
+    return parts.join('  ')
+}
+
+function DiffView({ group }: { group: TypeChangeGroup }) {
+    const hunks = group.before.length > 0 || group.after.length > 0
+        ? computeUnifiedDiff(group.before, group.after, 5, group.beforeStartLine)
+        : []
+
+    const hasFull = hunks.length > 0
+    const label = group.phraseType
+
+    return (
+        <div className="font-mono text-sm overflow-x-auto">
+            {/* File header */}
+            <div className="flex items-center gap-2 px-4 py-2.5 bg-[#1e2030] border-b border-[#363b54] text-[#7aa2f7]">
+                <span className="text-[#565f89] select-none">diff</span>
+                <span className="font-bold">{label}</span>
+                <span className="text-[#565f89] text-xs ml-2">{group.codes.join(', ')}</span>
+            </div>
+            <div className="text-[#565f89] px-4 py-1 bg-[#1a1b2e] border-b border-[#2a2d3e]">
+                <span>--- a/{label}</span>
+            </div>
+            <div className="text-[#565f89] px-4 py-1 bg-[#1a1b2e] border-b border-[#2a2d3e]">
+                <span>+++ b/{label}</span>
+            </div>
+
+            {hasFull ? (
+                hunks.map((hunk, hi) => (
+                    <div key={hi}>
+                        {/* Hunk header */}
+                        <div className="px-4 py-1.5 bg-[#1e2030] text-[#7dcfff] border-y border-[#2a2d3e]">
+                            @@ -{hunk.oldStart},{hunk.oldCount} +{hunk.newStart},{hunk.newCount} @@
+                        </div>
+                        {hunk.lines.map((line, li) => {
+                            if (line.kind === 'context') {
+                                return (
+                                    <div key={li} className="flex gap-0 text-[#565f89] hover:bg-[#1e2030]/50">
+                                        <span className="w-12 text-right pr-3 py-1.5 select-none border-r border-[#2a2d3e] shrink-0 text-[#3b4261]">{line.oldLine}</span>
+                                        <span className="w-12 text-right pr-3 py-1.5 select-none border-r border-[#2a2d3e] shrink-0 text-[#3b4261]">{line.newLine}</span>
+                                        <span className="px-3 py-1.5 select-none w-6 shrink-0"> </span>
+                                        <span className="px-3 py-1.5 text-[#565f89]">{formatPhraseLine(line.phrase)}</span>
+                                    </div>
+                                )
+                            }
+                            if (line.kind === 'remove') {
+                                return (
+                                    <div key={li} className="flex gap-0 bg-[#3d1515]/40 hover:bg-[#3d1515]/60">
+                                        <span className="w-12 text-right pr-3 py-1.5 select-none border-r border-[#5a2020] shrink-0 text-[#f7768e] font-semibold">{line.oldLine}</span>
+                                        <span className="w-12 text-right pr-3 py-1.5 select-none border-r border-[#5a2020] shrink-0 text-[#3b4261]"> </span>
+                                        <span className="px-3 py-1.5 text-[#f7768e] select-none w-6 shrink-0">-</span>
+                                        <span className="px-3 py-1.5 text-[#f7768e]">{formatPhraseLine(line.phrase)}</span>
+                                    </div>
+                                )
+                            }
+                            // add
+                            return (
+                                <div key={li} className="flex gap-0 bg-[#1a3a1a]/40 hover:bg-[#1a3a1a]/60">
+                                    <span className="w-12 text-right pr-3 py-1.5 select-none border-r border-[#2a5a2a] shrink-0 text-[#3b4261]"> </span>
+                                    <span className="w-12 text-right pr-3 py-1.5 select-none border-r border-[#2a5a2a] shrink-0 text-[#9ece6a] font-semibold">{line.newLine}</span>
+                                    <span className="px-3 py-1.5 text-[#9ece6a] select-none w-6 shrink-0">+</span>
+                                    <span className="px-3 py-1.5 text-[#9ece6a]">{formatPhraseLine(line.phrase)}</span>
+                                </div>
+                            )
+                        })}
+                    </div>
+                ))
+            ) : (
+                // Fallback: no context, render diffs directly
+                <div>
+                    <div className="px-4 py-1.5 bg-[#1e2030] text-[#7dcfff] border-y border-[#2a2d3e]">
+                        @@ changes @@
+                    </div>
+                    {group.diffs.map((diff, i) => {
+                        if (diff.type === 'remove' && diff.phrase) {
+                            return (
+                                <div key={i} className="flex gap-0 bg-[#3d1515]/40">
+                                    <span className="px-3 py-1.5 text-[#f7768e] select-none w-6 shrink-0">-</span>
+                                    <span className="px-3 py-1.5 text-[#f7768e]">{formatPhraseLine(diff.phrase)}</span>
+                                </div>
+                            )
+                        }
+                        if (diff.type === 'add' && diff.phrase) {
+                            return (
+                                <div key={i} className="flex gap-0 bg-[#1a3a1a]/40">
+                                    <span className="px-3 py-1.5 text-[#9ece6a] select-none w-6 shrink-0">+</span>
+                                    <span className="px-3 py-1.5 text-[#9ece6a]">{formatPhraseLine(diff.phrase)}</span>
+                                </div>
+                            )
+                        }
+                        if (diff.type === 'modify' && diff.before && diff.after) {
+                            return (
+                                <div key={i}>
+                                    <div className="flex gap-0 bg-[#3d1515]/40">
+                                        <span className="px-3 py-1.5 text-[#f7768e] select-none w-6 shrink-0">-</span>
+                                        <span className="px-3 py-1.5 text-[#f7768e]">{formatPhraseLine(diff.before)}</span>
+                                    </div>
+                                    <div className="flex gap-0 bg-[#1a3a1a]/40">
+                                        <span className="px-3 py-1.5 text-[#9ece6a] select-none w-6 shrink-0">+</span>
+                                        <span className="px-3 py-1.5 text-[#9ece6a]">{formatPhraseLine(diff.after)}</span>
+                                    </div>
+                                </div>
+                            )
+                        }
+                        return null
+                    })}
+                </div>
+            )}
+        </div>
+    )
 }
 
 export default function BatchPreview({ batchId }: BatchPreviewProps) {
@@ -66,12 +280,10 @@ export default function BatchPreview({ batchId }: BatchPreviewProps) {
 
     if (error || !data) {
         return (
-            <Card>
-                <CardBody className="text-center py-8">
-                    <p className="text-danger">加载预览失败</p>
-                    <p className="text-default-500 text-small">{error?.message || '未知错误'}</p>
-                </CardBody>
-            </Card>
+            <div className="text-center py-8">
+                <p className="text-danger">加载预览失败</p>
+                <p className="text-default-500 text-small">{error?.message || '未知错误'}</p>
+            </div>
         )
     }
 
@@ -81,184 +293,84 @@ export default function BatchPreview({ batchId }: BatchPreviewProps) {
 
     if (total === 0 && rejected.length === 0) {
         return (
-            <Card>
-                <CardBody className="text-center py-8">
-                    <p className="text-default-500">暂无修改预览</p>
-                </CardBody>
-            </Card>
+            <div className="text-center py-8">
+                <p className="text-default-500">暂无修改预览</p>
+            </div>
         )
     }
 
     return (
         <div className="space-y-4">
             {/* Summary */}
-            <Card>
-                <CardBody>
-                    <div className="flex gap-4 justify-center flex-wrap">
-                        <div className="flex items-center gap-2">
-                            <Chip color="success" variant="flat" size="sm">+ {summary.added}</Chip>
-                            <span className="text-small text-default-500">新增</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                            <Chip color="warning" variant="flat" size="sm">~ {summary.modified}</Chip>
-                            <span className="text-small text-default-500">修改</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                            <Chip color="danger" variant="flat" size="sm">- {summary.deleted}</Chip>
-                            <span className="text-small text-default-500">删除</span>
-                        </div>
-                        {summary.rejected > 0 && (
-                            <div className="flex items-center gap-2">
-                                <Chip color="default" variant="flat" size="sm">✖ {summary.rejected}</Chip>
-                                <span className="text-small text-default-500">被拒绝</span>
-                            </div>
-                        )}
+            <div className="flex gap-4 flex-wrap">
+                <div className="flex items-center gap-2">
+                    <Chip color="success" variant="flat" size="sm">+{summary.added}</Chip>
+                    <span className="text-small text-default-500">新增</span>
+                </div>
+                <div className="flex items-center gap-2">
+                    <Chip color="warning" variant="flat" size="sm">~{summary.modified}</Chip>
+                    <span className="text-small text-default-500">修改</span>
+                </div>
+                <div className="flex items-center gap-2">
+                    <Chip color="danger" variant="flat" size="sm">-{summary.deleted}</Chip>
+                    <span className="text-small text-default-500">删除</span>
+                </div>
+                {summary.rejected > 0 && (
+                    <div className="flex items-center gap-2">
+                        <Chip color="default" variant="flat" size="sm">✖{summary.rejected}</Chip>
+                        <span className="text-small text-default-500">被拒绝</span>
                     </div>
-                </CardBody>
-            </Card>
+                )}
+            </div>
 
-            {/* Changes grouped by code */}
+            {/* Git diff view */}
             {changes.length > 0 && (
-                <div className="space-y-4">
+                <div className="rounded-lg overflow-hidden border border-[#2a2d3e] bg-[#1a1b2e] divide-y divide-[#2a2d3e]">
                     {changes.map((group) => (
-                        <div key={group.code} className="border border-default-200 rounded-lg overflow-hidden bg-content1 shadow-sm">
-                            {/* Header: Code */}
-                            <div className="bg-default-100 px-4 py-2 border-b border-default-200 flex items-center justify-between">
-                                <div className="flex items-center gap-2">
-                                    <span className="text-small font-medium text-default-600">编码:</span>
-                                    <CodePhrasesPopover code={group.code}>
-                                        <code className="bg-primary/10 text-primary px-2 py-0.5 rounded font-bold text-medium cursor-pointer hover:bg-primary/20 transition-colors">
-                                            {group.code}
-                                        </code>
-                                    </CodePhrasesPopover>
-                                </div>
-                            </div>
-
-                            {/* Diffs List */}
-                            <div className="divide-y divide-default-100/50">
-                                {group.diffs.map((diff, idx) => (
-                                    <div key={idx} className="p-3 hover:bg-default-50 transition-colors">
-
-                                        {/* Remove */}
-                                        {diff.type === 'remove' && diff.phrase && (
-                                            <div className="flex items-center gap-3 text-default-500 line-through opacity-70">
-                                                <div className="w-6 h-6 flex items-center justify-center rounded bg-danger/10 text-danger shrink-0">
-                                                    -
-                                                </div>
-                                                <div className="flex-1 flex flex-wrap items-center gap-2">
-                                                    <span className="font-medium text-large">{diff.phrase.word}</span>
-                                                    <Chip size="sm" variant="flat" className="opacity-70">{diff.phrase.type}</Chip>
-                                                    <span className="text-tiny">权重: {diff.phrase.weight}</span>
-                                                    {diff.phrase.remark && (
-                                                        <span className="text-tiny text-default-400">({diff.phrase.remark})</span>
-                                                    )}
-                                                </div>
-                                            </div>
-                                        )}
-
-                                        {/* Add */}
-                                        {diff.type === 'add' && diff.phrase && (
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-6 h-6 flex items-center justify-center rounded bg-success/10 text-success shrink-0 font-bold">
-                                                    +
-                                                </div>
-                                                <div className="flex-1 flex flex-wrap items-center gap-2">
-                                                    <span className="font-bold text-large text-success-700 dark:text-success-400">
-                                                        {diff.phrase.word}
-                                                    </span>
-                                                    <Chip size="sm" variant="flat" color="success">{diff.phrase.type}</Chip>
-                                                    <span className="text-tiny text-default-600">权重: {diff.phrase.weight}</span>
-                                                    {diff.phrase.remark && (
-                                                        <span className="text-tiny text-default-500">({diff.phrase.remark})</span>
-                                                    )}
-                                                </div>
-                                            </div>
-                                        )}
-
-                                        {/* Modify */}
-                                        {diff.type === 'modify' && diff.before && diff.after && (
-                                            <div className="flex flex-col gap-2">
-                                                {/* Before */}
-                                                <div className="flex items-center gap-3 text-default-500 line-through opacity-70">
-                                                    <div className="w-6 h-6 flex items-center justify-center rounded bg-warning/10 text-warning shrink-0">
-                                                        ~
-                                                    </div>
-                                                    <div className="flex-1 flex flex-wrap items-center gap-2">
-                                                        <span className="font-medium">{diff.before.word}</span>
-                                                        <span className="text-tiny">[{diff.before.type}] w:{diff.before.weight}</span>
-                                                    </div>
-                                                </div>
-                                                {/* After */}
-                                                <div className="flex items-center gap-3 ml-9">
-                                                    <div className="flex-1 flex flex-wrap items-center gap-2">
-                                                        <span className="font-bold text-large text-warning-700 dark:text-warning-400">
-                                                            {diff.after.word}
-                                                        </span>
-                                                        <Chip size="sm" variant="flat" color="warning">{diff.after.type}</Chip>
-                                                        <span className="text-tiny text-default-600">权重: {diff.after.weight}</span>
-                                                        {diff.after.remark && (
-                                                            <span className="text-tiny text-default-500">({diff.after.remark})</span>
-                                                        )}
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        )}
-
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
+                        <DiffView key={group.phraseType} group={group} />
                     ))}
                 </div>
             )}
 
             {/* Rejected Operations */}
             {rejected.length > 0 && (
-                <Card className="border-2 border-default-300">
-                    <div className="bg-default-100 px-4 py-3 border-b border-default-200">
-                        <div className="flex items-center gap-2">
-                            <span className="text-medium font-semibold text-default-700 flex items-center gap-2"><AlertTriangle className="w-4 h-4" /> 被拒绝的操作</span>
-                            <Chip size="sm" variant="flat">{rejected.length}</Chip>
-                        </div>
-                        <p className="text-tiny text-default-500 mt-1">以下操作因冲突无法执行，将被跳过</p>
+                <div className="rounded-lg border border-default-200 overflow-hidden">
+                    <div className="bg-default-100 px-4 py-3 border-b border-default-200 flex items-center gap-2">
+                        <AlertTriangle className="w-4 h-4 text-warning" />
+                        <span className="text-medium font-semibold text-default-700">被拒绝的操作</span>
+                        <Chip size="sm" variant="flat">{rejected.length}</Chip>
+                        <span className="text-tiny text-default-500 ml-2">以下操作因冲突将被跳过</span>
                     </div>
-                    <CardBody>
-                        <div className="space-y-3">
-                            {rejected.map((op, idx) => (
-                                <div key={idx} className="p-3 border border-default-200 rounded-lg bg-default-50">
-                                    <div className="flex items-start gap-3">
-                                        <div className="w-6 h-6 flex items-center justify-center rounded bg-default-200 text-default-600 shrink-0">
-                                            <X className="w-4 h-4" />
-                                        </div>
-                                        <div className="flex-1 space-y-2">
-                                            <div className="flex flex-wrap items-center gap-2">
-                                                <Chip size="sm" variant="flat" color="default">
-                                                    {op.action === 'Create' ? '新增' : op.action === 'Change' ? '修改' : '删除'}
-                                                </Chip>
-                                                <span className="font-semibold text-default-700">{op.word}</span>
-                                                {op.oldWord && (
-                                                    <>
-                                                        <span className="text-default-400">←</span>
-                                                        <span className="text-default-500 line-through">{op.oldWord}</span>
-                                                    </>
-                                                )}
-                                                <span className="text-default-400">@</span>
-                                                <code className="bg-default-200 text-default-700 px-2 py-0.5 rounded text-small font-mono">
-                                                    {op.code}
-                                                </code>
-                                            </div>
-                                            <div className="p-2 bg-warning-50 dark:bg-warning-100/10 rounded border-l-3 border-warning">
-                                                <p className="text-small text-warning-700 dark:text-warning-600">
-                                                    <span className="font-semibold">拒绝原因: </span>{op.reason}
-                                                </p>
-                                            </div>
-                                        </div>
+                    <div className="divide-y divide-default-100">
+                        {rejected.map((op, idx) => (
+                            <div key={idx} className="p-3 flex items-start gap-3">
+                                <div className="w-6 h-6 flex items-center justify-center rounded bg-default-200 text-default-600 shrink-0 mt-0.5">
+                                    <X className="w-4 h-4" />
+                                </div>
+                                <div className="flex-1 space-y-1.5">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <Chip size="sm" variant="flat">
+                                            {op.action === 'Create' ? '新增' : op.action === 'Change' ? '修改' : '删除'}
+                                        </Chip>
+                                        <span className="font-semibold text-default-700">{op.word}</span>
+                                        {op.oldWord && (
+                                            <>
+                                                <span className="text-default-400">←</span>
+                                                <span className="text-default-500 line-through">{op.oldWord}</span>
+                                            </>
+                                        )}
+                                        <code className="bg-default-200 text-default-700 px-2 py-0.5 rounded text-small font-mono">{op.code}</code>
+                                    </div>
+                                    <div className="p-2 bg-warning-50 dark:bg-warning-100/10 rounded border-l-2 border-warning">
+                                        <p className="text-small text-warning-700 dark:text-warning-600">
+                                            <span className="font-semibold">拒绝原因: </span>{op.reason}
+                                        </p>
                                     </div>
                                 </div>
-                            ))}
-                        </div>
-                    </CardBody>
-                </Card>
+                            </div>
+                        ))}
+                    </div>
+                </div>
             )}
         </div>
     )

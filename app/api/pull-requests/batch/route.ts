@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { checkBatchConflictsWithWeight } from '@/lib/services/batchConflictService'
+import { buildDependencies } from '@/lib/services/batchDependencyService'
 import { PullRequestType } from '@prisma/client'
 import { PhraseType } from '@/lib/constants/phraseTypes'
 
@@ -104,31 +105,7 @@ export async function POST(request: NextRequest) {
       )
 
       // Build dependencies if conflicts are resolved within batch
-      for (let i = 0; i < results.length; i++) {
-        const result = results[i]
-        const conflict = result.conflict
-
-        if (conflict.currentPhrase && conflict.suggestions?.some(sug => sug.action === 'Resolved')) {
-          // Find the PR that moves the conflicting phrase
-          const movingPR = prs.find(
-            (pr) => pr.word === conflict.currentPhrase!.word && pr.code === conflict.currentPhrase!.code
-          )
-
-          // Find the PR that wants to occupy the code (current PR)
-          const occupyingPR = prs[i]
-
-          if (movingPR && occupyingPR && movingPR.id !== occupyingPR.id) {
-            // occupyingPR depends on movingPR (must execute movingPR first)
-            await tx.pullRequestDependency.create({
-              data: {
-                dependentId: occupyingPR.id,
-                dependsOnId: movingPR.id,
-                reason: `必须先将 "${conflict.currentPhrase.word}" 从编码 "${conflict.code}" 移走`
-              }
-            })
-          }
-        }
-      }
+      await buildDependencies(prs, results, tx)
 
       return { batch, prs }
     })

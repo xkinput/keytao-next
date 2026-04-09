@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { conflictDetector } from '@/lib/services/conflictDetector'
+import { rebuildBatchDependencies } from '@/lib/services/batchDependencyService'
 import { PullRequestType } from '@prisma/client'
 
 // GET /api/pull-requests/:id - Get PR with dependencies
@@ -196,6 +197,9 @@ export async function PATCH(
         }
       })
     }
+
+    // Rebuild all batch dependencies since changing one PR can affect the whole batch
+    await rebuildBatchDependencies(pr.batch.id)
 
     return NextResponse.json({ pullRequest: updated })
   } catch (error) {
