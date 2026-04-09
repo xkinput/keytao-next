@@ -37,6 +37,12 @@ export async function GET(request: NextRequest) {
                   action: true,
                 },
               },
+              creator: {
+                select: {
+                  id: true,
+                  name: true,
+                }
+              }
             },
           },
         },

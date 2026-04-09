@@ -48,6 +48,10 @@ interface SyncTask {
       change: number
       delete: number
     }
+    creator: {
+      id: string
+      name: string
+    }
     totalPullRequests: number
   }>
   totalStats: {
@@ -536,6 +540,9 @@ export default function SyncPage() {
                                 <code className="text-xs text-default-400">
                                   {batch.id.slice(0, 8)}...
                                 </code>
+                                <span className="text-xs text-default-500">
+                                  {batch.creator.name || batch.creator.id}
+                                </span>
                               </div>
                               <p className="text-sm font-medium text-default-700 mb-2">
                                 {batch.description || '无描述'}
