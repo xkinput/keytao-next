@@ -159,7 +159,7 @@ function formatPhraseLine(p: PreviewPhrase): string {
 
 function DiffView({ group }: { group: TypeChangeGroup }) {
     const hunks = group.before.length > 0 || group.after.length > 0
-        ? computeUnifiedDiff(group.before, group.after, 5, group.beforeStartLine)
+        ? computeUnifiedDiff(group.before, group.after, 3, group.beforeStartLine)
         : []
 
     const hasFull = hunks.length > 0

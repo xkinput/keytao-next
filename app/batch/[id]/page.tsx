@@ -10,9 +10,7 @@ import {
   Spinner,
   Chip,
   useDisclosure,
-  Input,
-  Tabs,
-  Tab
+  Input
 } from '@heroui/react'
 import { useAuthStore } from '@/lib/store/auth'
 import { useAPI, apiRequest } from '@/lib/hooks/useSWR'
@@ -23,7 +21,7 @@ import BatchActionsDropdown from '@/app/components/BatchActionsDropdown'
 import { useUIStore } from '@/lib/store/ui'
 import { BATCH_STATUS_MAP, STATUS_COLOR_MAP } from '@/lib/constants/status'
 import type { PhraseType } from '@/lib/constants/phraseTypes'
-import { Edit, AlertTriangle, Lightbulb, FileText, Eye } from 'lucide-react'
+import { Edit, AlertTriangle, Lightbulb } from 'lucide-react'
 
 interface PullRequest {
   id: number
@@ -451,30 +449,14 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
           )}
         </div>
 
-        <Tabs aria-label="批次视图" className="mb-4">
-          <Tab key="list" title={
-            <div className="flex items-center gap-1">
-              <FileText className="w-4 h-4" />
-              修改列表 ({batchData.pullRequests.length})
-            </div>
-          }>
-            <BatchPRList
-              pullRequests={batchData.pullRequests}
-              canEdit={canEdit}
-              onAddFirst={onOpen}
-            />
-          </Tab>
-          <Tab key="preview" title={
-            <div className="flex items-center gap-1">
-              <Eye className="w-4 h-4" />
-              预览执行
-            </div>
-          }>
-            <div className="pt-4">
-              <BatchPreview batchId={resolvedParams.id} />
-            </div>
-          </Tab>
-        </Tabs>
+        <div className="space-y-6">
+          <BatchPreview batchId={resolvedParams.id} />
+          <BatchPRList
+            pullRequests={batchData.pullRequests}
+            canEdit={canEdit}
+            onAddFirst={onOpen}
+          />
+        </div>
       </main>
 
       <CreatePRModal

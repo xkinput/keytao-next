@@ -9,11 +9,9 @@ import {
   Button,
   Spinner,
   Chip,
-  Textarea,
-  Tabs,
-  Tab
+  Textarea
 } from '@heroui/react'
-import { AlertTriangle, FileEdit, Eye } from 'lucide-react'
+import { AlertTriangle } from 'lucide-react'
 import BatchPreview from '@/app/components/BatchPreview'
 import { useAPI, apiRequest } from '@/lib/hooks/useSWR'
 import BatchPRList from '@/app/components/BatchPRList'
@@ -243,20 +241,10 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
           </Card>
         </div>
 
-        <Tabs aria-label="批次视图" className="mb-4">
-          <Tab key="list" title={<span className="flex items-center gap-1"><FileEdit className="w-4 h-4" /> 修改列表 ({batchData.pullRequests.length})</span>}>
-            <div className="space-y-4 pt-4">
-
-              <BatchPRList pullRequests={batchData.pullRequests} />
-
-            </div>
-          </Tab>
-          <Tab key="preview" title={<span className="flex items-center gap-1"><Eye className="w-4 h-4" /> 预览执行</span>}>
-            <div className="pt-4">
-              <BatchPreview batchId={resolvedParams.id} />
-            </div>
-          </Tab>
-        </Tabs>
+        <div className="space-y-6 mb-6">
+          <BatchPreview batchId={resolvedParams.id} />
+          <BatchPRList pullRequests={batchData.pullRequests} />
+        </div>
 
         {canReview && (
           <Card>
