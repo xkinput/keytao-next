@@ -156,8 +156,10 @@ export interface BotBatchDraftResponse {
   successCount: number
   failedCount: number
   skippedCount: number
+  warnedCount: number
   failed: BotBatchDraftFailedItem[]
   skipped: BotBatchDraftFailedItem[]
+  warned: BotBatchDraftFailedItem[]
   draftItems: BotDraftSnapshotItem[]
   draftTotal: number
 }

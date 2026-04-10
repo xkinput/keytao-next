@@ -30,7 +30,7 @@ export async function POST(request: NextRequest) {
   try {
     if (!await verifyBotToken()) {
       return NextResponse.json<BotBatchDraftResponse>(
-        { success: false, message: '未授权', successCount: 0, failedCount: 0, skippedCount: 0, failed: [], skipped: [], draftItems: [], draftTotal: 0 },
+        { success: false, message: '未授权', successCount: 0, failedCount: 0, skippedCount: 0, warnedCount: 0, failed: [], skipped: [], warned: [], draftItems: [], draftTotal: 0 },
         { status: 401 }
       )
     }
@@ -40,14 +40,14 @@ export async function POST(request: NextRequest) {
 
     if (!platform || !platformId || !items || !Array.isArray(items) || items.length === 0) {
       return NextResponse.json<BotBatchDraftResponse>(
-        { success: false, message: '缺少必需参数', successCount: 0, failedCount: 0, skippedCount: 0, failed: [], skipped: [], draftItems: [], draftTotal: 0 },
+        { success: false, message: '缺少必需参数', successCount: 0, failedCount: 0, skippedCount: 0, warnedCount: 0, failed: [], skipped: [], warned: [], draftItems: [], draftTotal: 0 },
         { status: 400 }
       )
     }
 
     if (!['qq', 'telegram'].includes(platform)) {
       return NextResponse.json<BotBatchDraftResponse>(
-        { success: false, message: '不支持的平台', successCount: 0, failedCount: 0, skippedCount: 0, failed: [], skipped: [], draftItems: [], draftTotal: 0 },
+        { success: false, message: '不支持的平台', successCount: 0, failedCount: 0, skippedCount: 0, warnedCount: 0, failed: [], skipped: [], warned: [], draftItems: [], draftTotal: 0 },
         { status: 400 }
       )
     }
@@ -61,7 +61,7 @@ export async function POST(request: NextRequest) {
 
     if (!user) {
       return NextResponse.json<BotBatchDraftResponse>(
-        { success: false, message: '未找到绑定账号，请先使用 /bind 命令绑定', successCount: 0, failedCount: 0, skippedCount: 0, failed: [], skipped: [], draftItems: [], draftTotal: 0 },
+        { success: false, message: '未找到绑定账号，请先使用 /bind 命令绑定', successCount: 0, failedCount: 0, skippedCount: 0, warnedCount: 0, failed: [], skipped: [], warned: [], draftItems: [], draftTotal: 0 },
         { status: 404 }
       )
     }
@@ -112,6 +112,7 @@ export async function POST(request: NextRequest) {
 
     const failed: BotBatchDraftFailedItem[] = []
     const skipped: BotBatchDraftFailedItem[] = []
+    const warned: BotBatchDraftFailedItem[] = []
     const toWrite: Array<{ item: typeof normalizedItems[0]; conflictReason?: string }> = []
 
     for (let i = 0; i < normalizedItems.length; i++) {
@@ -145,7 +146,11 @@ export async function POST(request: NextRequest) {
 
       // Warning (重码) or clean → write (warnings auto-confirmed for bulk operations)
       const isResolved = result.conflict.suggestions?.some(s => s.action === 'Resolved')
-      toWrite.push({ item, conflictReason: isResolved ? undefined : result.conflict.impact || undefined })
+      const conflictReason = isResolved ? undefined : result.conflict.impact || undefined
+      if (conflictReason) {
+        warned.push({ index: i, word: item.word, code: item.code, reason: conflictReason })
+      }
+      toWrite.push({ item, conflictReason })
       // Mark this as "now in draft" so subsequent items in same request see it
       existingPRs.push({ action: item.action, word: item.word, code: item.code })
     }
@@ -178,7 +183,7 @@ export async function POST(request: NextRequest) {
       select: {
         pullRequests: {
           orderBy: { createAt: 'asc' },
-          select: { id: true, action: true, word: true, code: true, type: true, status: true },
+          select: { id: true, action: true, word: true, code: true, type: true, status: true, conflictReason: true },
         },
       },
     })
@@ -190,15 +195,18 @@ export async function POST(request: NextRequest) {
       code: pr.code ?? '',
       type: pr.type ?? 'Phrase',
       status: pr.status,
+      ...(pr.conflictReason && { hasWarning: true, warningNote: pr.conflictReason }),
     }))
 
     const successCount = toWrite.length
     const failedCount = failed.length
     const skippedCount = skipped.length
+    const warnedCount = warned.length
 
     const parts: string[] = [`成功写入 ${successCount} 条`]
     if (failedCount > 0) parts.push(`冲突 ${failedCount} 条`)
     if (skippedCount > 0) parts.push(`跳过重复 ${skippedCount} 条`)
+    if (warnedCount > 0) parts.push(`重码警告 ${warnedCount} 条`)
 
     return NextResponse.json<BotBatchDraftResponse>({
       success: true,
@@ -207,8 +215,10 @@ export async function POST(request: NextRequest) {
       successCount,
       failedCount,
       skippedCount,
+      warnedCount,
       failed,
       skipped,
+      warned,
       draftItems,
       draftTotal: draftItems.length,
     })
@@ -222,8 +232,10 @@ export async function POST(request: NextRequest) {
         successCount: 0,
         failedCount: 0,
         skippedCount: 0,
+        warnedCount: 0,
         failed: [],
         skipped: [],
+        warned: [],
         draftItems: [],
         draftTotal: 0,
       },
