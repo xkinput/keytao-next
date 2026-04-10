@@ -1,0 +1,36 @@
+final,key,note
+ua,q,
+iu,q,
+ei,w,
+un,w,
+e,e,
+eng,r,
+uan,t,"üan 合并至此（j/q/x/y 后）"
+ong,y,
+iong,y,
+ang,p,
+a,s,
+ia,s,
+ou,d,
+ie,d,
+an,f,
+uai,g,
+ing,g,
+ai,h,
+ue,h,"üe 合并至此"
+ve,h,"üe 的 v 写法"
+u,j,"非 j/q/x/y 声母后"
+er,j,
+i,k,
+uo,l,
+v,l,"ü 在 j/q/x/y 后"
+o,l,
+in,b,
+ui,b,
+en,n,
+ian,m,
+uang,m,"非 zh内/ch内 声母后"
+uang,x,"zh内(F)/ch内(W) 声母后"
+iang,x,
+iao,c,
+ao,z,

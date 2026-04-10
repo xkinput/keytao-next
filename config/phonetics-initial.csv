@@ -1,0 +1,27 @@
+initial,key,note
+b,b,
+p,p,
+m,m,
+f,f,
+d,d,
+t,t,
+n,n,
+l,l,
+g,g,
+k,k,
+h,h,
+j,j,
+q,q,
+x,x,
+r,r,
+z,z,
+c,c,
+s,s,
+y,y,
+w,w,
+sh,e,
+zh-outer,q,"an/ang/ei/en/eng/u/un + 飞键 ai/ao/e"
+zh-inner,f,"a/i/ong/ou/ua/uai/uan/uang/ui/uo"
+ch-outer,j,"ai/an/ang/en/eng/u/un + 飞键 ao/e"
+ch-inner,w,"a/i/ong/ou/ua/uai/uan/uang/ui/uo"
+zero,x,"零声母 a/e/o 起头"

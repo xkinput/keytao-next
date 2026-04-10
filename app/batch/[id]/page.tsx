@@ -14,6 +14,7 @@ import {
 } from '@heroui/react'
 import { useAuthStore } from '@/lib/store/auth'
 import { useAPI, apiRequest } from '@/lib/hooks/useSWR'
+import { mutate as globalMutate } from 'swr'
 import CreatePRModal from '@/app/components/CreatePRModal'
 import BatchPreview from '@/app/components/BatchPreview'
 import BatchPRList from '@/app/components/BatchPRList'
@@ -473,7 +474,10 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
           weight: pr.weight || undefined,
           remark: pr.remark || undefined
         })) : undefined}
-        onSuccess={() => void mutate()}
+        onSuccess={() => {
+          void mutate()
+          void globalMutate((key: unknown) => Array.isArray(key) && key[0] === `/api/batches/${resolvedParams.id}/preview`)
+        }}
       />
     </div>
   )

@@ -142,6 +142,11 @@ export default function CreatePRModal({
   // Track if we've initialized the form in this modal session
   const hasInitializedRef = useRef(false)
 
+  // Track which fields had their code auto-filled (so user edits override auto-fill)
+  const autoFilledRef = useRef<Set<string>>(new Set())
+  // Track encoding loading state per field
+  const [encodingFields, setEncodingFields] = useState<Set<string>>(new Set())
+
   // Refs for scrolling to conflict items
   const cardRefs = useRef<Map<string, HTMLDivElement>>(new Map())
 
@@ -243,6 +248,50 @@ export default function CreatePRModal({
       hasInitializedRef.current = false
     }
   }, [isOpen, batchPRs, editPR, reset, defaultFormItem])
+
+  // Auto-encode: watch all items, debounce 600ms, fill code if empty or previously auto-filled
+  useEffect(() => {
+    const subscription = watch((values, { name }) => {
+      if (!name?.includes('.word')) return
+      const indexMatch = name.match(/items\.(\d+)\.word/)
+      if (!indexMatch) return
+
+      const index = parseInt(indexMatch[1])
+      const item = values.items?.[index]
+      if (!item) return
+
+      const word = (item.word ?? '').trim()
+      const code = item.code ?? ''
+      const action = item.action
+      const fieldId = fields[index]?.id
+
+      // Only auto-encode for Create/Change actions, and only when code is empty or was previously auto-filled
+      if (!fieldId || !word || action === 'Delete') return
+      if (code && !autoFilledRef.current.has(fieldId)) return
+
+      setEncodingFields(prev => new Set(prev).add(fieldId))
+
+      const timer = setTimeout(async () => {
+        try {
+          const res = await fetch(`/api/phrases/encode?word=${encodeURIComponent(word)}`)
+          if (!res.ok) return
+          const data = await res.json()
+          const suggestedCode = data.codes?.[0]
+          if (!suggestedCode) return
+
+          setValue(`items.${index}.code`, suggestedCode, { shouldValidate: true })
+          autoFilledRef.current.add(fieldId)
+        } catch {
+          // silently ignore encode errors
+        } finally {
+          setEncodingFields(prev => { const s = new Set(prev); s.delete(fieldId); return s })
+        }
+      }, 600)
+
+      return () => clearTimeout(timer)
+    })
+    return () => subscription.unsubscribe()
+  }, [watch, fields, setValue])
 
   // Add new item
   const handleAddItem = () => {
@@ -1150,20 +1199,26 @@ export default function CreatePRModal({
                                           onValueChange={(v) => {
                                             codeField.onChange(v)
                                             updateMeta(field.id, { hasChecked: false, conflict: null })
+                                            // Mark as manually edited - stop auto-filling
+                                            autoFilledRef.current.delete(field.id)
                                           }}
                                           endContent={
-                                            codeField.value && (
-                                              <CodePhrasesPopover code={codeField.value}>
-                                                <Button
-                                                  size="sm"
-                                                  variant="light"
-                                                  isIconOnly
-                                                  className="min-w-unit-6 w-6 h-6"
-                                                >
-                                                  <Eye className="w-4 h-4" />
-                                                </Button>
-                                              </CodePhrasesPopover>
-                                            )
+                                            encodingFields.has(field.id) ? (
+                                              <span className="text-xs text-default-400 animate-pulse">识别中…</span>
+                                            ) : codeField.value ? (
+                                              <div className="flex items-center gap-1">
+                                                {autoFilledRef.current.has(field.id) && (
+                                                  <Tooltip content="自动识别编码，可手动修改">
+                                                    <Chip size="sm" variant="flat" color="primary" className="h-5 text-[10px]">自动</Chip>
+                                                  </Tooltip>
+                                                )}
+                                                <CodePhrasesPopover code={codeField.value}>
+                                                  <Button size="sm" variant="light" isIconOnly className="min-w-unit-6 w-6 h-6">
+                                                    <Eye className="w-4 h-4" />
+                                                  </Button>
+                                                </CodePhrasesPopover>
+                                              </div>
+                                            ) : null
                                           }
                                         />
                                       )}

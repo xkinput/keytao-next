@@ -5,7 +5,8 @@ import {
     CardBody,
     CardHeader,
     Chip,
-    Button
+    Button,
+    Badge
 } from '@heroui/react'
 import { AlertTriangle } from 'lucide-react'
 import CodePhrasesPopover from './CodePhrasesPopover'
@@ -109,6 +110,7 @@ export default function BatchPRList({
                 <Card key={pr.id}>
                     <CardHeader className="flex justify-between">
                         <div className="flex items-center gap-2 flex-wrap">
+                            <Chip size="sm">{pr.id}</Chip>
                             <Chip size="sm" variant="flat" color={getActionColor(pr.action)}>
                                 {getActionText(pr.action)}
                             </Chip>
@@ -190,7 +192,7 @@ export default function BatchPRList({
                                 <p className="text-small font-medium mb-2">依赖于:</p>
                                 {pr.dependencies.map((dep, idx) => (
                                     <div key={idx} className="text-small text-default-500 ml-4">
-                                        • PR#{dep.dependsOn.id}: {dep.dependsOn.word ?? 'Unknown'} ({dep.reason})
+                                        • PR#{dep.dependsOn.id}: {dep.dependsOn.word ?? 'Unknown'} {dep.reason && <span>{dep.reason}</span>}
                                     </div>
                                 ))}
                             </div>
@@ -201,7 +203,7 @@ export default function BatchPRList({
                                 <p className="text-small font-medium mb-2">被依赖:</p>
                                 {pr.dependedBy.map((dep, idx) => (
                                     <div key={idx} className="text-small text-default-500 ml-4">
-                                        • PR#{dep.dependent.id}: {dep.dependent.word ?? 'Unknown'} ({dep.reason})
+                                        • PR#{dep.dependent.id}: {dep.dependent.word ?? 'Unknown'} {dep.reason && <span>{dep.reason}</span>}
                                     </div>
                                 ))}
                             </div>

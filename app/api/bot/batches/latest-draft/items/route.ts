@@ -118,3 +118,83 @@ export async function GET(request: NextRequest) {
     )
   }
 }
+
+/**
+ * Bot API: Add a phrase to the user's latest draft batch (create if not exists)
+ * POST /api/bot/batches/latest-draft/items
+ * Body: { platform, platformId, word, code, type?, remark? }
+ */
+export async function POST(request: NextRequest) {
+  try {
+    if (!await verifyBotToken()) {
+      return NextResponse.json({ success: false, message: '未授权' }, { status: 401 })
+    }
+
+    const body = await request.json()
+    const { platform, platformId, word, code, type = 'Phrase', remark } = body
+
+    if (!platform || !platformId || !word || !code) {
+      return NextResponse.json({ success: false, message: '缺少必需参数: platform, platformId, word, code' }, { status: 400 })
+    }
+
+    if (!['qq', 'telegram'].includes(platform)) {
+      return NextResponse.json({ success: false, message: '不支持的平台' }, { status: 400 })
+    }
+
+    const fieldName = platform === 'qq' ? 'qqId' : 'telegramId'
+
+    const user = await prisma.user.findFirst({
+      where: { [fieldName]: platformId, status: 'ENABLE' },
+      select: { id: true, name: true, nickname: true }
+    })
+
+    if (!user) {
+      return NextResponse.json(
+        { success: false, message: '未找到绑定账号，请先使用 /bind 命令绑定' },
+        { status: 404 }
+      )
+    }
+
+    // Find or create draft batch
+    let batch = await prisma.batch.findFirst({
+      where: { creatorId: user.id, status: 'Draft', description: { startsWith: '键道助手' } },
+      orderBy: { createAt: 'desc' },
+      select: { id: true }
+    })
+
+    if (!batch) {
+      batch = await prisma.batch.create({
+        data: { description: '键道助手草稿批次', creatorId: user.id, status: 'Draft' },
+        select: { id: true }
+      })
+    }
+
+    // Add PR to batch
+    const pr = await prisma.pullRequest.create({
+      data: {
+        word,
+        code,
+        action: 'Create',
+        type,
+        remark: remark || null,
+        batchId: batch.id,
+        userId: user.id,
+      } as any,
+      select: { id: true, word: true, code: true, type: true }
+    })
+
+    return NextResponse.json({
+      success: true,
+      batchId: batch.id,
+      item: pr,
+      message: `已将「${word}」(${code}) 添加到草稿批次`
+    })
+  } catch (error) {
+    console.error('[Bot API] Add draft item error:', error)
+    const errorMessage = error instanceof Error ? error.message : '未知错误'
+    return NextResponse.json(
+      { success: false, message: `添加失败：${errorMessage}` },
+      { status: 500 }
+    )
+  }
+}

@@ -173,13 +173,6 @@ function DiffView({ group }: { group: TypeChangeGroup }) {
                 <span className="font-bold">{label}</span>
                 <span className="text-[#565f89] text-xs ml-2">{group.codes.join(', ')}</span>
             </div>
-            <div className="text-[#565f89] px-4 py-1 bg-[#1a1b2e] border-b border-[#2a2d3e]">
-                <span>--- a/{label}</span>
-            </div>
-            <div className="text-[#565f89] px-4 py-1 bg-[#1a1b2e] border-b border-[#2a2d3e]">
-                <span>+++ b/{label}</span>
-            </div>
-
             {hasFull ? (
                 hunks.map((hunk, hi) => (
                     <div key={hi}>

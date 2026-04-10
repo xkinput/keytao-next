@@ -279,7 +279,9 @@ export default function PRDetailPage({ params }: { params: Promise<{ id: string 
                         >
                           PR#{dep.dependsOn.id}: {dep.dependsOn.word} → {dep.dependsOn.code}
                         </Link>
-                        <p className="text-default-500 text-tiny">{dep.reason}</p>
+                        {dep.reason && (
+                          <p className="text-default-500 text-tiny">{dep.reason}</p>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -298,7 +300,9 @@ export default function PRDetailPage({ params }: { params: Promise<{ id: string 
                         >
                           PR#{dep.dependent.id}: {dep.dependent.word} → {dep.dependent.code}
                         </Link>
-                        <p className="text-default-500 text-tiny">{dep.reason}</p>
+                        {dep.reason && (
+                          <p className="text-default-500 text-tiny">{dep.reason}</p>
+                        )}
                       </div>
                     ))}
                   </div>

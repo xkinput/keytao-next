@@ -130,7 +130,6 @@ export default function CodePhrasesPopover({
     <Popover
       isOpen={isOpen}
       onOpenChange={setIsOpen}
-      placement="bottom"
       showArrow
     >
       <PopoverTrigger>
