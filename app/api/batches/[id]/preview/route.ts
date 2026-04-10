@@ -69,30 +69,45 @@ async function fetchTypeContext(
         word: p.word, code: p.code, type: p.type, weight: p.weight, remark: p.remark || undefined
     })
     const sel = { word: true, code: true, type: true, weight: true, remark: true } as const
-    const [beforeRows, middleRows, afterRows] = await Promise.all([
+
+    // For each gap between consecutive affected codes, fetch CONTEXT_SIZE phrases
+    // from each direction — avoids fetching all phrases in a potentially huge range
+    const gapPromises: Promise<{ word: string; code: string; type: string; weight: number; remark: string | null }[]>[] = []
+    for (let i = 0; i < affectedCodes.length - 1; i++) {
+        const codeA = affectedCodes[i]
+        const codeB = affectedCodes[i + 1]
+        const gapWhere = { code: { gt: codeA, lt: codeB }, type: type as any, status: 'Finish' } as const
+        gapPromises.push(
+            prisma.phrase.findMany({ where: gapWhere, orderBy: [{ code: 'asc' }, { weight: 'desc' }], take: CONTEXT_SIZE, select: sel }),
+            prisma.phrase.findMany({ where: gapWhere, orderBy: [{ code: 'desc' }, { weight: 'desc' }], take: CONTEXT_SIZE, select: sel })
+        )
+    }
+
+    const [beforeRows, afterRows, ...gapResults] = await Promise.all([
         prisma.phrase.findMany({
             where: { code: { lt: minCode }, type: type as any, status: 'Finish' },
             orderBy: [{ code: 'desc' }, { weight: 'desc' }],
             take: CONTEXT_SIZE,
             select: sel
         }),
-        minCode !== maxCode ? prisma.phrase.findMany({
-            where: { code: { gt: minCode, lt: maxCode }, type: type as any, status: 'Finish' },
-            orderBy: [{ code: 'asc' }, { weight: 'desc' }],
-            select: sel
-        }) : Promise.resolve([]),
         prisma.phrase.findMany({
             where: { code: { gt: maxCode }, type: type as any, status: 'Finish' },
             orderBy: [{ code: 'asc' }, { weight: 'desc' }],
             take: CONTEXT_SIZE,
             select: sel
-        })
+        }),
+        ...gapPromises
     ])
+
     const middlePhrases = new Map<string, PreviewPhrase[]>()
-    for (const p of middleRows) {
-        if (!middlePhrases.has(p.code)) middlePhrases.set(p.code, [])
-        middlePhrases.get(p.code)!.push(toPhrase(p))
+    for (const rows of gapResults) {
+        for (const p of rows) {
+            if (!middlePhrases.has(p.code)) middlePhrases.set(p.code, [])
+            const bucket = middlePhrases.get(p.code)!
+            if (!bucket.find(x => x.word === p.word)) bucket.push(toPhrase(p))
+        }
     }
+
     return {
         ctxBefore: beforeRows.reverse().map(toPhrase),
         middlePhrases,
