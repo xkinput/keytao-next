@@ -401,3 +401,50 @@ export async function checkBatchConflictsWithWeight(
 
   return results
 }
+
+/**
+ * Re-check all PR items in a batch and persist updated conflict state.
+ * Call this after any mutation (create or delete) on a Draft batch so that
+ * every item reflects the full batch context rather than the state at insertion time.
+ */
+export async function recheckBatchConflicts(batchId: string): Promise<void> {
+  const prs = await prisma.pullRequest.findMany({
+    where: { batchId },
+    orderBy: { createAt: 'asc' },
+    select: {
+      id: true,
+      action: true,
+      word: true,
+      oldWord: true,
+      code: true,
+      type: true,
+      weight: true,
+    }
+  })
+
+  if (prs.length === 0) return
+
+  const items: BatchPRItem[] = prs.map(pr => ({
+    id: pr.id.toString(),
+    action: pr.action as 'Create' | 'Change' | 'Delete',
+    word: pr.word || '',
+    oldWord: pr.oldWord || undefined,
+    code: pr.code || '',
+    type: (pr.type || 'Phrase') as PhraseType,
+    weight: pr.weight || undefined,
+  }))
+
+  const results = await checkBatchConflictsWithWeight(items)
+
+  await Promise.all(
+    results.map((result, idx) => {
+      const isResolved = result.conflict.suggestions?.some(s => s.action === 'Resolved')
+      const hasConflict = result.conflict.hasConflict && !isResolved
+      const conflictReason = result.conflict.impact || null
+      return prisma.pullRequest.update({
+        where: { id: prs[idx].id },
+        data: { hasConflict, conflictReason },
+      })
+    })
+  )
+}

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { verifyBotToken } from '@/lib/botAuth'
 import { prisma } from '@/lib/prisma'
-import { checkBatchConflictsWithWeight } from '@/lib/services/batchConflictService'
+import { checkBatchConflictsWithWeight, recheckBatchConflicts } from '@/lib/services/batchConflictService'
 import { buildDependencies } from '@/lib/services/batchDependencyService'
 import { PullRequestType } from '@prisma/client'
 import { PhraseType } from '@/lib/constants/phraseTypes'
@@ -320,6 +320,9 @@ export async function POST(request: NextRequest) {
 
       return { batch, prs }
     })
+
+    // Re-check full batch conflict state so all existing items reflect the updated context
+    await recheckBatchConflicts(result.batch.id)
 
     const responseData: BotCreatePRResponse = {
       success: true,

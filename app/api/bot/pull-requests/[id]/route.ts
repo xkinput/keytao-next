@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { verifyBotToken } from '@/lib/botAuth'
 import { prisma } from '@/lib/prisma'
+import { recheckBatchConflicts } from '@/lib/services/batchConflictService'
 
 /**
  * Bot API: Delete a PR item from the user's draft batch
@@ -87,6 +88,9 @@ export async function DELETE(
     await prisma.pullRequest.delete({ where: { id: prId } })
 
     console.log(`[Bot API] Deleted PR #${prId} (${pr.action} "${pr.word}") from batch ${pr.batch.id}`)
+
+    // Re-check full batch conflict state so remaining items reflect the updated context
+    await recheckBatchConflicts(pr.batch.id)
 
     return NextResponse.json({
       success: true,
