@@ -295,8 +295,8 @@ export async function GET(
                     const afterArr: PreviewPhrase[] = [...ctxBefore]
                     for (const code of sortedRange) {
                         if (codeSet.has(code)) {
-                            beforeArr.push(...sortPhrases(beforeStateMap.get(code) || []))
-                            afterArr.push(...sortPhrases(afterStateMap.get(code) || []))
+                            beforeArr.push(...sortPhrases((beforeStateMap.get(code) || []).filter(p => p.type === phraseType)))
+                            afterArr.push(...sortPhrases((afterStateMap.get(code) || []).filter(p => p.type === phraseType)))
                         } else {
                             const middle = sortPhrases(middlePhrases.get(code) || [])
                             beforeArr.push(...middle)
