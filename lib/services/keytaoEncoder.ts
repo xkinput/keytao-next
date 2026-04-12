@@ -44,17 +44,17 @@ const ZERO_INITIAL: Record<string, string> = {
 // Final → phonetic key
 const FINAL_KEY: Record<string, string> = {
   ua: 'q', iu: 'q',
-  ei: 'w', un: 'w', vn: 'w', // vn = ün
+  ei: 'w', un: 'w', vn: 'w', ün: 'w', // vn/ün = j/q/x form of ün
   e:  'e',
   eng: 'r',
-  uan: 't', van: 't', // van = üan
+  uan: 't', van: 't', üan: 't', // van/üan = j/q/x form of üan
   ong: 'y', iong: 'y',
   ang: 'p',
   a: 's', ia: 's',
   ou: 'd', ie: 'd',
   an: 'f',
   uai: 'g', ing: 'g',
-  ai: 'h', ue: 'h', ve: 'h', // ve = üe
+  ai: 'h', ue: 'h', ve: 'h', üe: 'h', // ve/üe = j/q/x form of üe
   u: 'j', er: 'j',
   i: 'k',
   uo: 'l', v: 'l', o: 'l', ü: 'l', // ü pinyin-pro returns ü directly for j/q/x
