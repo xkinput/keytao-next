@@ -310,13 +310,32 @@ export default function BatchPreview({ batchId }: BatchPreviewProps) {
             </div>
 
             {/* Git diff view */}
-            {changes.length > 0 && (
-                <div className="rounded-lg overflow-hidden border border-[#2a2d3e] bg-[#1a1b2e] divide-y divide-[#2a2d3e]">
-                    {changes.map((group, i) => (
-                        <DiffView key={group.codes.join(',') || i} group={group} />
-                    ))}
-                </div>
-            )}
+            {changes.length > 0 && (() => {
+                const grouped = changes.reduce<{ type: string; groups: TypeChangeGroup[] }[]>((acc, group) => {
+                    const last = acc[acc.length - 1]
+                    if (last && last.type === group.phraseType) {
+                        last.groups.push(group)
+                    } else {
+                        acc.push({ type: group.phraseType, groups: [group] })
+                    }
+                    return acc
+                }, [])
+                return (
+                    <div className="rounded-lg overflow-hidden border border-[#2a2d3e] bg-[#1a1b2e] divide-y divide-[#2a2d3e]">
+                        {grouped.map(({ type, groups }) => (
+                            <div key={type}>
+                                <div className="flex items-center gap-2 px-4 py-2.5 bg-[#1e2030] border-b border-[#363b54] text-[#7aa2f7] font-mono text-sm">
+                                    <span className="text-[#565f89] select-none">diff</span>
+                                    <span className="font-bold">{type}</span>
+                                </div>
+                                {groups.map((group, i) => (
+                                    <DiffView key={group.codes.join(',') || i} group={group} />
+                                ))}
+                            </div>
+                        ))}
+                    </div>
+                )
+            })()}
 
             {/* Rejected Operations */}
             {rejected.length > 0 && (
