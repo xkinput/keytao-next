@@ -42,6 +42,32 @@ function sortPhrases(phrases: PreviewPhrase[]): PreviewPhrase[] {
 }
 
 const CONTEXT_SIZE = 3
+const LARGE_GAP_THRESHOLD = CONTEXT_SIZE * 2
+
+// Split sorted affected codes into clusters separated by large gaps.
+// A gap is "large" if it contains more phrases than we can show as context.
+async function clusterAffectedCodes(affectedCodes: string[], type: string): Promise<string[][]> {
+    if (affectedCodes.length <= 1) return [affectedCodes]
+    const gapCounts = await Promise.all(
+        affectedCodes.slice(0, -1).map((codeA, i) =>
+            prisma.phrase.count({
+                where: { code: { gt: codeA, lt: affectedCodes[i + 1] }, type: type as any, status: 'Finish' }
+            })
+        )
+    )
+    const clusters: string[][] = []
+    let current: string[] = [affectedCodes[0]]
+    for (let i = 0; i < gapCounts.length; i++) {
+        if (gapCounts[i] > LARGE_GAP_THRESHOLD) {
+            clusters.push(current)
+            current = [affectedCodes[i + 1]]
+        } else {
+            current.push(affectedCodes[i + 1])
+        }
+    }
+    clusters.push(current)
+    return clusters
+}
 
 // Count how many phrases come before `p` in the global sort order (code ASC, weight DESC)
 // Only counts same type and Finish status to match the exported phrase library
@@ -288,26 +314,35 @@ export async function GET(
                 }
 
                 if (diffs.length > 0) {
-                    const { ctxBefore, middlePhrases, ctxAfter } = await fetchTypeContext(affectedCodes, phraseType)
-                    const allCodesInRange = new Set([...affectedCodes, ...middlePhrases.keys()])
-                    const sortedRange = Array.from(allCodesInRange).sort()
-                    const beforeArr: PreviewPhrase[] = [...ctxBefore]
-                    const afterArr: PreviewPhrase[] = [...ctxBefore]
-                    for (const code of sortedRange) {
-                        if (codeSet.has(code)) {
-                            beforeArr.push(...sortPhrases((beforeStateMap.get(code) || []).filter(p => p.type === phraseType)))
-                            afterArr.push(...sortPhrases((afterStateMap.get(code) || []).filter(p => p.type === phraseType)))
-                        } else {
-                            const middle = sortPhrases(middlePhrases.get(code) || [])
-                            beforeArr.push(...middle)
-                            afterArr.push(...middle)
+                    const clusters = await clusterAffectedCodes(affectedCodes, phraseType)
+                    for (const cluster of clusters) {
+                        const clusterSet = new Set(cluster)
+                        const clusterDiffs = diffs.filter(d => {
+                            const code = d.phrase?.code ?? d.after?.code ?? d.before?.code
+                            return code && clusterSet.has(code)
+                        })
+                        if (clusterDiffs.length === 0) continue
+                        const { ctxBefore, middlePhrases, ctxAfter } = await fetchTypeContext(cluster, phraseType)
+                        const allCodesInRange = new Set([...cluster, ...middlePhrases.keys()])
+                        const sortedRange = Array.from(allCodesInRange).sort()
+                        const beforeArr: PreviewPhrase[] = [...ctxBefore]
+                        const afterArr: PreviewPhrase[] = [...ctxBefore]
+                        for (const code of sortedRange) {
+                            if (clusterSet.has(code)) {
+                                beforeArr.push(...sortPhrases((beforeStateMap.get(code) || []).filter(p => p.type === phraseType)))
+                                afterArr.push(...sortPhrases((afterStateMap.get(code) || []).filter(p => p.type === phraseType)))
+                            } else {
+                                const middle = sortPhrases(middlePhrases.get(code) || [])
+                                beforeArr.push(...middle)
+                                afterArr.push(...middle)
+                            }
                         }
+                        beforeArr.push(...ctxAfter)
+                        afterArr.push(...ctxAfter)
+                        const firstPhrase = beforeArr[0] ?? afterArr[0]
+                        const beforeStartLine = firstPhrase ? await fetchStartLine(firstPhrase) : 1
+                        changes.push({ phraseType, codes: cluster, diffs: clusterDiffs, before: beforeArr, after: afterArr, beforeStartLine })
                     }
-                    beforeArr.push(...ctxAfter)
-                    afterArr.push(...ctxAfter)
-                    const firstPhrase = beforeArr[0] ?? afterArr[0]
-                    const beforeStartLine = firstPhrase ? await fetchStartLine(firstPhrase) : 1
-                    changes.push({ phraseType, codes: affectedCodes, diffs, before: beforeArr, after: afterArr, beforeStartLine })
                 }
             }
 
@@ -448,26 +483,35 @@ export async function GET(
                 }
 
                 if (diffs.length > 0) {
-                    const { ctxBefore, middlePhrases, ctxAfter } = await fetchTypeContext(affectedCodes, phraseType)
-                    const allCodesInRange = new Set([...affectedCodes, ...middlePhrases.keys()])
-                    const sortedRange = Array.from(allCodesInRange).sort()
-                    const beforeArr: PreviewPhrase[] = [...ctxBefore]
-                    const afterArr: PreviewPhrase[] = [...ctxBefore]
-                    for (const code of sortedRange) {
-                        if (codeSet.has(code)) {
-                            beforeArr.push(...sortPhrases(originalState.get(code) || []))
-                            afterArr.push(...sortPhrases(currentState.get(code) || []))
-                        } else {
-                            const middle = sortPhrases(middlePhrases.get(code) || [])
-                            beforeArr.push(...middle)
-                            afterArr.push(...middle)
+                    const clusters = await clusterAffectedCodes(affectedCodes, phraseType)
+                    for (const cluster of clusters) {
+                        const clusterSet = new Set(cluster)
+                        const clusterDiffs = diffs.filter(d => {
+                            const code = d.phrase?.code ?? d.after?.code ?? d.before?.code
+                            return code && clusterSet.has(code)
+                        })
+                        if (clusterDiffs.length === 0) continue
+                        const { ctxBefore, middlePhrases, ctxAfter } = await fetchTypeContext(cluster, phraseType)
+                        const allCodesInRange = new Set([...cluster, ...middlePhrases.keys()])
+                        const sortedRange = Array.from(allCodesInRange).sort()
+                        const beforeArr: PreviewPhrase[] = [...ctxBefore]
+                        const afterArr: PreviewPhrase[] = [...ctxBefore]
+                        for (const code of sortedRange) {
+                            if (clusterSet.has(code)) {
+                                beforeArr.push(...sortPhrases(originalState.get(code) || []))
+                                afterArr.push(...sortPhrases(currentState.get(code) || []))
+                            } else {
+                                const middle = sortPhrases(middlePhrases.get(code) || [])
+                                beforeArr.push(...middle)
+                                afterArr.push(...middle)
+                            }
                         }
+                        beforeArr.push(...ctxAfter)
+                        afterArr.push(...ctxAfter)
+                        const firstPhrase = beforeArr[0] ?? afterArr[0]
+                        const beforeStartLine = firstPhrase ? await fetchStartLine(firstPhrase) : 1
+                        changes.push({ phraseType, codes: cluster, diffs: clusterDiffs, before: beforeArr, after: afterArr, beforeStartLine })
                     }
-                    beforeArr.push(...ctxAfter)
-                    afterArr.push(...ctxAfter)
-                    const firstPhrase = beforeArr[0] ?? afterArr[0]
-                    const beforeStartLine = firstPhrase ? await fetchStartLine(firstPhrase) : 1
-                    changes.push({ phraseType, codes: affectedCodes, diffs, before: beforeArr, after: afterArr, beforeStartLine })
                 }
             }
         }
