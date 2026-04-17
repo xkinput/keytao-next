@@ -163,16 +163,9 @@ function DiffView({ group }: { group: TypeChangeGroup }) {
         : []
 
     const hasFull = hunks.length > 0
-    const label = group.phraseType
 
     return (
         <div className="font-mono text-sm overflow-x-auto">
-            {/* File header */}
-            <div className="flex items-center gap-2 px-4 py-2.5 bg-[#1e2030] border-b border-[#363b54] text-[#7aa2f7]">
-                <span className="text-[#565f89] select-none">diff</span>
-                <span className="font-bold">{label}</span>
-                <span className="text-[#565f89] text-xs ml-2">{group.codes.join(', ')}</span>
-            </div>
             {hasFull ? (
                 hunks.map((hunk, hi) => (
                     <div key={hi}>
@@ -319,8 +312,8 @@ export default function BatchPreview({ batchId }: BatchPreviewProps) {
             {/* Git diff view */}
             {changes.length > 0 && (
                 <div className="rounded-lg overflow-hidden border border-[#2a2d3e] bg-[#1a1b2e] divide-y divide-[#2a2d3e]">
-                    {changes.map((group) => (
-                        <DiffView key={group.phraseType} group={group} />
+                    {changes.map((group, i) => (
+                        <DiffView key={group.codes.join(',') || i} group={group} />
                     ))}
                 </div>
             )}
