@@ -5,6 +5,8 @@ import { Button, Card, CardBody, Code, Listbox, ListboxItem, Progress, Alert, Li
 import { Folder, File, Apple, Monitor, Check, Download, RefreshCw, Smartphone, TabletSmartphone, Lightbulb, Package, ClipboardList } from 'lucide-react'
 import JSZip from 'jszip'
 
+const INSTALLER_RELEASES_URL = 'https://github.com/xkinput/keytao-installer/releases/latest'
+
 type OSType = 'windows' | 'macos' | 'linux' | 'android' | 'ios' | 'unknown'
 
 interface FileItem {
@@ -480,6 +482,28 @@ export default function InstallPage() {
           <p className="text-default-500 mt-2">自动下载并安装最新版本的 KeyTao 输入法方案到您的 Rime 配置目录</p>
         </div>
 
+        {/* Top-level installer banner */}
+        <div className="bg-primary-50 border border-primary-200 rounded-xl p-5 mb-6 flex flex-col sm:flex-row items-start sm:items-center gap-4">
+          <Package className="w-10 h-10 text-primary flex-shrink-0" />
+          <div className="flex-1">
+            <p className="font-semibold text-lg text-primary-700">推荐使用键道安装更新程序</p>
+            <p className="text-sm text-default-600 mt-0.5">
+              支持 Windows / macOS / Linux，自动完成 Rime 平台与 KeyTao 方案的安装与更新，无需手动操作
+            </p>
+          </div>
+          <Button
+            as={Link}
+            href={INSTALLER_RELEASES_URL}
+            isExternal
+            color="primary"
+            size="md"
+            startContent={<Download className="w-4 h-4" />}
+            className="flex-shrink-0"
+          >
+            下载安装程序
+          </Button>
+        </div>
+
         <div className="grid gap-6">
           {/* System Info Card */}
           <Card>
@@ -626,195 +650,229 @@ export default function InstallPage() {
             <CardBody>
               <h2 className="text-xl font-semibold mb-4">步骤 2：安装 KeyTao 方案</h2>
 
-              {/* macOS Warning */}
-              {osType === 'macos' && (
-                <Alert
-                  color="warning"
-                  title="macOS 系统限制"
-                  description={
-                    <>
-                      由于浏览器安全限制，<Code size="sm">~/Library</Code> 目录无法通过网页访问。
-                      <strong>请选择其他目录</strong>（如 <Code size="sm">~/Documents/RimeSync</Code>）作为同步目录。
-                    </>
-                  }
-                  className="mb-3"
-                />
-              )}
-
-              {/* Installation Warning */}
-              <Alert
-                color="danger"
-                title="重要提示"
-                description={
-                  <>
-                    点击安装将会<span className="font-semibold underline">覆盖选择目录中的所有同名文件</span>！
-                    在执行安装操作前，请务必备份您的 Rime 配置目录，以免丢失个人配置和词库数据。
-                  </>
-                }
-                className="mb-3"
-              />
-
-              {releaseInfo && (
-                <Alert
-                  color="success"
-                  title={`最新版本: ${releaseInfo.version}`}
-                  description={`发布时间: ${new Date(releaseInfo.publishedAt).toLocaleString('zh-CN')}`}
-                  icon={<Download className="w-5 h-5" />}
-                  className="mb-3"
-                />
-              )}
-
-              {!hasWriteSupport && (
+              {(osType === 'windows' || osType === 'macos' || osType === 'ios') ? (
+                <div className="space-y-4">
+                  <Alert
+                    color="warning"
+                    title="系统限制"
+                    description={
+                      <span>
+                        由于系统权限限制，浏览器无法直接写入{' '}
+                        {osType === 'windows' && <><Code size="sm">%APPDATA%\Rime</Code> 目录</>}
+                        {osType === 'macos' && <><Code size="sm">~/Library/Rime</Code> 目录</>}
+                        {osType === 'ios' && 'iRime 应用目录'}
+                        ，请下载并运行键道安装更新程序完成安装与更新。
+                      </span>
+                    }
+                  />
+                  {releaseInfo && (
+                    <Alert
+                      color="success"
+                      title={`最新 KeyTao 版本: ${releaseInfo.version}`}
+                      description={`发布时间: ${new Date(releaseInfo.publishedAt).toLocaleString('zh-CN')}`}
+                      icon={<Download className="w-5 h-5" />}
+                    />
+                  )}
+                  <div className="bg-default-50 rounded-lg p-5 border border-default-200">
+                    <div className="flex items-start gap-4 mb-4">
+                      <Package className="w-10 h-10 text-primary flex-shrink-0 mt-1" />
+                      <div>
+                        <p className="font-semibold text-lg">键道安装更新程序</p>
+                        <p className="text-sm text-default-500 mt-1">
+                          支持 Windows / macOS / Linux，自动完成 Rime 平台与 KeyTao 方案的安装与更新
+                        </p>
+                      </div>
+                    </div>
+                    <Button
+                      as={Link}
+                      href={INSTALLER_RELEASES_URL}
+                      isExternal
+                      color="primary"
+                      size="lg"
+                      startContent={<Download className="w-5 h-5" />}
+                    >
+                      前往下载安装程序
+                    </Button>
+                  </div>
+                </div>
+              ) : (
                 <>
+                  {/* Installation Warning */}
                   <Alert
                     color="danger"
-                    title="权限不完整，无法安装"
+                    title="重要提示"
                     description={
                       <>
-                        您的浏览器不支持文件写入功能。<br />
-                        <strong>请使用支持 File System Access API 的浏览器</strong>（如 Chrome 86+、Edge 86+）或使用 <strong>GitHub 同步功能</strong>进行安装。
+                        点击安装将会<span className="font-semibold underline">覆盖选择目录中的所有同名文件</span>！
+                        在执行安装操作前，请务必备份您的 Rime 配置目录，以免丢失个人配置和词库数据。
                       </>
                     }
                     className="mb-3"
                   />
-                  <Alert
-                    title={<span className="flex items-center gap-2"><Package className="w-4 h-4" /> 手动安装方式</span>}
-                    description={
-                      <div className="text-xs space-y-1">
-                        <p>1. 前往 <Link href="https://github.com/xkinput/KeyTao/releases" isExternal showAnchorIcon className="text-xs">​GitHub Releases</Link> 下载对应系统的压缩包</p>
-                        <p>2. 解压压缩包到 Rime 配置目录中</p>
-                        <p>3. 重新部署 Rime 输入法即可</p>
-                      </div>
-                    }
-                    className="mb-3"
-                  />
-                </>
-              )}
 
-              <p className="text-sm text-default-600 mb-2">
-                选择一个目录，KeyTao 输入法方案将被安装到该目录
-              </p>
-              <div className="mb-4">
-                <p className="text-xs text-default-500 mb-1">默认 Rime 配置目录：</p>
-                <Code className="w-full" size="sm">{defaultPath}</Code>
-              </div>
-
-              <div className="flex gap-2 mb-4">
-                <Button
-                  color="primary"
-                  onPress={selectDirectory}
-                  isLoading={isLoading}
-                  isDisabled={!hasWriteSupport || isLoading || isInstalling}
-                  className="flex-1 sm:flex-none"
-                >
-                  {selectedDirectory ? '重新选择目录' : '选择安装目录'}
-                </Button>
-
-                {selectedDirectory && releaseInfo && (
-                  <Button
-                    onPress={downloadAndInstall}
-                    isLoading={isInstalling}
-                    isDisabled={isLoading || isInstalling}
-                    startContent={!isInstalling && <Download className="w-5 h-5" />}
-                    className="flex-1 sm:flex-none"
-                  >
-                    {isInstalling ? '安装中...' : '立即安装'}
-                  </Button>
-                )}
-              </div>
-
-              {isInstalling && (
-                <Card className="bg-primary-50 border-primary-200 mb-3">
-                  <CardBody className="py-2">
-                    <Progress
-                      value={installProgress}
-                      color="primary"
-                      size="sm"
-                      className="mb-1"
-                      label={installStatus}
-                      valueLabel={`${Math.round(installProgress)}%`}
-                      showValueLabel
+                  {releaseInfo && (
+                    <Alert
+                      color="success"
+                      title={`最新版本: ${releaseInfo.version}`}
+                      description={`发布时间: ${new Date(releaseInfo.publishedAt).toLocaleString('zh-CN')}`}
+                      icon={<Download className="w-5 h-5" />}
+                      className="mb-3"
                     />
-                  </CardBody>
-                </Card>
-              )}
+                  )}
 
-              {selectedDirectory && (
-                <Card className="bg-default-50 border-default-200 mb-4">
-                  <CardBody>
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-2">
-                        <Check className="w-5 h-5 text-success" />
-                        <p className="text-sm font-semibold">
-                          已选择同步目录: {selectedDirectory.name}
-                        </p>
-                      </div>
-                      <Button
-                        isIconOnly
-                        size="sm"
-                        variant="light"
-                        onPress={refreshDirectory}
-                        isLoading={isLoading}
-                        isDisabled={isLoading || isInstalling}
-                        title="刷新目录内容"
-                      >
-                        <RefreshCw className="w-4 h-4" />
-                      </Button>
-                    </div>
-                    <div>
-                      <p className="text-xs text-default-600 mb-2">
-                        {`${files.length} 个项目`}
-                      </p>
-                      {files.length > 0 ? (
-                        <>
-                          <div className="max-h-48 overflow-y-auto border border-default-200 rounded-lg">
-                            <Listbox aria-label="Directory contents" variant="flat">
-                              {files.slice(0, 30).map((item, index) => (
-                                <ListboxItem
-                                  key={`${item.name}-${index}`}
-                                  startContent={getFileIcon(item)}
-                                  description={item.kind === 'directory' ? '文件夹' : '文件'}
-                                  className="text-xs"
-                                >
-                                  {item.name}
-                                </ListboxItem>
-                              ))}
-                            </Listbox>
+                  {!hasWriteSupport && (
+                    <>
+                      <Alert
+                        color="danger"
+                        title="权限不完整，无法安装"
+                        description={
+                          <>
+                            您的浏览器不支持文件写入功能。<br />
+                            <strong>请使用支持 File System Access API 的浏览器</strong>（如 Chrome 86+、Edge 86+）或使用 <strong>GitHub 同步功能</strong>进行安装。
+                          </>
+                        }
+                        className="mb-3"
+                      />
+                      <Alert
+                        title={<span className="flex items-center gap-2"><Package className="w-4 h-4" /> 手动安装方式</span>}
+                        description={
+                          <div className="text-xs space-y-1">
+                            <p>1. 前往 <Link href="https://github.com/xkinput/KeyTao/releases" isExternal showAnchorIcon className="text-xs">GitHub Releases</Link> 下载对应系统的压缩包</p>
+                            <p>2. 解压压缩包到 Rime 配置目录中</p>
+                            <p>3. 重新部署 Rime 输入法即可</p>
                           </div>
-                          {files.length > 30 && (
-                            <p className="text-xs text-default-400 mt-2">还有 {files.length - 30} 个项目...</p>
-                          )}
-                        </>
-                      ) : (
-                        <div className="border border-default-200 rounded-lg p-4 text-center">
-                          <p className="text-sm text-default-400">该目录当前为空</p>
+                        }
+                        className="mb-3"
+                      />
+                    </>
+                  )}
+
+                  <p className="text-sm text-default-600 mb-2">
+                    选择一个目录，KeyTao 输入法方案将被安装到该目录
+                  </p>
+                  <div className="mb-4">
+                    <p className="text-xs text-default-500 mb-1">默认 Rime 配置目录：</p>
+                    <Code className="w-full" size="sm">{defaultPath}</Code>
+                  </div>
+
+                  <div className="flex gap-2 mb-4">
+                    <Button
+                      color="primary"
+                      onPress={selectDirectory}
+                      isLoading={isLoading}
+                      isDisabled={!hasWriteSupport || isLoading || isInstalling}
+                      className="flex-1 sm:flex-none"
+                    >
+                      {selectedDirectory ? '重新选择目录' : '选择安装目录'}
+                    </Button>
+
+                    {selectedDirectory && releaseInfo && (
+                      <Button
+                        onPress={downloadAndInstall}
+                        isLoading={isInstalling}
+                        isDisabled={isLoading || isInstalling}
+                        startContent={!isInstalling && <Download className="w-5 h-5" />}
+                        className="flex-1 sm:flex-none"
+                      >
+                        {isInstalling ? '安装中...' : '立即安装'}
+                      </Button>
+                    )}
+                  </div>
+
+                  {isInstalling && (
+                    <Card className="bg-primary-50 border-primary-200 mb-3">
+                      <CardBody className="py-2">
+                        <Progress
+                          value={installProgress}
+                          color="primary"
+                          size="sm"
+                          className="mb-1"
+                          label={installStatus}
+                          valueLabel={`${Math.round(installProgress)}%`}
+                          showValueLabel
+                        />
+                      </CardBody>
+                    </Card>
+                  )}
+
+                  {selectedDirectory && (
+                    <Card className="bg-default-50 border-default-200 mb-4">
+                      <CardBody>
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center gap-2">
+                            <Check className="w-5 h-5 text-success" />
+                            <p className="text-sm font-semibold">
+                              已选择同步目录: {selectedDirectory.name}
+                            </p>
+                          </div>
+                          <Button
+                            isIconOnly
+                            size="sm"
+                            variant="light"
+                            onPress={refreshDirectory}
+                            isLoading={isLoading}
+                            isDisabled={isLoading || isInstalling}
+                            title="刷新目录内容"
+                          >
+                            <RefreshCw className="w-4 h-4" />
+                          </Button>
                         </div>
-                      )}
-                    </div>
-                  </CardBody>
-                </Card>
-              )}
+                        <div>
+                          <p className="text-xs text-default-600 mb-2">
+                            {`${files.length} 个项目`}
+                          </p>
+                          {files.length > 0 ? (
+                            <>
+                              <div className="max-h-48 overflow-y-auto border border-default-200 rounded-lg">
+                                <Listbox aria-label="Directory contents" variant="flat">
+                                  {files.slice(0, 30).map((item, index) => (
+                                    <ListboxItem
+                                      key={`${item.name}-${index}`}
+                                      startContent={getFileIcon(item)}
+                                      description={item.kind === 'directory' ? '文件夹' : '文件'}
+                                      className="text-xs"
+                                    >
+                                      {item.name}
+                                    </ListboxItem>
+                                  ))}
+                                </Listbox>
+                              </div>
+                              {files.length > 30 && (
+                                <p className="text-xs text-default-400 mt-2">还有 {files.length - 30} 个项目...</p>
+                              )}
+                            </>
+                          ) : (
+                            <div className="border border-default-200 rounded-lg p-4 text-center">
+                              <p className="text-sm text-default-400">该目录当前为空</p>
+                            </div>
+                          )}
+                        </div>
+                      </CardBody>
+                    </Card>
+                  )}
 
-              {installSuccess && (
-                <Alert
-                  color="success"
-                  title="安装完成！"
-                  description={
-                    <div>
-                      <p className="mb-2">KeyTao 输入法方案已成功安装到所选目录。</p>
-                      <p className="font-semibold">请前往输入法中点击&ldquo;重新部署&rdquo;即可使用。</p>
-                    </div>
-                  }
-                  onClose={() => setInstallSuccess(false)}
-                />
-              )}
+                  {installSuccess && (
+                    <Alert
+                      color="success"
+                      title="安装完成！"
+                      description={
+                        <div>
+                          <p className="mb-2">KeyTao 输入法方案已成功安装到所选目录。</p>
+                          <p className="font-semibold">请前往输入法中点击&ldquo;重新部署&rdquo;即可使用。</p>
+                        </div>
+                      }
+                      onClose={() => setInstallSuccess(false)}
+                    />
+                  )}
 
-              {error && (
-                <Alert
-                  color="danger"
-                  title="错误"
-                  description={<div className="whitespace-pre-line">{error}</div>}
-                />
+                  {error && (
+                    <Alert
+                      color="danger"
+                      title="错误"
+                      description={<div className="whitespace-pre-line">{error}</div>}
+                    />
+                  )}
+                </>
               )}
             </CardBody>
           </Card>
