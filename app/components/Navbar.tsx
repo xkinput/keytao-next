@@ -2,8 +2,8 @@
 
 import { useEffect, useMemo, useCallback, memo, useState, useRef } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
-import { Button, Dropdown, DropdownTrigger, DropdownMenu, DropdownItem, DropdownSection } from '@heroui/react'
-import { Menu, User, Database, Shield, ChevronDown, Edit, Download, BookOpen, Code } from 'lucide-react'
+import { Button, Dropdown, DropdownTrigger, DropdownMenu, DropdownItem, DropdownSection, Link } from '@heroui/react'
+import { Menu, User, Database, Shield, ChevronDown, Edit, Download, BookOpen, Code, Github } from 'lucide-react'
 import { useAuthStore } from '@/lib/store/auth'
 import { useAPI } from '@/lib/hooks/useSWR'
 import Logo from './Logo'
@@ -350,6 +350,18 @@ function Navbar() {
           </div>
 
           <div className="flex items-center gap-2">
+            <Button
+              variant="light"
+              size="sm"
+              isIconOnly
+              aria-label="GitHub"
+              as={Link}
+              href="https://github.com/xkinput/KeyTao"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <Github className="w-5 h-5" />
+            </Button>
             <ThemeSwitch />
             {isAuthenticatedValue ? (
               <>
