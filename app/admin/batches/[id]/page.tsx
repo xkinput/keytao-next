@@ -62,6 +62,7 @@ interface BatchDetail {
   description: string
   status: 'Draft' | 'Submitted' | 'Approved' | 'Rejected' | 'Published'
   createAt: string
+  updateAt: string
   reviewNote: string | null
   creator: {
     id: number
@@ -260,6 +261,9 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
                     </p>
                     <p>
                       创建时间: {new Date(batchData.createAt).toLocaleString('zh-CN')}
+                    </p>
+                    <p>
+                      最后修改: {new Date(batchData.updateAt).toLocaleString('zh-CN')}
                     </p>
                     {batchData.sourceIssue && (
                       <p>

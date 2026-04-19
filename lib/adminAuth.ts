@@ -47,6 +47,14 @@ export async function checkAdminPermission() {
   }
 }
 
+export async function checkIsAdmin(userId: number): Promise<boolean> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { roles: { select: { value: true } } }
+  })
+  return user?.roles.some(r => ['R:ROOT', 'R:MANAGER'].includes(r.value)) ?? false
+}
+
 /**
  * Check if user is ROOT admin (initial administrator)
  */

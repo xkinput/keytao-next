@@ -71,6 +71,7 @@ interface BatchDetail {
   description: string
   status: 'Draft' | 'Submitted' | 'Approved' | 'Rejected' | 'Published'
   createAt: string
+  updateAt: string
   creator: {
     id: number
     name: string
@@ -312,7 +313,7 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
 
   const batchData = batch.batch
   const isOwner = user?.id === batchData.creator.id
-  const canEdit = isOwner && (batchData.status === 'Draft' || batchData.status === 'Rejected')
+  const canEdit = (isOwner || isAdmin) && (batchData.status === 'Draft' || batchData.status === 'Rejected')
 
   return (
     <div className="min-h-screen">
@@ -403,10 +404,12 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
                       {BATCH_STATUS_MAP[batchData.status] || batchData.status}
                     </Chip>
                   </div>
-                  <p className="text-small text-default-500">
-                    由 {batchData.creator.nickname || batchData.creator.name} 创建于{' '}
-                    {new Date(batchData.createAt).toLocaleString('zh-CN')}
-                  </p>
+                  <div className="text-small text-default-500 space-y-0.5">
+                    <p>由 {batchData.creator.nickname || batchData.creator.name} 创建于{' '}
+                      {new Date(batchData.createAt).toLocaleString('zh-CN')}
+                    </p>
+                    <p>最后修改：{new Date(batchData.updateAt).toLocaleString('zh-CN')}</p>
+                  </div>
                 </div>
                 <div className="flex gap-2 flex-wrap">
                   {canEdit && (

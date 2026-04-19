@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
+import { checkIsAdmin } from '@/lib/adminAuth'
 
 // GET /api/batches/:id - Get batch details
 export async function GET(
@@ -151,7 +152,8 @@ export async function PATCH(
       return NextResponse.json({ error: '批次不存在' }, { status: 404 })
     }
 
-    if (batch.creatorId !== session.id) {
+    const isAdmin = await checkIsAdmin(session.id)
+    if (batch.creatorId !== session.id && !isAdmin) {
       return NextResponse.json({ error: '无权限' }, { status: 403 })
     }
 
@@ -194,7 +196,8 @@ export async function DELETE(
       return NextResponse.json({ error: '批次不存在' }, { status: 404 })
     }
 
-    if (batch.creatorId !== session.id) {
+    const isAdmin = await checkIsAdmin(session.id)
+    if (batch.creatorId !== session.id && !isAdmin) {
       return NextResponse.json({ error: '无权限' }, { status: 403 })
     }
 

@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma'
 import { conflictDetector } from '@/lib/services/conflictDetector'
 import { rebuildBatchDependencies } from '@/lib/services/batchDependencyService'
 import { PullRequestType } from '@prisma/client'
+import { checkIsAdmin } from '@/lib/adminAuth'
 
 // GET /api/pull-requests/:id - Get PR with dependencies
 export async function GET(
@@ -113,7 +114,8 @@ export async function PATCH(
       return NextResponse.json({ error: 'PR 未关联批次' }, { status: 400 })
     }
 
-    if (pr.userId !== session.id) {
+    const isAdmin = await checkIsAdmin(session.id)
+    if (pr.userId !== session.id && !isAdmin) {
       return NextResponse.json({ error: '无权限' }, { status: 403 })
     }
 
@@ -236,7 +238,8 @@ export async function DELETE(
       return NextResponse.json({ error: 'PR 未关联批次' }, { status: 400 })
     }
 
-    if (pr.userId !== session.id) {
+    const isAdmin = await checkIsAdmin(session.id)
+    if (pr.userId !== session.id && !isAdmin) {
       return NextResponse.json({ error: '无权限' }, { status: 403 })
     }
 

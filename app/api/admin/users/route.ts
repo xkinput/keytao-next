@@ -3,7 +3,6 @@ import { prisma } from '@/lib/prisma'
 import { checkAdminPermission } from '@/lib/adminAuth'
 
 export async function GET() {
-  // 验证管理员权限
   const authCheck = await checkAdminPermission()
   if (!authCheck.authorized) {
     return authCheck.response
@@ -18,6 +17,8 @@ export async function GET() {
         email: true,
         status: true,
         createAt: true,
+        roles: { select: { id: true, name: true, value: true } },
+        _count: { select: { batches: true, pullRequests: true } },
       },
       orderBy: { createAt: 'desc' },
     })
@@ -25,9 +26,6 @@ export async function GET() {
     return NextResponse.json({ users })
   } catch (error) {
     console.error('Get users error:', error)
-    return NextResponse.json(
-      { error: '获取用户列表失败' },
-      { status: 500 }
-    )
+    return NextResponse.json({ error: '获取用户列表失败' }, { status: 500 })
   }
 }
