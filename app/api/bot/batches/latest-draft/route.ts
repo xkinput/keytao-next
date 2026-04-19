@@ -56,7 +56,7 @@ export async function GET(request: NextRequest) {
     // Find user by platform ID
     let user
     try {
-      user = await resolveUserByPlatform(platform, platformId, { id: true, name: true, nickname: true })
+      user = await resolveUserByPlatform(platform, platformId)
     } catch (prismaError) {
       console.error('[Bot API] Prisma error:', prismaError)
 
