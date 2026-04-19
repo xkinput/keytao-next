@@ -5,6 +5,7 @@ import { conflictDetector } from '@/lib/services/conflictDetector'
 import { PullRequestType } from '@prisma/client'
 import { getDefaultWeight, type PhraseType } from '@/lib/constants/phraseTypes'
 import { calculateWeightForType } from '@/lib/services/batchConflictService'
+import { checkIsAdmin } from '@/lib/adminAuth'
 
 // PUT /api/batches/:id/pull-requests - Batch sync PRs (Create/Update/Delete)
 export async function PUT(
@@ -27,11 +28,13 @@ export async function PUT(
             return NextResponse.json({ error: '批次不存在' }, { status: 404 })
         }
 
-        if (batch.creatorId !== session.id) {
+        const isAdmin = await checkIsAdmin(session.id)
+        if (batch.creatorId !== session.id && !isAdmin) {
             return NextResponse.json({ error: '无权限' }, { status: 403 })
         }
 
-        if (batch.status !== 'Draft' && batch.status !== 'Rejected') {
+        const allowedStatuses = isAdmin ? ['Draft', 'Rejected', 'Submitted'] : ['Draft', 'Rejected']
+        if (!allowedStatuses.includes(batch.status)) {
             return NextResponse.json(
                 { error: '只能编辑草稿或已拒绝状态的批次' },
                 { status: 400 }
