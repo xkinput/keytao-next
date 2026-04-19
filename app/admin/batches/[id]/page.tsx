@@ -87,6 +87,16 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
     { withAuth: true }
   )
 
+  const batchStatus = batch?.batch.status
+  const { data: batchList } = useAPI<{ batches: Array<{ id: string }> }>(
+    batchStatus ? `/api/admin/batches?status=${batchStatus}` : null,
+    { withAuth: true }
+  )
+  const navList = batchList?.batches ?? []
+  const currentIndex = navList.findIndex(b => b.id === resolvedParams.id)
+  const prevId = currentIndex > 0 ? navList[currentIndex - 1].id : null
+  const nextId = currentIndex >= 0 && currentIndex < navList.length - 1 ? navList[currentIndex + 1].id : null
+
   const handleApprove = async () => {
     openConfirm('确定要批准这个批次吗？', async () => {
       setProcessing(true)
@@ -194,13 +204,35 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
     <div className="min-h-screen">
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="mb-6">
-          <Button
-            variant="light"
-            onPress={() => router.push('/admin/batches')}
-            className="mb-4"
-          >
-            ← 返回列表
-          </Button>
+          <div className="flex items-center gap-2 mb-4">
+            <Button
+              variant="light"
+              onPress={() => router.push('/admin/batches')}
+            >
+              ← 返回列表
+            </Button>
+            <Button
+              variant="flat"
+              size="sm"
+              isDisabled={!prevId}
+              onPress={() => prevId && router.push(`/admin/batches/${prevId}`)}
+            >
+              ← 上一个
+            </Button>
+            <Button
+              variant="flat"
+              size="sm"
+              isDisabled={!nextId}
+              onPress={() => nextId && router.push(`/admin/batches/${nextId}`)}
+            >
+              下一个 →
+            </Button>
+            {navList.length > 0 && currentIndex >= 0 && (
+              <span className="text-small text-default-400">
+                {currentIndex + 1} / {navList.length}
+              </span>
+            )}
+          </div>
 
           <Card>
             <CardHeader>

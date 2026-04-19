@@ -100,6 +100,17 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
     `/api/batches/${resolvedParams.id}`
   )
 
+  const batchStatus = batch?.batch.status
+  const isPrivateStatus = batchStatus === 'Draft' || batchStatus === 'Rejected'
+  const { data: batchList } = useAPI<{ batches: Array<{ id: string }> }>(
+    batchStatus ? `/api/batches?status=${batchStatus}&pageSize=500${isPrivateStatus ? '&onlyMine=true' : ''}` : null,
+    isPrivateStatus ? { withAuth: true } : undefined
+  )
+  const navList = batchList?.batches ?? []
+  const currentIndex = navList.findIndex(b => b.id === resolvedParams.id)
+  const prevId = currentIndex > 0 ? navList[currentIndex - 1].id : null
+  const nextId = currentIndex >= 0 && currentIndex < navList.length - 1 ? navList[currentIndex + 1].id : null
+
   // Check if user is admin
   const { data: adminCheck } = useAPI(
     isAuthenticated() && token ? '/api/admin/stats' : null
@@ -307,13 +318,35 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
     <div className="min-h-screen">
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="mb-6">
-          <Button
-            variant="light"
-            onPress={() => router.push('/')}
-            className="mb-4"
-          >
-            ← 返回列表
-          </Button>
+          <div className="flex items-center gap-2 mb-4">
+            <Button
+              variant="light"
+              onPress={() => router.push('/')}
+            >
+              ← 返回列表
+            </Button>
+            <Button
+              variant="flat"
+              size="sm"
+              isDisabled={!prevId}
+              onPress={() => prevId && router.push(`/batch/${prevId}`)}
+            >
+              ← 上一个
+            </Button>
+            <Button
+              variant="flat"
+              size="sm"
+              isDisabled={!nextId}
+              onPress={() => nextId && router.push(`/batch/${nextId}`)}
+            >
+              下一个 →
+            </Button>
+            {navList.length > 0 && currentIndex >= 0 && (
+              <span className="text-small text-default-400">
+                {currentIndex + 1} / {navList.length}
+              </span>
+            )}
+          </div>
 
           <Card>
             <CardHeader>
