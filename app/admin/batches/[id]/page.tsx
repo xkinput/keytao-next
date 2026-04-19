@@ -272,6 +272,13 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
                     )}
                   </div>
                 </div>
+                <Button
+                  variant="flat"
+                  size="sm"
+                  onPress={() => router.push(`/batch/${resolvedParams.id}`)}
+                >
+                  编辑批次
+                </Button>
               </div>
             </CardHeader>
           </Card>
