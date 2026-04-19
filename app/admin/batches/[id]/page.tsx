@@ -98,6 +98,15 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
   const prevId = currentIndex > 0 ? navList[currentIndex - 1].id : null
   const nextId = currentIndex >= 0 && currentIndex < navList.length - 1 ? navList[currentIndex + 1].id : null
 
+  const afterReview = () => {
+    if (nextId) {
+      router.push(`/admin/batches/${nextId}`)
+    } else {
+      openAlert('所有待审批次已处理完毕，即将返回列表', '审核完成')
+      setTimeout(() => router.push('/admin/batches'), 1500)
+    }
+  }
+
   const handleApprove = async () => {
     openConfirm('确定要批准这个批次吗？', async () => {
       setProcessing(true)
@@ -107,9 +116,7 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
           body: { reviewNote: reviewNote || undefined },
           withAuth: true
         })
-        openAlert('批次已批准', '操作成功')
-        mutate()
-        router.push('/admin/batches')
+        afterReview()
       } catch (err) {
         const error = err as Error
         openAlert(error.message || '批准失败', '操作失败')
@@ -133,9 +140,7 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
           body: { reviewNote },
           withAuth: true
         })
-        openAlert('批次已拒绝', '操作成功')
-        mutate()
-        router.push('/admin/batches')
+        afterReview()
       } catch (err) {
         const error = err as Error
         openAlert(error.message || '拒绝失败', '操作失败')
