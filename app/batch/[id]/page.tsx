@@ -89,7 +89,7 @@ interface BatchDetail {
 export default function BatchDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const resolvedParams = use(params)
   const router = useRouter()
-  const { user, token, isAuthenticated } = useAuthStore()
+  const { user, isAdmin } = useAuthStore()
   const [submitting, setSubmitting] = useState(false)
   const [editingName, setEditingName] = useState(false)
   const [batchName, setBatchName] = useState('')
@@ -111,12 +111,6 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
   const currentIndex = navList.findIndex(b => b.id === resolvedParams.id)
   const prevId = currentIndex > 0 ? navList[currentIndex - 1].id : null
   const nextId = currentIndex >= 0 && currentIndex < navList.length - 1 ? navList[currentIndex + 1].id : null
-
-  // Check if user is admin
-  const { data: adminCheck } = useAPI(
-    isAuthenticated() && token ? '/api/admin/stats' : null
-  )
-  const isAdmin = !!adminCheck
 
   // Initialize batch name when data loads
   useEffect(() => {
@@ -313,7 +307,10 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
 
   const batchData = batch.batch
   const isOwner = user?.id === batchData.creator.id
-  const canEdit = (isOwner || isAdmin) && (batchData.status === 'Draft' || batchData.status === 'Rejected')
+  const editableStatuses = isAdmin
+    ? ['Draft', 'Rejected', 'Submitted']
+    : ['Draft', 'Rejected']
+  const canEdit = (isOwner || isAdmin) && editableStatuses.includes(batchData.status)
 
   return (
     <div className="min-h-screen">
