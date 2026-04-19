@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { verifyBotToken } from '@/lib/botAuth'
 import { prisma } from '@/lib/prisma'
+import { isValidPlatform, resolveUserByPlatform } from '@/lib/botUserResolver'
 import { checkBatchConflictsWithWeight, recheckBatchConflicts } from '@/lib/services/batchConflictService'
 import { buildDependencies } from '@/lib/services/batchDependencyService'
 import { PullRequestType } from '@prisma/client'
@@ -48,7 +49,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    if (!['qq', 'telegram'].includes(platform)) {
+    if (!isValidPlatform(platform)) {
       return NextResponse.json<BotCreatePRResponse>(
         {
           success: false,
@@ -59,45 +60,13 @@ export async function POST(request: NextRequest) {
     }
 
     // Find user by platform ID
-    const fieldName = platform === 'qq' ? 'qqId' : 'telegramId'
-
-    let user
-    try {
-      user = await prisma.user.findFirst({
-        where: {
-          [fieldName]: platformId,
-          status: 'ENABLE'
-        },
-        select: {
-          id: true,
-          name: true,
-          nickname: true
-        }
-      })
-    } catch (prismaError: any) {
-      // Handle database schema errors (e.g., column doesn't exist)
-      console.error('[Bot API] Prisma error:', prismaError)
-
-      if (prismaError.code === 'P2022') {
-        // Column doesn't exist - probably need to run migrations
-        return NextResponse.json<BotCreatePRResponse>(
-          {
-            success: false,
-            message: '系统配置错误，请联系管理员更新数据库（需要运行 prisma migrate）'
-          },
-          { status: 500 }
-        )
-      }
-
-      // Other Prisma errors
-      throw prismaError
-    }
+    const user = await resolveUserByPlatform(platform, platformId)
 
     if (!user) {
       return NextResponse.json<BotCreatePRResponse>(
         {
           success: false,
-          message: '未找到绑定账号。\n\n请先使用 /bind 命令绑定你的平台账号到键道加词平台～'
+          message: '未找到账号'
         },
         { status: 404 }
       )

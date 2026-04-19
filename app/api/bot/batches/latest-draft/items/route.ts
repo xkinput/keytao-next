@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { verifyBotToken } from '@/lib/botAuth'
 import { prisma } from '@/lib/prisma'
+import { isValidPlatform, resolveUserByPlatform } from '@/lib/botUserResolver'
 
 /**
  * Bot API: List all PR items in the user's latest draft batch
@@ -21,20 +22,15 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ success: false, message: '缺少必需参数' }, { status: 400 })
     }
 
-    if (!['qq', 'telegram'].includes(platform)) {
+    if (!isValidPlatform(platform)) {
       return NextResponse.json({ success: false, message: '不支持的平台' }, { status: 400 })
     }
 
-    const fieldName = platform === 'qq' ? 'qqId' : 'telegramId'
-
-    const user = await prisma.user.findFirst({
-      where: { [fieldName]: platformId, status: 'ENABLE' },
-      select: { id: true }
-    })
+    const user = await resolveUserByPlatform(platform, platformId)
 
     if (!user) {
       return NextResponse.json(
-        { success: false, message: '未找到绑定账号，请先使用 /bind 命令绑定' },
+        { success: false, message: '未找到账号' },
         { status: 404 }
       )
     }
@@ -137,20 +133,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, message: '缺少必需参数: platform, platformId, word, code' }, { status: 400 })
     }
 
-    if (!['qq', 'telegram'].includes(platform)) {
+    if (!isValidPlatform(platform)) {
       return NextResponse.json({ success: false, message: '不支持的平台' }, { status: 400 })
     }
 
-    const fieldName = platform === 'qq' ? 'qqId' : 'telegramId'
-
-    const user = await prisma.user.findFirst({
-      where: { [fieldName]: platformId, status: 'ENABLE' },
-      select: { id: true, name: true, nickname: true }
-    })
+    const user = await resolveUserByPlatform(platform, platformId)
 
     if (!user) {
       return NextResponse.json(
-        { success: false, message: '未找到绑定账号，请先使用 /bind 命令绑定' },
+        { success: false, message: '未找到账号' },
         { status: 404 }
       )
     }

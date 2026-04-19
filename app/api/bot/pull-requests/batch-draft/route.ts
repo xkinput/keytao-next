@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { verifyBotToken } from '@/lib/botAuth'
 import { prisma } from '@/lib/prisma'
+import { isValidPlatform, resolveUserByPlatform } from '@/lib/botUserResolver'
 import { checkBatchConflictsWithWeight } from '@/lib/services/batchConflictService'
 import { PullRequestType } from '@prisma/client'
 import { PhraseType } from '@/lib/constants/phraseTypes'
@@ -45,7 +46,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    if (!['qq', 'telegram'].includes(platform)) {
+    if (!isValidPlatform(platform)) {
       return NextResponse.json<BotBatchDraftResponse>(
         { success: false, message: '不支持的平台', successCount: 0, failedCount: 0, skippedCount: 0, warnedCount: 0, failed: [], skipped: [], warned: [], draftItems: [], draftTotal: 0 },
         { status: 400 }
@@ -53,15 +54,11 @@ export async function POST(request: NextRequest) {
     }
 
     // Resolve user
-    const fieldName = platform === 'qq' ? 'qqId' : 'telegramId'
-    const user = await prisma.user.findFirst({
-      where: { [fieldName]: platformId, status: 'ENABLE' },
-      select: { id: true }
-    })
+    const user = await resolveUserByPlatform(platform, platformId)
 
     if (!user) {
       return NextResponse.json<BotBatchDraftResponse>(
-        { success: false, message: '未找到绑定账号，请先使用 /bind 命令绑定', successCount: 0, failedCount: 0, skippedCount: 0, warnedCount: 0, failed: [], skipped: [], warned: [], draftItems: [], draftTotal: 0 },
+        { success: false, message: '未找到账号', successCount: 0, failedCount: 0, skippedCount: 0, warnedCount: 0, failed: [], skipped: [], warned: [], draftItems: [], draftTotal: 0 },
         { status: 404 }
       )
     }
@@ -279,22 +276,18 @@ export async function DELETE(request: NextRequest) {
       )
     }
 
-    if (!['qq', 'telegram'].includes(platform)) {
+    if (!isValidPlatform(platform)) {
       return NextResponse.json<BotBatchDeleteDraftResponse>(
         { success: false, message: '不支持的平台', successCount: 0, failedCount: 0, deleted: [], failed: [], draftItems: [], draftTotal: 0 },
         { status: 400 }
       )
     }
 
-    const fieldName = platform === 'qq' ? 'qqId' : 'telegramId'
-    const user = await prisma.user.findFirst({
-      where: { [fieldName]: platformId, status: 'ENABLE' },
-      select: { id: true }
-    })
+    const user = await resolveUserByPlatform(platform, platformId)
 
     if (!user) {
       return NextResponse.json<BotBatchDeleteDraftResponse>(
-        { success: false, message: '未找到绑定账号，请先使用 /bind 命令绑定', successCount: 0, failedCount: 0, deleted: [], failed: [], draftItems: [], draftTotal: 0 },
+        { success: false, message: '未找到账号', successCount: 0, failedCount: 0, deleted: [], failed: [], draftItems: [], draftTotal: 0 },
         { status: 404 }
       )
     }

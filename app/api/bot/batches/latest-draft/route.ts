@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { verifyBotToken } from '@/lib/botAuth'
 import { prisma } from '@/lib/prisma'
+import { isValidPlatform, resolveUserByPlatform } from '@/lib/botUserResolver'
 
 /**
  * Bot API: Get or create latest draft batch
@@ -42,7 +43,7 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    if (!['qq', 'telegram'].includes(platform)) {
+    if (!isValidPlatform(platform)) {
       return NextResponse.json(
         {
           success: false,
@@ -53,21 +54,9 @@ export async function GET(request: NextRequest) {
     }
 
     // Find user by platform ID
-    const fieldName = platform === 'qq' ? 'qqId' : 'telegramId'
-
     let user
     try {
-      user = await prisma.user.findFirst({
-        where: {
-          [fieldName]: platformId,
-          status: 'ENABLE'
-        },
-        select: {
-          id: true,
-          name: true,
-          nickname: true
-        }
-      })
+      user = await resolveUserByPlatform(platform, platformId, { id: true, name: true, nickname: true })
     } catch (prismaError) {
       console.error('[Bot API] Prisma error:', prismaError)
 
