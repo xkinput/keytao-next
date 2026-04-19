@@ -5,13 +5,14 @@ import dynamic from 'next/dynamic'
 import { Button, Textarea, ScrollShadow } from '@heroui/react'
 import { Trash2, X, Send } from 'lucide-react'
 import { useChatStore } from '@/lib/store/chat'
+import { useAuthStore } from '@/lib/store/auth'
 
 const Live2DCanvas = dynamic(() => import('./Live2DCanvas'), { ssr: false })
 
 const CANVAS_W = 200
 const CANVAS_H = 220
-const CANVAS_W_MOBILE = 150
-const CANVAS_H_MOBILE = 165
+const CANVAS_W_MOBILE = 120
+const CANVAS_H_MOBILE = 132
 
 // Idle messages that rotate in the speech bubble
 const IDLE_MESSAGES = [
@@ -21,10 +22,15 @@ const IDLE_MESSAGES = [
   '需要帮助吗？',
 ]
 
+function authHeaders(): Record<string, string> {
+  const token = useAuthStore.getState().token
+  return token ? { Authorization: `Bearer ${token}` } : {}
+}
+
 async function sendChat(message: string, sessionId: string): Promise<string> {
   const res = await fetch('/api/bot/chat', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify({ message, session_id: sessionId }),
   })
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
@@ -35,7 +41,7 @@ async function sendChat(message: string, sessionId: string): Promise<string> {
 async function clearServerHistory(sessionId: string) {
   await fetch('/api/bot/chat', {
     method: 'DELETE',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify({ session_id: sessionId }),
   }).catch(() => {})
 }
@@ -132,7 +138,13 @@ function ChatPanel({ onClose }: { onClose: () => void }) {
   return (
     <div style={{ width: 'min(320px, calc(100vw - 32px))' }}>
       {/* Toolbar */}
-      <div className="flex items-center justify-between px-1 pb-1.5">
+      <div
+        className="flex items-center justify-between px-3 py-1.5 mb-2 rounded-2xl"
+        style={{
+          background: 'hsl(var(--heroui-content1))',
+          border: '1px solid hsl(var(--heroui-divider))',
+        }}
+      >
         <div className="flex items-center gap-1.5">
           <div className="w-1.5 h-1.5 rounded-full bg-primary" />
           <span className="text-xs font-medium text-foreground-500">喵喵 · 键道助手</span>
@@ -272,7 +284,7 @@ export default function ChatWidget() {
 
   return (
     <div
-      className="fixed bottom-4 right-4 z-50 flex flex-col items-end gap-2"
+      className={`fixed z-50 flex flex-col items-end gap-2 ${isMobile ? 'bottom-2 right-2' : 'bottom-4 right-4'}`}
       style={{ userSelect: 'none' }}
     >
       {/* Chat panel — slides in above the character */}
