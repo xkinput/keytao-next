@@ -198,7 +198,7 @@ export default function InstallPage() {
         return {
           name: '元书输入法',
           description: 'iOS 平台的 Rime 输入法，支持通过链接直接下载方案',
-          url: 'https://apps.apple.com/app/id6744464701',
+          url: 'https://apps.apple.com/cn/app/%E5%85%83%E4%B9%A6%E8%BE%93%E5%85%A5%E6%B3%95/id6744464701',
           installMethod: '从 App Store 下载安装',
           appStoreNote: '在 App Store 搜索「元书输入法」或点击链接下载安装',
           configPath: '元书输入法 → 输入方案 → 右上角「下载方案」'
