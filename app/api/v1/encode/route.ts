@@ -15,6 +15,6 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'word 最多 20 个字符' }, { status: 400 })
   }
 
-  const result = encodePhrase(word.trim())
+  const result = await encodePhrase(word.trim())
   return NextResponse.json(result)
 }

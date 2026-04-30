@@ -1,4 +1,3 @@
-import { pinyin } from 'pinyin-pro'
 import * as fs from 'fs'
 import * as path from 'path'
 
@@ -45,7 +44,7 @@ const ZERO_INITIAL: Record<string, string> = {
 const FINAL_KEY: Record<string, string> = {
   ua: 'q', iu: 'q',
   ei: 'w', un: 'w', vn: 'w', ün: 'w', // vn/ün = j/q/x form of ün
-  e:  'e',
+  e: 'e',
   eng: 'r',
   uan: 't', van: 't', üan: 't', // van/üan = j/q/x form of üan
   ong: 'y', iong: 'y',
@@ -80,7 +79,7 @@ function getFinalKey(initial: string, final: string): string {
   if (final === 'uang') {
     // zh-inner(F) and ch-inner(W) use X; all others use M
     return (ZH_INNER.has('uang') && initial === 'zh') ||
-           (CH_INNER.has('uang') && initial === 'ch')
+      (CH_INNER.has('uang') && initial === 'ch')
       ? 'x' : 'm'
   }
   return FINAL_KEY[final] ?? '?'
@@ -167,11 +166,71 @@ function altFinalKey(initial: string, final: string): string | null {
   return primary === 'm' ? 'x' : 'm'
 }
 
+// ── Pinyin utils ──────────────────────────────────────────────────────────────
+
+// Strip tone marks → base ASCII pinyin (ü kept as ü)
+function normalizePinyin(p: string): string {
+  return p
+    .replace(/[āáǎà]/g, 'a').replace(/[ēéěè]/g, 'e').replace(/[īíǐì]/g, 'i')
+    .replace(/[ōóǒò]/g, 'o').replace(/[ūúǔù]/g, 'u').replace(/[ǖǘǚǜ]/g, 'ü')
+    .toLowerCase().trim()
+}
+
+// Ordered longest-first so zh/ch/sh are matched before z/c/s
+const INITIALS = ['zh', 'ch', 'sh', 'b', 'p', 'm', 'f', 'd', 't', 'n', 'l', 'g', 'k', 'h', 'j', 'q', 'x', 'r', 'z', 'c', 's', 'w', 'y']
+
+export function parsePinyin(p: string): { initial: string; final: string } {
+  const norm = normalizePinyin(p)
+  if (!norm) return { initial: '', final: '' }
+  for (const init of INITIALS) {
+    if (norm.startsWith(init)) return { initial: init, final: norm.slice(init.length) }
+  }
+  return { initial: '', final: norm }
+}
+
+// Tone-mark regex: matches one pinyin syllable with at least one toned vowel
+const TONED_PINYIN_RE = /((?:zh|ch|sh|[bpmfdtnlgkhjqxrzcswy])?[āáǎàēéěèīíǐìōóǒòūúǔùǖǘǚǜ][a-züāáǎàēéěèīíǐìōóǒòūúǔùǖǘǚǜ]*)/
+
+// ── Zdic fetching ─────────────────────────────────────────────────────────────
+
+// In-memory cache: char → all pinyin readings (deduped, pinyin-only, no bopomofo)
+const pinyinCache = new Map<string, string[]>()
+
+// Matches ASCII-based pinyin with at least one toned vowel (no bopomofo ㄅㄆ etc.)
+const PINYIN_ONLY_RE = /^[a-züāáǎàēéěèīíǐìōóǒòūúǔùǖǘǚǜ]+$/
+
+export async function getPinyinFromZdic(char: string): Promise<string[]> {
+  if (pinyinCache.has(char)) return pinyinCache.get(char)!
+  const url = `https://www.zdic.net/hans/${encodeURIComponent(char)}`
+  try {
+    const res = await fetch(url, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; keytao-encoder/1.0)' },
+      signal: AbortSignal.timeout(8000),
+    })
+    if (!res.ok) { pinyinCache.set(char, []); return [] }
+    const html = await res.text()
+    // Extract all <span class="z_d song">…</span> values, keep only pinyin (not bopomofo)
+    const all = [...html.matchAll(/class="z_d song">([^<\s]+)/g)]
+      .map(m => m[1])
+      .filter(s => PINYIN_ONLY_RE.test(s))
+    const deduped = [...new Set(all)]
+    if (deduped.length > 0) { pinyinCache.set(char, deduped); return deduped }
+    // Fallback: first toned pinyin anywhere on the page
+    const any = html.match(TONED_PINYIN_RE)
+    const result = any ? [any[1]] : []
+    pinyinCache.set(char, result)
+    return result
+  } catch {
+    return []
+  }
+}
+
 // ── Single character encoding ─────────────────────────────────────────────────
 
 export interface CharEncoding {
   char: string
-  pinyin: string
+  pinyin: string          // first (default) reading used for encoding
+  pinyins: string[]       // all readings from zdic (may be multiple for polyphonic chars)
   phoneticCode: string   // 2-key: initial+final
   c1: string | null      // raw c1 radicals from split
   c2: string | null      // raw c2 radicals from split
@@ -179,23 +238,16 @@ export interface CharEncoding {
   fullCode: string       // phoneticCode + shapeCode
 }
 
-export function encodeChar(char: string): CharEncoding {
-  const info = pinyin(char, { type: 'all', toneType: 'none' })
-  const first = Array.isArray(info) ? info[0] : null
-
-  let phoneticCode = ''
-  let pinyinStr = ''
-
-  if (first && first.isZh) {
-    pinyinStr = first.pinyin
-    phoneticCode = encodePhonetic(first.initial, first.final)
-  }
-
+export async function encodeChar(char: string): Promise<CharEncoding> {
+  const pinyins = await getPinyinFromZdic(char)
+  const pinyinStr = pinyins[0] ?? ''
+  const { initial, final } = parsePinyin(pinyinStr)
+  const phoneticCode = encodePhonetic(initial, final)
   const shape = encodeShape(char)
-
   return {
     char,
     pinyin: pinyinStr,
+    pinyins,
     phoneticCode,
     c1: shape?.c1 ?? null,
     c2: shape?.c2 ?? null,
@@ -261,13 +313,9 @@ function buildAltCodes(
   return [...new Set(alts)]
 }
 
-export function encodePhrase(word: string): PhraseEncoding {
-  const chars = [...word].map(encodeChar)
-  const pinyinInfos = chars.map((c) => {
-    const info = pinyin(c.char, { type: 'all', toneType: 'none' })
-    const first = Array.isArray(info) ? info[0] : null
-    return { initial: first?.initial ?? '', final: first?.final ?? '' }
-  })
+export async function encodePhrase(word: string): Promise<PhraseEncoding> {
+  const chars = await Promise.all([...word].map(encodeChar))
+  const pinyinInfos = chars.map((c) => parsePinyin(c.pinyin))
 
   const n = chars.length
   let type: PhraseType
@@ -275,23 +323,19 @@ export function encodePhrase(word: string): PhraseEncoding {
   let shapeSteps: string[]
 
   if (n === 1) {
-    // 单字: 声+韵 固定两码，形码最多4键（c1首码+c2首码，不足时重复末码）
     type = '单字'
     base = chars[0].phoneticCode
     const shape = chars[0].shapeCode ?? ''
     shapeSteps = shape.split('')
   } else if (n === 2) {
-    // 二字词: (声+韵)×2，形消歧最多+2
     type = '二字词'
     base = chars[0].phoneticCode + chars[1].phoneticCode
     shapeSteps = [firstShapeKey(chars[0]), firstShapeKey(chars[1])]
   } else if (n === 3) {
-    // 三字词: 声×3，形消歧最多+3
     type = '三字词'
     base = pinyinInfos.map((_, i) => chars[i].phoneticCode[0] ?? '').join('')
     shapeSteps = chars.map(firstShapeKey)
   } else {
-    // 四字词及以上: 声×3 + 末声，形消歧最多+2
     type = '四字词及以上'
     const initials = [0, 1, 2, n - 1].map((i) => chars[i].phoneticCode[0] ?? '')
     base = initials.join('')
@@ -300,19 +344,16 @@ export function encodePhrase(word: string): PhraseEncoding {
 
   const codes = buildCodes(base, shapeSteps)
 
-  // Build 飞键 variants for base code
   const altCodes = buildAltCodes(chars, pinyinInfos, (altInitKeys, altFinKeys) => {
     const parts: string[] = []
     for (let i = 0; i < n; i++) {
       if (n === 1 || n === 2) {
-        // use full phonetic (声+韵)
         let initKey = chars[i].phoneticCode[0]
         let finKey = chars[i].phoneticCode[1]
         if (altInitKeys[i]) initKey = altInitKeys[i]!
         if (altFinKeys[i]) finKey = altFinKeys[i]!
         parts.push(initKey + finKey)
       } else {
-        // use initial only (声); for 4+, only positions 0,1,2,n-1
         if (n >= 4 && i > 2 && i < n - 1) continue
         let initKey = chars[i].phoneticCode[0]
         if (altInitKeys[i]) initKey = altInitKeys[i]!

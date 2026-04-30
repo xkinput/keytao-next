@@ -8,7 +8,7 @@ export async function GET(request: NextRequest) {
   if (word.length > 20) return NextResponse.json({ error: 'word 最多 20 个字符' }, { status: 400 })
 
   try {
-    const result = encodePhrase(word)
+    const result = await encodePhrase(word)
     return NextResponse.json(result)
   } catch (error) {
     console.error('Encode error:', error)
