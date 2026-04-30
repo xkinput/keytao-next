@@ -39,6 +39,7 @@ export async function POST() {
             id: true,
             name: true,
             nickname: true,
+            email: true,
           },
         },
         pullRequests: {
@@ -103,9 +104,9 @@ export async function POST() {
       isManualSync
         ? undefined
         : {
-            includeTypes: affectedTypes,
-            includeEmptyTypes: true,
-          }
+          includeTypes: affectedTypes,
+          includeEmptyTypes: true,
+        }
     );
 
     if (dictFiles.size === 0) {

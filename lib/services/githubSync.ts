@@ -334,6 +334,54 @@ export class GithubSyncService {
   }
 
   /**
+   * Get the latest semver tag (v[x.x.x]) from the repo
+   */
+  async getLatestVersionTag(): Promise<string | null> {
+    const { data } = await this.octokit.repos.listTags({
+      owner: this.owner,
+      repo: this.repo,
+      per_page: 100,
+    });
+
+    const versionTags = data
+      .map((t) => t.name)
+      .filter((name) => /^v\d+\.\d+\.\d+$/.test(name))
+      .sort((a, b) => {
+        const pa = a.slice(1).split('.').map(Number);
+        const pb = b.slice(1).split('.').map(Number);
+        for (let i = 0; i < 3; i++) {
+          if (pa[i] !== pb[i]) return pb[i] - pa[i];
+        }
+        return 0;
+      });
+
+    return versionTags[0] ?? null;
+  }
+
+  /**
+   * Create an annotated tag on the latest commit of baseBranch and push it
+   */
+  async createAndPushTag(tagName: string, message: string): Promise<void> {
+    const sha = await this.getLatestCommitSha();
+
+    const { data: tagObj } = await this.octokit.git.createTag({
+      owner: this.owner,
+      repo: this.repo,
+      tag: tagName,
+      message,
+      object: sha,
+      type: 'commit',
+    });
+
+    await this.octokit.git.createRef({
+      owner: this.owner,
+      repo: this.repo,
+      ref: `refs/tags/${tagName}`,
+      sha: tagObj.sha,
+    });
+  }
+
+  /**
    * Full sync workflow: create branch, commit files, create PR
    */
   async syncDictionaries(

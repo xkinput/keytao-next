@@ -41,6 +41,17 @@ export async function POST(request: NextRequest) {
         githubBranch: true,
         processedFiles: true,
         pendingFiles: true,
+        batches: {
+          select: {
+            creator: {
+              select: {
+                name: true,
+                nickname: true,
+                email: true,
+              },
+            },
+          },
+        },
       },
     });
 
@@ -94,7 +105,19 @@ export async function POST(request: NextRequest) {
     const changedFiles = await githubService.filterChangedFiles(branch, fileCommits);
 
     // Commit files
-    const commitMessage = `Update dictionaries - ${new Date().toISOString().split('T')[0]}`;
+    const coAuthors = new Map<string, string>();
+    for (const batch of task.batches) {
+      if (batch.creator.email) {
+        const name = batch.creator.nickname || batch.creator.name || 'Anonymous';
+        coAuthors.set(batch.creator.email, name);
+      }
+    }
+    const trailers = Array.from(coAuthors.entries())
+      .map(([email, name]) => `Co-authored-by: ${name} <${email}>`)
+      .join('\n');
+    const commitMessage = trailers
+      ? `Update dictionaries - ${new Date().toISOString().split('T')[0]}\n\n${trailers}`
+      : `Update dictionaries - ${new Date().toISOString().split('T')[0]}`;
 
     if (changedFiles.length > 0) {
       console.log(`[CommitBatch] Committing ${changedFiles.length} files in one commit`);

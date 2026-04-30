@@ -22,8 +22,9 @@ import {
   ModalFooter,
   Link,
   Skeleton,
+  Input,
 } from '@heroui/react'
-import { RefreshCw } from 'lucide-react'
+import { RefreshCw, Tag } from 'lucide-react'
 import { useAPI } from '@/lib/hooks/useSWR'
 import { useAuthStore } from '@/lib/store/auth'
 import { format } from 'date-fns'
@@ -88,6 +89,10 @@ export default function SyncPage() {
   const [selectedTask, setSelectedTask] = useState<SyncTask | null>(null)
   const [isBatchModalOpen, setIsBatchModalOpen] = useState(false)
   const [cancellingTaskId, setCancellingTaskId] = useState<string | null>(null)
+  const [newTagName, setNewTagName] = useState('')
+  const [isPublishingTag, setIsPublishingTag] = useState(false)
+  const [tagError, setTagError] = useState<string | null>(null)
+  const [tagSuccess, setTagSuccess] = useState<string | null>(null)
 
   // Check if user is admin
   const { data: adminCheck } = useAPI('/api/admin/stats')
@@ -108,6 +113,39 @@ export default function SyncPage() {
   const { data: statsData, mutate: mutateStats } = useAPI<StatsResponse>(
     '/api/admin/stats'
   )
+
+  // Get latest tag (admin only)
+  const { data: tagData, mutate: mutateTag } = useAPI<{ success: boolean; latestTag: string | null }>(
+    isAdmin ? '/api/admin/github/tags' : null
+  )
+
+  const handlePublishTag = async () => {
+    if (!newTagName.trim()) return
+    setTagError(null)
+    setTagSuccess(null)
+    setIsPublishingTag(true)
+    try {
+      const res = await fetch('/api/admin/github/tags', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ tagName: newTagName.trim() }),
+      })
+      const result = await res.json()
+      if (!res.ok || !result.success) {
+        throw new Error(result.error || '发布失败')
+      }
+      setTagSuccess(`Tag ${result.tagName} 已成功推送到 GitHub`)
+      setNewTagName('')
+      mutateTag()
+    } catch (err) {
+      setTagError(err instanceof Error ? err.message : '发布失败')
+    } finally {
+      setIsPublishingTag(false)
+    }
+  }
 
   // Get running task (if any)
   const runningTask = tasksData?.tasks?.find(
@@ -254,6 +292,57 @@ export default function SyncPage() {
               )}
             </div>
           </div>
+
+          {/* Publish GitHub Tag (admin only) */}
+          {isAdmin && (
+            <Card className="mb-6">
+              <CardHeader className="flex items-center gap-2">
+                <Tag className="w-5 h-5" />
+                <h2 className="text-xl font-semibold">发布 GitHub Tag</h2>
+              </CardHeader>
+              <CardBody className="space-y-4">
+                <div className="flex items-center gap-3">
+                  <span className="text-sm text-default-600 shrink-0">当前最新 Tag:</span>
+                  {tagData === undefined ? (
+                    <Skeleton className="h-5 w-20 rounded-lg" />
+                  ) : (
+                    <Chip color="primary" variant="flat" size="sm">
+                      {tagData?.latestTag ?? '暂无'}
+                    </Chip>
+                  )}
+                </div>
+                <div className="flex items-start gap-3">
+                  <Input
+                    className="max-w-xs"
+                    size="sm"
+                    placeholder="v1.0.0"
+                    label="新 Tag 名称"
+                    value={newTagName}
+                    onValueChange={(v) => {
+                      setNewTagName(v)
+                      setTagError(null)
+                      setTagSuccess(null)
+                    }}
+                    isInvalid={!!tagError}
+                    errorMessage={tagError ?? undefined}
+                    description="格式: v[major].[minor].[patch]"
+                  />
+                  <Button
+                    color="primary"
+                    className="mt-6"
+                    isLoading={isPublishingTag}
+                    isDisabled={!newTagName.trim()}
+                    onPress={handlePublishTag}
+                  >
+                    发布到 GitHub
+                  </Button>
+                </div>
+                {tagSuccess && (
+                  <p className="text-sm text-success">{tagSuccess}</p>
+                )}
+              </CardBody>
+            </Card>
+          )}
 
           {/* Manual sync info card */}
           {isAdmin && statsData && statsData.pendingSyncBatches === 0 && !runningTask && (

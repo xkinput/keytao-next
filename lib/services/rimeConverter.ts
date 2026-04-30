@@ -383,7 +383,7 @@ export function mergeRimeEntries(
  */
 export function generateSyncSummary(
   pullRequests: PullRequest[],
-  batches?: Array<{ creator: { name: string | null; nickname: string | null } }>
+  batches?: Array<{ creator: { name: string | null; nickname: string | null; email: string | null } }>
 ): string {
   const grouped = groupPullRequestsByType(pullRequests);
   const lines: string[] = [];
@@ -449,6 +449,22 @@ export function generateSyncSummary(
   lines.push('---');
   lines.push('');
   lines.push('_此PR由KeyTao管理系统自动生成_');
+
+  if (batches && batches.length > 0) {
+    const coAuthors = new Map<string, string>();
+    for (const batch of batches) {
+      if (batch.creator.email) {
+        const name = batch.creator.nickname || batch.creator.name || 'Anonymous';
+        coAuthors.set(batch.creator.email, name);
+      }
+    }
+    if (coAuthors.size > 0) {
+      lines.push('');
+      for (const [email, name] of coAuthors.entries()) {
+        lines.push(`Co-authored-by: ${name} <${email}>`);
+      }
+    }
+  }
 
   return lines.join('\n');
 }
