@@ -115,7 +115,11 @@ export default function SyncPage() {
   )
 
   // Get latest tag (admin only)
-  const { data: tagData, mutate: mutateTag } = useAPI<{ success: boolean; latestTag: string | null }>(
+  const { data: tagData, mutate: mutateTag } = useAPI<{
+    success: boolean
+    latestTag: string | null
+    latestCommit: { sha: string; message: string; date: string; author: string } | null
+  }>(
     isAdmin ? '/api/admin/github/tags' : null
   )
 
@@ -310,6 +314,27 @@ export default function SyncPage() {
                       {tagData?.latestTag ?? '暂无'}
                     </Chip>
                   )}
+                </div>
+                <div className="flex items-start gap-2 text-sm text-default-500">
+                  <span className="shrink-0">将基于 commit:</span>
+                  {tagData === undefined ? (
+                    <Skeleton className="h-4 w-64 rounded-lg" />
+                  ) : tagData?.latestCommit ? (
+                    <div className="flex flex-col gap-0.5">
+                      <div className="flex items-center gap-2">
+                        <code className="text-xs bg-default-100 px-1.5 py-0.5 rounded">
+                          {tagData.latestCommit.sha.slice(0, 7)}
+                        </code>
+                        <span className="truncate max-w-xs">{tagData.latestCommit.message}</span>
+                      </div>
+                      <span className="text-xs text-default-400">
+                        {tagData.latestCommit.author && `${tagData.latestCommit.author} · `}
+                        {tagData.latestCommit.date
+                          ? format(new Date(tagData.latestCommit.date), 'yyyy-MM-dd HH:mm:ss', { locale: zhCN })
+                          : ''}
+                      </span>
+                    </div>
+                  ) : null}
                 </div>
                 <div className="flex items-start gap-3">
                   <Input

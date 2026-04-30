@@ -112,6 +112,24 @@ export class GithubSyncService {
   }
 
   /**
+   * Get latest commit info from base branch
+   */
+  async getLatestCommitInfo(): Promise<{ sha: string; message: string; date: string; author: string }> {
+    const { data } = await this.octokit.repos.getBranch({
+      owner: this.owner,
+      repo: this.repo,
+      branch: this.baseBranch,
+    });
+    const c = data.commit.commit;
+    return {
+      sha: data.commit.sha,
+      message: c.message.split('\n')[0],
+      date: c.committer?.date ?? c.author?.date ?? '',
+      author: c.author?.name ?? '',
+    };
+  }
+
+  /**
    * Create a new branch
    */
   async createBranch(branchName: string): Promise<void> {

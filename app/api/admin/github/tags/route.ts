@@ -18,9 +18,12 @@ export async function GET() {
     }
 
     const githubService = createGithubSyncService();
-    const latestTag = await githubService.getLatestVersionTag();
+    const [latestTag, latestCommit] = await Promise.all([
+      githubService.getLatestVersionTag(),
+      githubService.getLatestCommitInfo(),
+    ]);
 
-    return NextResponse.json({ success: true, latestTag });
+    return NextResponse.json({ success: true, latestTag, latestCommit });
   } catch (error) {
     console.error('[Tags] GET error:', error);
     return NextResponse.json(
