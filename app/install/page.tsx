@@ -73,7 +73,7 @@ export default function InstallPage() {
       path = '/sdcard/rime 或内部存储/rime'
     } else if (userAgent.includes('iphone') || userAgent.includes('ipad') || userAgent.includes('ipod')) {
       detectedOS = 'ios'
-      path = 'iRime 应用内部目录'
+      path = '元书输入法 RimeUserData 目录'
     } else if (platform.includes('mac') || userAgent.includes('mac')) {
       detectedOS = 'macos'
       path = '~/Library/Rime'
@@ -196,12 +196,12 @@ export default function InstallPage() {
         }
       case 'ios':
         return {
-          name: 'iRime',
-          description: 'iOS 平台的 Rime 输入法',
-          url: 'https://github.com/jimmy54/iRime',
+          name: '元书输入法',
+          description: 'iOS 平台的 Rime 输入法，支持通过链接直接下载方案',
+          url: 'https://apps.apple.com/app/id6744464701',
           installMethod: '从 App Store 下载安装',
-          appStoreNote: '在 App Store 搜索 "iRime" 下载安装',
-          configPath: 'iRime 应用内通过 iCloud 或文件管理导入'
+          appStoreNote: '在 App Store 搜索「元书输入法」或点击链接下载安装',
+          configPath: '元书输入法 → 输入方案 → 右上角「下载方案」'
         }
       default:
         return null
@@ -650,7 +650,42 @@ export default function InstallPage() {
             <CardBody>
               <h2 className="text-xl font-semibold mb-4">步骤 2：安装 KeyTao 方案</h2>
 
-              {(osType === 'windows' || osType === 'macos' || osType === 'ios') ? (
+              {osType === 'ios' ? (
+                <div className="space-y-4">
+                  <Alert
+                    color="primary"
+                    title="iOS 平台 — 元书输入法"
+                    description="iOS 不支持安装更新程序，请按以下步骤手动安装"
+                  />
+                  {releaseInfo && (
+                    <Alert
+                      color="success"
+                      title={`最新 KeyTao 版本: ${releaseInfo.version}`}
+                      description={`发布时间: ${new Date(releaseInfo.publishedAt).toLocaleString('zh-CN')}`}
+                      icon={<Download className="w-5 h-5" />}
+                    />
+                  )}
+                  <div className="bg-default-50 rounded-lg p-5 border border-default-200">
+                    <ol className="list-decimal list-inside space-y-2 text-sm text-default-700">
+                      <li>
+                        前往{' '}
+                        <Link href="https://github.com/xkinput/KeyTao/releases/latest" isExternal showAnchorIcon className="text-sm">
+                          GitHub Releases
+                        </Link>
+                        ，复制 <Code size="sm">keytao-ios-*.zip</Code> 的下载链接
+                      </li>
+                      <li>
+                        打开{' '}
+                        <Link href="https://apps.apple.com/app/id6744464701" isExternal showAnchorIcon className="text-sm">
+                          元书输入法
+                        </Link>
+                        {' '}→ 输入方案 → 右上角「下载方案」→ 填写方案名称和下载链接 → 保存 → 点击下载
+                      </li>
+                      <li>返回「输入方案」→ 右上角「方案目录切换」→ 进入键道目录 → 右上角「打开」→ 部署 → 等待完成</li>
+                    </ol>
+                  </div>
+                </div>
+              ) : (osType === 'windows' || osType === 'macos') ? (
                 <div className="space-y-4">
                   <Alert
                     color="warning"
@@ -660,7 +695,6 @@ export default function InstallPage() {
                         由于系统权限限制，浏览器无法直接写入{' '}
                         {osType === 'windows' && <><Code size="sm">%APPDATA%\Rime</Code> 目录</>}
                         {osType === 'macos' && <><Code size="sm">~/Library/Rime</Code> 目录</>}
-                        {osType === 'ios' && 'iRime 应用目录'}
                         ，请下载并运行键道安装更新程序完成安装与更新。
                       </span>
                     }
@@ -938,9 +972,10 @@ export default function InstallPage() {
                     )}
                     {osType === 'ios' && (
                       <>
-                        <li><Code size="sm">iRime App</Code> - 通过应用内导入</li>
-                        <li className="text-xs text-default-500 mt-1 flex items-center gap-1"><Lightbulb className="w-3 h-3" /> 可通过 iCloud Drive、文件共享或 iTunes 导入方案文件</li>
-                        <li className="text-xs text-default-500 flex items-center gap-1"><Lightbulb className="w-3 h-3" /> 详见应用内帮助文档</li>
+                        <li className="font-semibold">元书输入法安装步骤：</li>
+                        <li className="text-xs text-default-600 ml-2">1. 前往 GitHub Releases，复制 <Code size="sm">keytao-ios-*.zip</Code> 下载链接</li>
+                        <li className="text-xs text-default-600 ml-2">2. 打开元书输入法 → 输入方案 → 右上角「下载方案」→ 填写方案名称和下载链接 → 保存 → 点击下载</li>
+                        <li className="text-xs text-default-600 ml-2">3. 返回「输入方案」→ 右上角「方案目录切换」→ 进入键道目录 → 右上角「打开」→ 部署 → 等待完成</li>
                       </>
                     )}
                   </ul>
