@@ -32,6 +32,8 @@ export async function GET() {
         downloadUrls.linux = asset.browser_download_url
       } else if (asset.name.includes('keytao-android-')) {
         downloadUrls.android = asset.browser_download_url
+      } else if (asset.name.includes('keytao-ios-')) {
+        downloadUrls.ios = asset.browser_download_url
       }
     }
 
