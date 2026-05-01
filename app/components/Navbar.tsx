@@ -363,14 +363,13 @@ function Navbar() {
               赞助
             </Button>
             <Button
-              variant="light"
+              variant="flat"
               size="sm"
               isIconOnly
-              color="warning"
               aria-label="赞助键道开发"
               as={Link}
               href="/sponsor"
-              className="sm:hidden"
+              className="sm:hidden text-pink-600 dark:text-pink-400"
             >
               <Coffee className="w-5 h-5" />
             </Button>
