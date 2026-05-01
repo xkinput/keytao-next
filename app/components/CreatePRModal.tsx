@@ -473,7 +473,7 @@ export default function CreatePRModal({
     const lines = dictInput.split('\n').filter(line => line.trim())
     const parsed: DictParseItem[] = []
     for (const line of lines) {
-      const parts = line.split('\t')
+      const parts = line.split(/\t| {2,}| /)
       const word = parts[0].trim()
       if (!word) continue
       const inputCode = parts[1]?.trim() || undefined
@@ -1010,7 +1010,7 @@ export default function CreatePRModal({
                               <span className="w-4 shrink-0 text-center text-default-300"> </span>
                               <span className="shrink-0">{p.word}</span>
                               <span className="shrink-0">{p.code}</span><span className="shrink-0 text-default-300">{p.weight}</span>
-                              
+
                             </div>
                           ))}
                           <div className="p-3 flex flex-col gap-2.5">
@@ -1384,7 +1384,7 @@ export default function CreatePRModal({
                               <span className="w-4 shrink-0 text-center text-default-300"> </span>
                               <span className="shrink-0">{p.word}</span>
                               <span className="shrink-0">{p.code}</span><span className="shrink-0 text-default-300">{p.weight}</span>
-                              
+
                             </div>
                           ))}
                         </div>
@@ -1406,7 +1406,7 @@ export default function CreatePRModal({
                               <span className="w-4 shrink-0 text-center text-default-300"> </span>
                               <span className="shrink-0">{p.word}</span>
                               <span className="shrink-0">{p.code}</span><span className="shrink-0 text-default-300">{p.weight}</span>
-                              
+
                             </div>
                           ))}
                           {/* Main action line */}
@@ -1466,7 +1466,7 @@ export default function CreatePRModal({
                               <span className="w-4 shrink-0 text-center text-default-300"> </span>
                               <span className="shrink-0">{p.word}</span>
                               <span className="shrink-0">{p.code}</span><span className="shrink-0 text-default-300">{p.weight}</span>
-                              
+
                             </div>
                           ))}
                         </div>
@@ -1617,7 +1617,7 @@ export default function CreatePRModal({
                       支持两种格式，每行一条：
                       <code className="bg-content2 px-1 rounded mx-1">词条</code>（自动推断编码）
                       或
-                      <code className="bg-content2 px-1 rounded mx-1">词条[Tab]编码</code>（使用提供的编码）
+                      <code className="bg-content2 px-1 rounded mx-1">词条[Tab/空格]编码</code>（使用提供的编码）
                     </p>
                     <Textarea
                       placeholder={"程序员\n算法\t可选编码\n的\n..."}
@@ -1625,6 +1625,19 @@ export default function CreatePRModal({
                       onValueChange={setDictInput}
                       minRows={12}
                       classNames={{ input: "font-mono text-sm" }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Tab') {
+                          e.preventDefault()
+                          const el = e.currentTarget as HTMLTextAreaElement
+                          const start = el.selectionStart
+                          const end = el.selectionEnd
+                          const next = dictInput.slice(0, start) + '\t' + dictInput.slice(end)
+                          setDictInput(next)
+                          requestAnimationFrame(() => {
+                            el.selectionStart = el.selectionEnd = start + 1
+                          })
+                        }
+                      }}
                     />
                   </div>
                 ) : (
