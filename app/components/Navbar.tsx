@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useCallback, memo, useState, useRef } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import { Button, Dropdown, DropdownTrigger, DropdownMenu, DropdownItem, Link, Drawer, DrawerContent, DrawerHeader, DrawerBody, Divider } from '@heroui/react'
-import { Menu, User, Database, Shield, ChevronDown, Edit, Download, BookOpen, Code, Github, Coffee } from 'lucide-react'
+import { Menu, User, Database, Shield, ChevronDown, Edit, Download, BookOpen, Code, Github, Coffee, Info } from 'lucide-react'
 import { useAuthStore } from '@/lib/store/auth'
 import { useAPI } from '@/lib/hooks/useSWR'
 import Logo from './Logo'
@@ -133,6 +133,14 @@ function Navbar() {
       ]
     },
     {
+      key: 'about',
+      label: '关于',
+      icon: Info,
+      items: [
+        { label: '关于本站', href: '/about' },
+      ]
+    },
+    {
       key: 'admin',
       label: '管理',
       icon: Shield,
@@ -236,7 +244,7 @@ function Navbar() {
             <div className="flex items-center gap-4 md:gap-8">
               <Logo />
               {/* Desktop Navigation */}
-              <div className="hidden md:flex gap-1 items-center">
+              <div className="hidden nav:flex gap-1 items-center">
                 {visibleMenuCategories.map((category) => {
                   const IconComponent = category.icon
                   const firstItem = category.items[0]
@@ -339,7 +347,7 @@ function Navbar() {
               </div>
 
               {/* Mobile Menu Button */}
-              <div className="md:hidden">
+              <div className="nav:hidden">
                 <Button
                   variant="light"
                   isIconOnly

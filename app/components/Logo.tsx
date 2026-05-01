@@ -17,7 +17,10 @@ export default function Logo({ className = '', size = 40 }: LogoProps) {
         className="rounded-md"
         priority
       />
-      <span className="text-2xl font-bold text-primary">KeyTao</span>
+      <div className="flex flex-col leading-none">
+        <span className="text-xl font-extrabold text-primary tracking-tight">键道</span>
+        <span className="text-[11px] font-medium text-default-400 tracking-widest uppercase">KeyTao</span>
+      </div>
     </Link>
   )
 }

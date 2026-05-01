@@ -17,8 +17,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "KeyTao 键道词库管理系统",
-  description: "键道输入法词库管理系统",
+  title: "KeyTao 星空键道6词库管理系统",
+  description: "键道输入法,星空键道,键道6词库管理系统",
+  keywords: ["键道", "键道6", "星空键道", "输入法", "词库管理", "开源", "免费"],
 };
 
 export default function RootLayout({
