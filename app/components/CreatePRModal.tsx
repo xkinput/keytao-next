@@ -13,9 +13,6 @@ import {
   Select,
   SelectItem,
   Textarea,
-  Card,
-  CardBody,
-  CardHeader,
   Chip,
   RadioGroup,
   Radio,
@@ -26,9 +23,11 @@ import { apiRequest } from '@/lib/hooks/useSWR'
 import { getPhraseTypeOptions, getDefaultWeight, checkTypeMismatch, detectPhraseType, type PhraseType } from '@/lib/constants/phraseTypes'
 import { CODE_PATTERN } from '@/lib/constants/codeValidation'
 import { useUIStore } from '@/lib/store/ui'
-import { Trash2, FileText, CornerUpLeft, CornerDownLeft, ChevronUp, ChevronDown, Plus, Edit2, AlertTriangle, Eye, Check, Lightbulb, Search } from 'lucide-react'
+import { Trash2, FileText, CornerUpLeft, CornerDownLeft, ChevronUp, ChevronDown, Plus, Edit2, AlertTriangle, Eye, Check, Search } from 'lucide-react'
 import CodePhrasesPopover from './CodePhrasesPopover'
 import WordCodesPopover from './WordCodesPopover'
+import type { InferResponse } from '@/app/api/phrases/infer/route'
+import type { ContextResponse } from '@/app/api/phrases/context/route'
 
 interface CreatePRModalProps {
   isOpen: boolean
@@ -94,6 +93,20 @@ interface MetaState {
   checking: boolean
 }
 
+interface DictParseItem {
+  key: string
+  word: string
+  inputCode?: string
+  finalCode: string
+  type: string
+  weight: string
+  /** code slot result */
+  status: 'inferring' | 'new' | 'shifted' | 'overflow' | 'error'
+  statusDetail?: string
+  excluded: boolean
+  infer?: InferResponse
+}
+
 export default function CreatePRModal({
   isOpen,
   onClose,
@@ -138,6 +151,11 @@ export default function CreatePRModal({
   const [checkingAll, setCheckingAll] = useState(false)
   const [showDictParser, setShowDictParser] = useState(false)
   const [dictInput, setDictInput] = useState('')
+  const [dictStep, setDictStep] = useState<'input' | 'preview'>('input')
+  const [dictItems, setDictItems] = useState<DictParseItem[]>([])
+  const [dictInferring, setDictInferring] = useState(false)
+  // Which item is currently in edit/expand mode; null = all collapsed
+  const [expandedIndex, setExpandedIndex] = useState<number | null>(null)
 
   // Track if we've initialized the form in this modal session
   const hasInitializedRef = useRef(false)
@@ -146,6 +164,18 @@ export default function CreatePRModal({
   const autoFilledRef = useRef<Set<string>>(new Set())
   // Track encoding loading state per field
   const [encodingFields, setEncodingFields] = useState<Set<string>>(new Set())
+  // Per-field infer result (code slot info + word duplicate info)
+  const [inferResults, setInferResults] = useState<Map<string, InferResponse>>(new Map())
+  const [contextResults, setContextResults] = useState<Map<string, ContextResponse>>(new Map())
+
+  const setInferResult = (fieldId: string, result: InferResponse | null) => {
+    setInferResults(prev => {
+      const next = new Map(prev)
+      if (result === null) next.delete(fieldId)
+      else next.set(fieldId, result)
+      return next
+    })
+  }
 
   // Refs for scrolling to conflict items
   const cardRefs = useRef<Map<string, HTMLDivElement>>(new Map())
@@ -243,14 +273,18 @@ export default function CreatePRModal({
       }
 
       hasInitializedRef.current = true
+      setExpandedIndex(0)
     } else if (!isOpen) {
       // Modal closed - reset the initialization flag for next open
       hasInitializedRef.current = false
     }
   }, [isOpen, batchPRs, editPR, reset, defaultFormItem])
 
-  // Auto-encode: watch all items, debounce 600ms, fill code if empty or previously auto-filled
+  // Auto-infer: watch word changes, debounce 600ms, fill code with first available slot
+  // Also checks if word already exists in DB (single round-trip via /api/phrases/infer)
   useEffect(() => {
+    const timers = new Map<string, ReturnType<typeof setTimeout>>()
+
     const subscription = watch((values, { name }) => {
       if (!name?.includes('.word')) return
       const indexMatch = name.match(/items\.(\d+)\.word/)
@@ -265,47 +299,123 @@ export default function CreatePRModal({
       const action = item.action
       const fieldId = fields[index]?.id
 
-      // Only auto-encode for Create/Change actions, and only when code is empty or was previously auto-filled
-      if (!fieldId || !word || action === 'Delete') return
-      if (code && !autoFilledRef.current.has(fieldId)) return
+      if (!fieldId) return
 
-      setEncodingFields(prev => new Set(prev).add(fieldId))
+      // Clear infer result when word is cleared
+      if (!word) {
+        setInferResult(fieldId, null)
+        return
+      }
+
+      if (action === 'Delete') return
+      // Only auto-fill code if it's empty or was previously auto-filled
+      const shouldFillCode = !code || autoFilledRef.current.has(fieldId)
+
+      // Debounce per field
+      const existing = timers.get(fieldId)
+      if (existing) clearTimeout(existing)
+
+      if (shouldFillCode) setEncodingFields(prev => new Set(prev).add(fieldId))
 
       const timer = setTimeout(async () => {
+        timers.delete(fieldId)
         try {
-          const res = await fetch(`/api/phrases/encode?word=${encodeURIComponent(word)}`)
+          const res = await fetch(`/api/phrases/infer?word=${encodeURIComponent(word)}`)
           if (!res.ok) return
-          const data = await res.json()
-          const suggestedCode = data.codes?.[0]
-          if (!suggestedCode) return
+          const data: InferResponse = await res.json()
 
-          setValue(`items.${index}.code`, suggestedCode, { shouldValidate: true })
-          autoFilledRef.current.add(fieldId)
+          setInferResult(fieldId, data)
+
+          if (shouldFillCode && data.suggestion) {
+            setValue(`items.${index}.code`, data.suggestion, { shouldValidate: true })
+            autoFilledRef.current.add(fieldId)
+          }
         } catch {
-          // silently ignore encode errors
+          // silently ignore
         } finally {
           setEncodingFields(prev => { const s = new Set(prev); s.delete(fieldId); return s })
         }
       }, 600)
 
-      return () => clearTimeout(timer)
+      timers.set(fieldId, timer)
     })
-    return () => subscription.unsubscribe()
+
+    return () => {
+      subscription.unsubscribe()
+      timers.forEach(t => clearTimeout(t))
+    }
   }, [watch, fields, setValue])
+
+  // Context fetch: watch code changes, show surrounding phrases in collapsed diff rows
+  useEffect(() => {
+    const timers = new Map<string, ReturnType<typeof setTimeout>>()
+
+    const subscription = watch((values, { name }) => {
+      if (!name?.includes('.code')) return
+      const indexMatch = name.match(/items\.(\d+)\.code/)
+      if (!indexMatch) return
+      const index = parseInt(indexMatch[1])
+      const fieldId = fields[index]?.id
+      if (!fieldId) return
+
+      const code = (values.items?.[index]?.code ?? '').trim()
+      const type = (values.items?.[index]?.type ?? '').trim()
+      if (!code) {
+        setContextResults(prev => { const n = new Map(prev); n.delete(fieldId); return n })
+        return
+      }
+
+      const existing = timers.get(fieldId)
+      if (existing) clearTimeout(existing)
+
+      const timer = setTimeout(async () => {
+        try {
+          const params = new URLSearchParams({ code, count: '3', ...(type ? { type } : {}) })
+          const res = await fetch(`/api/phrases/context?${params}`)
+          if (res.ok) {
+            const data: ContextResponse = await res.json()
+            setContextResults(prev => new Map(prev).set(fieldId, data))
+          }
+        } catch { /* ignore */ }
+      }, 600)
+
+      timers.set(fieldId, timer)
+    })
+
+    return () => {
+      subscription.unsubscribe()
+      timers.forEach(t => clearTimeout(t))
+    }
+  }, [watch, fields])
+
+  // Fetch context for all pre-filled codes on mount / when fields change
+  useEffect(() => {
+    const values = getValues('items')
+    fields.forEach((field, index) => {
+      const code = (values[index]?.code ?? '').trim()
+      const type = (values[index]?.type ?? '').trim()
+      if (!code) return
+      const params = new URLSearchParams({ code, count: '3', ...(type ? { type } : {}) })
+      fetch(`/api/phrases/context?${params}`)
+        .then(r => r.ok ? r.json() : null)
+        .then((data: ContextResponse | null) => {
+          if (data) setContextResults(prev => new Map(prev).set(field.id, data))
+        })
+        .catch(() => { /* ignore */ })
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fields.map(f => f.id).join(',')])
 
   // Add new item
   const handleAddItem = () => {
+    const newIndex = fields.length
     append(defaultFormItem)
-    // Add meta state for new item  (setTimeout to wait for field to be created)
     setTimeout(() => {
-      const newField = fields[fields.length]
+      const newField = fields[newIndex]
       if (newField) {
-        updateMeta(newField.id, {
-          conflict: null,
-          hasChecked: false,
-          checking: false
-        })
+        updateMeta(newField.id, { conflict: null, hasChecked: false, checking: false })
       }
+      setExpandedIndex(newIndex)
     }, 0)
   }
 
@@ -328,12 +438,9 @@ export default function CreatePRModal({
     setTimeout(() => {
       const newField = fields[index]
       if (newField) {
-        updateMeta(newField.id, {
-          conflict: null,
-          hasChecked: false,
-          checking: false
-        })
+        updateMeta(newField.id, { conflict: null, hasChecked: false, checking: false })
       }
+      setExpandedIndex(index)
     }, 0)
   }
 
@@ -343,64 +450,130 @@ export default function CreatePRModal({
     setTimeout(() => {
       const newField = fields[index + 1]
       if (newField) {
-        updateMeta(newField.id, {
-          conflict: null,
-          hasChecked: false,
-          checking: false
-        })
+        updateMeta(newField.id, { conflict: null, hasChecked: false, checking: false })
       }
+      setExpandedIndex(index + 1)
     }, 0)
   }
 
-  // Parse dictionary format
-  const handleParseDictionary = () => {
+  // Dict parser helpers
+  const closeDictParser = () => {
+    setShowDictParser(false)
+    setDictInput('')
+    setDictStep('input')
+    setDictItems([])
+  }
+
+  const handleDictPreview = async () => {
     if (!dictInput.trim()) {
       openAlert('请输入词典内容', '输入为空')
       return
     }
 
     const lines = dictInput.split('\n').filter(line => line.trim())
-    const parsed: FormItem[] = []
-
+    const parsed: DictParseItem[] = []
     for (const line of lines) {
       const parts = line.split('\t')
-      if (parts.length < 2) continue
-
       const word = parts[0].trim()
-      const code = parts[1].trim()
-
-      if (!word || !code) continue
-
-      // Auto-detect type using new detectPhraseType function
-      const type = detectPhraseType(word, code)
-
-      // Get default weight for type
+      if (!word) continue
+      const inputCode = parts[1]?.trim() || undefined
+      const type = detectPhraseType(word, inputCode || '')
       const weight = getDefaultWeight(type)
-
       parsed.push({
-        action: 'Create',
+        key: `dict-${Math.random().toString(36).slice(2, 9)}`,
         word,
-        oldWord: '',
-        code,
+        inputCode,
+        finalCode: inputCode || '',
         type,
         weight: weight.toString(),
-        remark: ''
+        status: 'inferring',
+        excluded: false,
       })
     }
 
     if (parsed.length === 0) {
-      openAlert('未能解析到有效的词条，请检查格式是否正确（词条[Tab]编码）', '解析失败')
+      openAlert('未能解析到有效词条，请检查格式', '解析失败')
+      return
+    }
+    if (parsed.length > 200) {
+      openAlert('单次最多 200 个词条，请分批导入', '词条过多')
       return
     }
 
-    // Append parsed items to existing items
-    parsed.forEach(item => {
-      append(item)
-    })
+    setDictItems(parsed)
+    setDictStep('preview')
+    setDictInferring(true)
 
-    setShowDictParser(false)
-    setDictInput('')
-    toast.success(`已追加 ${parsed.length} 个词条`)
+    try {
+      const res = await fetch('/api/phrases/infer-batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ words: parsed.map(p => p.word) }),
+      })
+      if (!res.ok) throw new Error('批量推断失败')
+      const data = await res.json() as { results: InferResponse[] }
+
+      setDictItems(prev => prev.map((item, idx) => {
+        const infer = data.results[idx]
+        if (!infer) return { ...item, status: 'error' as const }
+
+        let finalCode = item.inputCode || ''
+        let status: DictParseItem['status'] = 'new'
+        let statusDetail: string | undefined
+
+        if (!item.inputCode) {
+          if (infer.suggestion === null) {
+            // All progressive + alt slots taken — add as 重码 using longest code
+            finalCode = infer.codes.at(-1) ?? infer.codes[0] ?? ''
+            status = 'overflow'
+          } else if (infer.isBaseConflict) {
+            finalCode = infer.suggestion
+            status = 'shifted'
+            statusDetail = `${infer.codes[0]} → ${infer.suggestion}`
+          } else {
+            finalCode = infer.suggestion
+            status = 'new'
+          }
+        }
+
+        if (infer.wordExists.length > 0) {
+          const existCodes = infer.wordExists.map(e => e.code).join('、')
+          const note = `词已存在：${existCodes}`
+          statusDetail = statusDetail ? `${statusDetail}；${note}` : note
+        }
+
+        return { ...item, infer, finalCode, status, statusDetail }
+      }))
+    } catch (err) {
+      setDictItems(prev => prev.map(item => ({
+        ...item, status: 'error' as const,
+        statusDetail: (err as Error).message,
+      })))
+      openAlert((err as Error).message || '批量推断失败', '推断出错')
+    } finally {
+      setDictInferring(false)
+    }
+  }
+
+  const handleDictConfirm = () => {
+    const toAdd = dictItems.filter(item => !item.excluded && item.finalCode.trim())
+    toAdd.forEach(item => {
+      append({
+        action: 'Create',
+        word: item.word,
+        oldWord: '',
+        code: item.finalCode,
+        type: item.type,
+        weight: item.weight,
+        remark: '',
+      })
+    })
+    closeDictParser()
+    toast.success(`已添加 ${toAdd.length} 个词条`)
+  }
+
+  const updateDictItemCode = (idx: number, code: string) => {
+    setDictItems(prev => prev.map((item, i) => i === idx ? { ...item, finalCode: code } : item))
   }
 
   // Check all conflicts
@@ -801,738 +974,524 @@ export default function CreatePRModal({
                   )}
                 </div>
               </ModalHeader>
-              <ModalBody className="gap-4 overflow-y-auto py-4 pb-0">
+              <ModalBody className="gap-1.5 overflow-y-auto py-3 pb-0">
                 {fields.map((field, index) => {
                   const meta = getMeta(field.id)
+                  const isExpanded = expandedIndex === index
+                  const currentAction = watch(`items.${index}.action`)
+                  const currentWord = watch(`items.${index}.word`)
+                  const currentOldWord = watch(`items.${index}.oldWord`)
+                  const currentCode = watch(`items.${index}.code`)
+                  const currentType = watch(`items.${index}.type`) as PhraseType
+                  const currentWeight = watch(`items.${index}.weight`) || String(getDefaultWeight(currentType))
+                  const infer = inferResults.get(field.id)
+                  const isResolved = meta.conflict?.suggestions?.some(s => s.action === 'Resolved')
+                  const hasConflict = !!(meta.conflict?.hasConflict && !isResolved)
+                  const hasWarning = !!(meta.conflict?.currentPhrase && currentAction === 'Create' && !isResolved)
+                  const isIncomplete = !currentWord || !currentCode
+                  const context = contextResults.get(field.id)
+
                   return (
-                    <Card
+                    <div
                       key={field.id}
-                      className="min-h-100 shrink-0"
                       ref={(el: HTMLDivElement | null) => {
-                        if (el) {
-                          cardRefs.current.set(field.id, el)
-                        } else {
-                          cardRefs.current.delete(field.id)
-                        }
+                        if (el) cardRefs.current.set(field.id, el)
+                        else cardRefs.current.delete(field.id)
                       }}
                     >
-                      <CardHeader className="flex justify-between">
-                        <span className="font-semibold">修改 #{index + 1}</span>
-                        {!isEditMode && (
-                          <div className="flex gap-1 items-center">
-                            <div className="flex flex-col gap-0.5">
-                              <Tooltip content="上方添加" placement="top">
-                                <Button
-                                  size="sm"
-                                  variant="light"
-                                  isIconOnly
-                                  className="min-w-unit-7 w-unit-7 h-unit-7"
-                                  onPress={() => handleAddItemAbove(index)}
-                                >
-                                  <CornerUpLeft className='w-3' />
-                                </Button>
-                              </Tooltip>
-                              <Tooltip content="下方添加" placement="bottom">
-                                <Button
-                                  size="sm"
-                                  variant="light"
-                                  isIconOnly
-                                  className="min-w-unit-7 w-unit-7 h-unit-7"
-                                  onPress={() => handleAddItemBelow(index)}
-                                >
-                                  <CornerDownLeft className='w-3' />
-                                </Button>
-                              </Tooltip>
+                      {isExpanded ? (
+                        /* ── EDIT MODE ──────────────────────────── */
+                        <div className={`rounded-xl border-2 overflow-hidden transition-colors ${currentAction === 'Delete' ? 'border-danger/40' :
+                          currentAction === 'Change' ? 'border-warning/40' : 'border-success/40'
+                          }`}>
+                          {/* Context before */}
+                          {context?.before && context.before.length > 0 && context.before.map((p, i) => (
+                            <div key={i} className="flex items-center gap-2 px-3 py-0.5 font-mono text-xs text-default-500 dark:text-default-400 bg-default-100 dark:bg-default-50/30">
+                              <span className="w-4 shrink-0 text-center text-default-300"> </span>
+                              <span className="shrink-0">{p.word}</span>
+                              <span className="shrink-0">{p.code}</span>
+                              {p.type && <span className="shrink-0 text-default-400 dark:text-default-300 text-[10px]">[{getPhraseTypeOptions().find(o => o.value === p.type)?.label ?? p.type}]</span>}
                             </div>
-                            {fields.length > 1 && (
-                              <Button
-                                size="sm"
-                                color="danger"
-                                variant="light"
-                                isIconOnly
-                                onPress={() => handleRemoveItem(index)}
-                              >
-                                <Trash2 className='w-4' />
-                              </Button>
-                            )}
-                          </div>
-                        )}
-                      </CardHeader>
-                      <CardBody className="gap-3">
-                        <Controller
-                          name={`items.${index}.action`}
-                          control={control}
-                          rules={{ required: true }}
-                          render={({ field: actionField }) => (
-                            <RadioGroup
-                              value={actionField.value}
-                              orientation="horizontal"
-                              isRequired
-                              size="sm"
-                              classNames={{
-                                wrapper: "gap-3",
-                              }}
-                              onValueChange={async (value) => {
-                                actionField.onChange(value)
-                                // Reset check state when action changes
-                                updateMeta(field.id, { hasChecked: false, conflict: null })
-
-                                const currentData = getValues(`items.${index}`)
-
-                                // Auto-fill oldWord when switching to Change action
-                                if (value === 'Change' && currentData.code) {
-                                  // Query the first phrase for this code
-                                  if (!currentData.oldWord) {
-                                    try {
-                                      const response = await fetch(`/api/phrases/by-code?code=${encodeURIComponent(currentData.code)}&page=1`)
-                                      if (response.ok) {
-                                        const data = await response.json()
-                                        if (data.phrases && data.phrases.length > 0) {
-                                          // Auto-fill with the first phrase's word
-                                          const firstPhrase = data.phrases.find((p: { code: string; word: string }) => p.code === currentData.code)
-                                          if (firstPhrase) {
-                                            setValue(`items.${index}.oldWord`, firstPhrase.word)
+                          ))}
+                          <div className="p-3 flex flex-col gap-2.5">
+                            {/* Row 1: index + action pills + confirm/delete */}
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-xs text-default-400 shrink-0 w-5 text-center">#{index + 1}</span>
+                              <Controller
+                                name={`items.${index}.action`}
+                                control={control}
+                                rules={{ required: true }}
+                                render={({ field: actionField }) => (
+                                  <RadioGroup
+                                    value={actionField.value}
+                                    orientation="horizontal"
+                                    isRequired
+                                    size="sm"
+                                    classNames={{ wrapper: "gap-1.5" }}
+                                    onValueChange={async (value) => {
+                                      actionField.onChange(value)
+                                      updateMeta(field.id, { hasChecked: false, conflict: null })
+                                      const currentData = getValues(`items.${index}`)
+                                      if (value === 'Change' && currentData.code) {
+                                        if (!currentData.oldWord) {
+                                          try {
+                                            const response = await fetch(`/api/phrases/by-code?code=${encodeURIComponent(currentData.code)}&page=1`)
+                                            if (response.ok) {
+                                              const data = await response.json()
+                                              if (data.phrases?.length > 0) {
+                                                const firstPhrase = data.phrases.find((p: { code: string; word: string }) => p.code === currentData.code)
+                                                if (firstPhrase) setValue(`items.${index}.oldWord`, firstPhrase.word)
+                                              }
+                                            }
+                                          } catch (err) {
+                                            console.error('Failed to fetch phrase by code:', err)
                                           }
                                         }
+                                        setTimeout(async () => {
+                                          const updatedData = getValues(`items.${index}`)
+                                          updateMeta(field.id, { checking: true })
+                                          try {
+                                            const result = await apiRequest('/api/pull-requests/check-conflicts-batch', {
+                                              method: 'POST',
+                                              body: { items: [{ id: field.id, action: 'Change', word: updatedData.word, oldWord: updatedData.oldWord || '', code: updatedData.code, weight: updatedData.weight ? parseInt(updatedData.weight) : undefined, type: updatedData.type }] },
+                                              withAuth: true
+                                            }) as { results: Array<{ id: string; conflict: ConflictInfo }> }
+                                            const conflictData = result.results[0]
+                                            if (conflictData) updateMeta(field.id, { conflict: conflictData.conflict, hasChecked: true, checking: false })
+                                          } catch { updateMeta(field.id, { checking: false }) }
+                                        }, 100)
                                       }
-                                    } catch (err) {
-                                      console.error('Failed to fetch phrase by code:', err)
-                                    }
-                                  }
-
-                                  // Always check conflict for Change action when code is present
-                                  setTimeout(async () => {
-                                    const updatedData = getValues(`items.${index}`)
-                                    updateMeta(field.id, { checking: true })
-                                    try {
-                                      const result = await apiRequest('/api/pull-requests/check-conflicts-batch', {
-                                        method: 'POST',
-                                        body: {
-                                          items: [{
-                                            id: field.id,
-                                            action: 'Change',
-                                            word: updatedData.word,
-                                            oldWord: updatedData.oldWord || '',
-                                            code: updatedData.code,
-                                            weight: updatedData.weight ? parseInt(updatedData.weight) : undefined,
-                                            type: updatedData.type
-                                          }]
-                                        },
-                                        withAuth: true
-                                      }) as { results: Array<{ id: string; conflict: ConflictInfo }> }
-
-                                      const conflictData = result.results[0]
-                                      if (conflictData) {
-                                        updateMeta(field.id, {
-                                          conflict: conflictData.conflict,
-                                          hasChecked: true,
-                                          checking: false
-                                        })
+                                      if ((value === 'Create' || value === 'Delete') && currentData.word && currentData.code) {
+                                        updateMeta(field.id, { checking: true })
+                                        try {
+                                          const result = await apiRequest('/api/pull-requests/check-conflicts-batch', {
+                                            method: 'POST',
+                                            body: { items: [{ id: field.id, action: value, word: currentData.word, oldWord: undefined, code: currentData.code, weight: currentData.weight ? parseInt(currentData.weight) : undefined, type: currentData.type }] },
+                                            withAuth: true
+                                          }) as { results: Array<{ id: string; conflict: ConflictInfo }> }
+                                          const conflictData = result.results[0]
+                                          if (conflictData) updateMeta(field.id, { conflict: conflictData.conflict, hasChecked: true, checking: false })
+                                        } catch { updateMeta(field.id, { checking: false }) }
                                       }
-                                    } catch {
-                                      updateMeta(field.id, { checking: false })
-                                    }
-                                  }, 100)
-                                }
-
-                                // Auto-check conflict for Create and Delete actions
-                                if ((value === 'Create' || value === 'Delete') && currentData.word && currentData.code) {
-                                  updateMeta(field.id, { checking: true })
-                                  try {
-                                    const result = await apiRequest('/api/pull-requests/check-conflicts-batch', {
-                                      method: 'POST',
-                                      body: {
-                                        items: [{
-                                          id: field.id,
-                                          action: value,
-                                          word: currentData.word,
-                                          oldWord: undefined,
-                                          code: currentData.code,
-                                          weight: currentData.weight ? parseInt(currentData.weight) : undefined,
-                                          type: currentData.type
-                                        }]
-                                      },
-                                      withAuth: true
-                                    }) as { results: Array<{ id: string; conflict: ConflictInfo }> }
-
-                                    const conflictData = result.results[0]
-                                    if (conflictData) {
-                                      updateMeta(field.id, {
-                                        conflict: conflictData.conflict,
-                                        hasChecked: true,
-                                        checking: false
-                                      })
-                                    }
-                                  } catch {
-                                    updateMeta(field.id, { checking: false })
-                                  }
-                                }
-                              }}
-                            >
-                              <Radio
-                                value="Create"
-                                color="success"
-                                classNames={{
-                                  base: "inline-flex m-0 bg-content1 hover:bg-content2 items-center justify-between flex-row-reverse max-w-full cursor-pointer rounded-lg gap-4 p-4 border-2 border-transparent data-[selected=true]:border-success",
-                                }}
-                              >
-                                <div className="flex flex-col gap-1">
-                                  <div className="flex items-center gap-2">
-                                    <Plus className="w-4 h-4 text-success" />
-                                    <span className="text-small font-semibold">新增词条</span>
-                                  </div>
-                                  <span className="text-tiny text-default-400">创建新的词典条目</span>
-                                </div>
-                              </Radio>
-                              <Radio
-                                value="Change"
-                                color="warning"
-                                classNames={{
-                                  base: "inline-flex m-0 bg-content1 hover:bg-content2 items-center justify-between flex-row-reverse max-w-full cursor-pointer rounded-lg gap-4 p-4 border-2 border-transparent data-[selected=true]:border-warning",
-                                }}
-                              >
-                                <div className="flex flex-col gap-1">
-                                  <div className="flex items-center gap-2">
-                                    <Edit2 className="w-4 h-4 text-warning" />
-                                    <span className="text-small font-semibold">修改词</span>
-                                  </div>
-                                  <span className="text-tiny text-default-400">按编码更改现有词条</span>
-                                </div>
-                              </Radio>
-                              <Radio
-                                value="Delete"
-                                color="danger"
-                                classNames={{
-                                  base: "inline-flex m-0 bg-content1 hover:bg-content2 items-center justify-between flex-row-reverse max-w-full cursor-pointer rounded-lg gap-4 p-4 border-2 border-transparent data-[selected=true]:border-danger",
-                                }}
-                              >
-                                <div className="flex flex-col gap-1">
-                                  <div className="flex items-center gap-2">
-                                    <Trash2 className="w-4 h-4 text-danger" />
-                                    <span className="text-small font-semibold">删除词条</span>
-                                  </div>
-                                  <span className="text-tiny text-default-400">移除词典条目</span>
-                                </div>
-                              </Radio>
-                            </RadioGroup>
-                          )}
-                        />
-
-                        <Controller
-                          name={`items.${index}.action`}
-                          control={control}
-                          render={({ field: watchField }) => {
-                            const currentAction = watchField.value
-                            return (
-                              <>
-                                {currentAction === 'Change' ? (
-                                  <>
-                                    <div className="flex gap-2">
-                                      <Controller
-                                        name={`items.${index}.oldWord`}
-                                        control={control}
-                                        rules={{ required: '旧词不能为空' }}
-                                        render={({ field: oldWordField, fieldState }) => (
-                                          <Input
-                                            value={oldWordField.value}
-                                            label="旧词"
-                                            placeholder="当前编码对应的词"
-                                            isRequired
-                                            isInvalid={!!fieldState.error}
-                                            errorMessage={fieldState.error?.message}
-                                            className="flex-1"
-                                            onValueChange={(v) => {
-                                              oldWordField.onChange(v)
-                                              updateMeta(field.id, { hasChecked: false, conflict: null })
-                                            }}
-                                            onBlur={() => autoCheckConflictForItem(index, field.id)}
-                                            endContent={
-                                              oldWordField.value && (
-                                                <WordCodesPopover word={oldWordField.value}>
-                                                  <Button
-                                                    size="sm"
-                                                    variant="light"
-                                                    isIconOnly
-                                                    className="min-w-unit-6 w-6 h-6"
-                                                  >
-                                                    <Eye className="w-4 h-4" />
-                                                  </Button>
-                                                </WordCodesPopover>
-                                              )
-                                            }
-                                          />
-                                        )}
-                                      />
-                                      <Controller
-                                        name={`items.${index}.code`}
-                                        control={control}
-                                        rules={{
-                                          required: '编码不能为空',
-                                          pattern: {
-                                            value: CODE_PATTERN,
-                                            message: '编码格式错误'
-                                          }
-                                        }}
-                                        render={({ field: codeField, fieldState }) => (
-                                          <Input
-                                            value={codeField.value}
-                                            label="编码"
-                                            placeholder="请输入编码"
-                                            isRequired
-                                            isInvalid={!!fieldState.error}
-                                            errorMessage={fieldState.error?.message}
-                                            color={fieldState.error ? 'danger' : 'default'}
-                                            className="flex-1"
-                                            onValueChange={(v) => {
-                                              codeField.onChange(v)
-                                              updateMeta(field.id, { hasChecked: false, conflict: null })
-                                            }}
-                                            onBlur={() => autoCheckConflictForItem(index, field.id)}
-                                            endContent={
-                                              codeField.value && (
-                                                <CodePhrasesPopover code={codeField.value}>
-                                                  <Button
-                                                    size="sm"
-                                                    variant="light"
-                                                    isIconOnly
-                                                    className="min-w-unit-6 w-6 h-6"
-                                                  >
-                                                    <Eye className="w-4 h-4" />
-                                                  </Button>
-                                                </CodePhrasesPopover>
-                                              )
-                                            }
-                                          />
-                                        )}
-                                      />
-                                    </div>
-                                    <Controller
-                                      name={`items.${index}.word`}
-                                      control={control}
-                                      rules={{ required: '新词不能为空' }}
-                                      render={({ field: wordField, fieldState }) => (
-                                        <Input
-                                          value={wordField.value}
-                                          label="新词"
-                                          placeholder="请输入新词"
-                                          isRequired
-                                          isInvalid={!!fieldState.error}
-                                          errorMessage={fieldState.error?.message}
-                                          onValueChange={(v) => {
-                                            wordField.onChange(v)
-                                            updateMeta(field.id, { hasChecked: false, conflict: null })
-                                          }}
-                                          endContent={
-                                            wordField.value && (
-                                              <WordCodesPopover word={wordField.value}>
-                                                <Button
-                                                  size="sm"
-                                                  variant="light"
-                                                  isIconOnly
-                                                  className="min-w-unit-6 w-6 h-6"
-                                                >
-                                                  <Eye className="w-4 h-4" />
-                                                </Button>
-                                              </WordCodesPopover>
-                                            )
-                                          }
-                                        />
-                                      )}
-                                    />
-                                  </>
-                                ) : (
-                                  <div className="flex gap-2">
-                                    <Controller
-                                      name={`items.${index}.word`}
-                                      control={control}
-                                      rules={{ required: '词不能为空' }}
-                                      render={({ field: wordField, fieldState }) => (
-                                        <Input
-                                          value={wordField.value}
-                                          label="词"
-                                          placeholder="请输入词"
-                                          isRequired
-                                          isInvalid={!!fieldState.error}
-                                          errorMessage={fieldState.error?.message}
-                                          className="flex-1"
-                                          onValueChange={(v) => {
-                                            wordField.onChange(v)
-                                            updateMeta(field.id, { hasChecked: false, conflict: null })
-                                          }}
-                                          endContent={
-                                            wordField.value && (
-                                              <WordCodesPopover word={wordField.value}>
-                                                <Button
-                                                  size="sm"
-                                                  variant="light"
-                                                  isIconOnly
-                                                  className="min-w-unit-6 w-6 h-6"
-                                                >
-                                                  <Eye className="w-4 h-4" />
-                                                </Button>
-                                              </WordCodesPopover>
-                                            )
-                                          }
-                                        />
-                                      )}
-                                    />
-                                    <Controller
-                                      name={`items.${index}.code`}
-                                      control={control}
-                                      rules={{
-                                        required: '编码不能为空',
-                                        pattern: {
-                                          value: CODE_PATTERN,
-                                          message: '编码格式错误'
-                                        }
-                                      }}
-                                      render={({ field: codeField, fieldState }) => (
-                                        <Input
-                                          value={codeField.value}
-                                          label="编码"
-                                          placeholder="请输入编码"
-                                          isRequired
-                                          isInvalid={!!fieldState.error}
-                                          errorMessage={fieldState.error?.message}
-                                          color={fieldState.error ? 'danger' : 'default'}
-                                          className="flex-1"
-                                          onValueChange={(v) => {
-                                            codeField.onChange(v)
-                                            updateMeta(field.id, { hasChecked: false, conflict: null })
-                                            // Mark as manually edited - stop auto-filling
-                                            autoFilledRef.current.delete(field.id)
-                                          }}
-                                          endContent={
-                                            encodingFields.has(field.id) ? (
-                                              <span className="text-xs text-default-400 animate-pulse">识别中…</span>
-                                            ) : codeField.value ? (
-                                              <div className="flex items-center gap-1">
-                                                {autoFilledRef.current.has(field.id) && (
-                                                  <Tooltip content="自动识别编码，可手动修改">
-                                                    <Chip size="sm" variant="flat" color="primary" className="h-5 text-[10px]">自动</Chip>
-                                                  </Tooltip>
-                                                )}
-                                                <CodePhrasesPopover code={codeField.value}>
-                                                  <Button size="sm" variant="light" isIconOnly className="min-w-unit-6 w-6 h-6">
-                                                    <Eye className="w-4 h-4" />
-                                                  </Button>
-                                                </CodePhrasesPopover>
-                                              </div>
-                                            ) : null
-                                          }
-                                        />
-                                      )}
-                                    />
-                                  </div>
+                                    }}
+                                  >
+                                    <Radio value="Create" color="success" classNames={{ base: "m-0 bg-content1 hover:bg-success-50 dark:hover:bg-success-50/10 cursor-pointer rounded-lg px-2.5 py-1 border-2 border-transparent data-[selected=true]:border-success data-[selected=true]:bg-success-50 dark:data-[selected=true]:bg-success-50/10" }}>
+                                      <span className="flex items-center gap-1 text-small font-semibold"><Plus className="w-3 h-3 text-success" />新增</span>
+                                    </Radio>
+                                    <Radio value="Change" color="warning" classNames={{ base: "m-0 bg-content1 hover:bg-warning-50 dark:hover:bg-warning-50/10 cursor-pointer rounded-lg px-2.5 py-1 border-2 border-transparent data-[selected=true]:border-warning data-[selected=true]:bg-warning-50 dark:data-[selected=true]:bg-warning-50/10" }}>
+                                      <span className="flex items-center gap-1 text-small font-semibold"><Edit2 className="w-3 h-3 text-warning" />修改</span>
+                                    </Radio>
+                                    <Radio value="Delete" color="danger" classNames={{ base: "m-0 bg-content1 hover:bg-danger-50 dark:hover:bg-danger-50/10 cursor-pointer rounded-lg px-2.5 py-1 border-2 border-transparent data-[selected=true]:border-danger data-[selected=true]:bg-danger-50 dark:data-[selected=true]:bg-danger-50/10" }}>
+                                      <span className="flex items-center gap-1 text-small font-semibold"><Trash2 className="w-3 h-3 text-danger" />删除</span>
+                                    </Radio>
+                                  </RadioGroup>
                                 )}
-
-                                {currentAction !== 'Delete' && (
+                              />
+                              <div className="ml-auto flex items-center gap-1">
+                                {!isEditMode && (
                                   <>
-                                    <div className="flex gap-2">
-                                      <Controller
-                                        name={`items.${index}.type`}
-                                        control={control}
-                                        render={({ field: typeField }) => (
-                                          <Select
-                                            label="类型"
-                                            selectedKeys={[typeField.value]}
-                                            onSelectionChange={(keys) => {
-                                              const selected = Array.from(keys)[0] as string
-                                              typeField.onChange(selected)
-                                            }}
-                                            disallowEmptySelection
-                                            className="flex-1"
-                                          >
-                                            {getPhraseTypeOptions().map(option => (
-                                              <SelectItem key={option.value}>
-                                                {option.label}
-                                              </SelectItem>
-                                            ))}
-                                          </Select>
-                                        )}
-                                      />
-                                      <Controller
-                                        name={`items.${index}.weight`}
-                                        control={control}
-                                        render={({ field: weightField }) => {
-                                          const currentType = watch(`items.${index}.type`) as PhraseType
-                                          return (
-                                            <Input
-                                              value={weightField.value}
-                                              label="权重"
-                                              type="number"
-                                              placeholder={`默认: ${getDefaultWeight(currentType)}`}
-                                              className="flex-1"
-                                              onValueChange={(v) => weightField.onChange(v)}
+                                    <Tooltip content="上方插入"><Button size="sm" variant="light" isIconOnly className="w-7 h-7 min-w-0" onPress={() => handleAddItemAbove(index)}><CornerUpLeft className="w-3" /></Button></Tooltip>
+                                    <Tooltip content="下方插入"><Button size="sm" variant="light" isIconOnly className="w-7 h-7 min-w-0" onPress={() => handleAddItemBelow(index)}><CornerDownLeft className="w-3" /></Button></Tooltip>
+                                    {fields.length > 1 && (
+                                      <Button size="sm" color="danger" variant="light" isIconOnly className="w-7 h-7 min-w-0" onPress={() => handleRemoveItem(index)}>
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      </Button>
+                                    )}
+                                    <Button size="sm" color="primary" variant="flat" className="h-7 px-3 text-xs" onPress={() => setExpandedIndex(null)}>
+                                      ✓ 确认
+                                    </Button>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Fields */}
+                            <Controller
+                              name={`items.${index}.action`}
+                              control={control}
+                              render={({ field: watchField }) => {
+                                const act = watchField.value
+                                return (
+                                  <>
+                                    {act === 'Change' ? (
+                                      <>
+                                        <div className="flex flex-wrap gap-2">
+                                          {/* Group 1: 类型 + 旧词 + 新词 */}
+                                          <div className="flex gap-2 flex-1 min-w-52">
+                                            <Controller
+                                              name={`items.${index}.type`}
+                                              control={control}
+                                              render={({ field: f }) => (
+                                                <Select label="类型" selectedKeys={[f.value]} onSelectionChange={keys => f.onChange(Array.from(keys)[0] as string)} disallowEmptySelection size="sm" className="w-24 shrink-0">
+                                                  {getPhraseTypeOptions().map(o => <SelectItem key={o.value}>{o.label}</SelectItem>)}
+                                                </Select>
+                                              )}
                                             />
-                                          )
-                                        }}
-                                      />
-                                    </div>
-
-                                    {/* Original type info for Change action */}
-                                    {(() => {
-                                      const currentAction = watch(`items.${index}.action`)
-                                      if (currentAction === 'Change' && meta.conflict?.currentPhrase?.type) {
-                                        const currentType = watch(`items.${index}.type`) as PhraseType
-                                        const originalType = meta.conflict.currentPhrase.type
-                                        const originalTypeLabel = getPhraseTypeOptions().find(opt => opt.value === originalType)?.label || originalType
-                                        const currentTypeLabel = getPhraseTypeOptions().find(opt => opt.value === currentType)?.label || currentType
-                                        const isTypeChanged = originalType !== currentType
-
-                                        return (
-                                          <Card className={isTypeChanged ? "border-primary bg-primary-50/50 dark:bg-primary-100/5" : "border-default-200 bg-default-50"}>
-                                            <CardBody className="py-2 px-3">
-                                              <div className="flex items-center gap-2">
-                                                <FileText className="w-4 h-4 text-default-500 shrink-0" />
-                                                <p className="text-sm text-default-700 dark:text-default-400">
-                                                  原类型: <span className="font-semibold">{originalTypeLabel}</span>
-                                                  {isTypeChanged && (
-                                                    <>
-                                                      {' → '}
-                                                      <span className="font-semibold text-primary">{currentTypeLabel}</span>
-                                                    </>
-                                                  )}
-                                                </p>
-                                              </div>
-                                            </CardBody>
-                                          </Card>
-                                        )
-                                      }
-                                      return null
-                                    })()}
-
-                                    {/* Type mismatch warning */}
-                                    {(() => {
-                                      const currentWord = watch(`items.${index}.word`)
-                                      const currentCode = watch(`items.${index}.code`)
-                                      const currentType = watch(`items.${index}.type`) as PhraseType
-
-                                      if (!currentWord) return null
-
-                                      const typeMismatch = checkTypeMismatch(currentWord, currentCode, currentType)
-
-                                      if (!typeMismatch.hasTypeMismatch) return null
-
-                                      return (
-                                        <Card className="border-warning bg-warning-50/50 dark:bg-warning-100/5">
-                                          <CardBody className="py-2 px-3">
-                                            <div className="flex items-start gap-2">
-                                              <AlertTriangle className="w-4 h-4 text-warning shrink-0 mt-0.5" />
-                                              <div className="flex-1 min-w-0">
-                                                <p className="text-sm text-warning-700 dark:text-warning-400">
-                                                  该词条类型应为 <span className="font-semibold">{typeMismatch.suggestedTypeLabel}</span>
-                                                </p>
-                                              </div>
-                                              <Button
-                                                size="sm"
-                                                color="warning"
-                                                variant="flat"
-                                                className="shrink-0"
-                                                onPress={() => {
-                                                  if (typeMismatch.suggestedType) {
-                                                    setValue(`items.${index}.type`, typeMismatch.suggestedType)
-                                                    toast.success(`已修改为${typeMismatch.suggestedTypeLabel}`)
-                                                  }
-                                                }}
-                                              >
-                                                修改为{typeMismatch.suggestedTypeLabel}
-                                              </Button>
-                                            </div>
-                                          </CardBody>
-                                        </Card>
-                                      )
-                                    })()}
-                                  </>
-                                )}
-                              </>
-                            )
-                          }}
-                        />
-
-                        <Controller
-                          name={`items.${index}.remark`}
-                          control={control}
-                          render={({ field: remarkField }) => (
-                            <Textarea
-                              value={remarkField.value}
-                              label="备注"
-                              placeholder="可选，说明修改原因"
-                              minRows={2}
-                              onValueChange={(v) => remarkField.onChange(v)}
-                            />
-                          )}
-                        />
-
-                        {meta.conflict && (
-                          <Card className={meta.conflict.hasConflict ? 'border-danger' :
-                            meta.conflict.currentPhrase && watch(`items.${index}.action`) === 'Create' ? 'border-warning' : 'border-success'}>
-                            <CardBody className="max-h-75 overflow-y-auto">
-                              {meta.conflict.hasConflict ? (
-                                <div>
-                                  <div className="flex items-center gap-2 mb-2">
-                                    <Chip color="danger" variant="flat" size="sm" startContent={<AlertTriangle className="w-3 h-3" />}>
-                                      冲突
-                                    </Chip>
-                                    <p className="text-small">{meta.conflict.impact}</p>
-                                  </div>
-                                  {meta.conflict.currentPhrase && (
-                                    <div className="mb-2 p-2 bg-default-100 rounded text-small">
-                                      当前: {meta.conflict.currentPhrase.word} @ {meta.conflict.currentPhrase.code} (权重: {meta.conflict.currentPhrase.weight})
-                                    </div>
-                                  )}
-                                  {meta.conflict.suggestions.map((sug, idx) => (
-                                    <div key={idx} className="mb-1 p-2 bg-primary-50 dark:bg-primary-100/10 rounded text-small flex justify-between items-start">
-                                      <div className="flex-1">
-                                        <p className="font-medium">
-                                          {sug.action === 'Move' ? '移动' :
-                                            sug.action === 'Adjust' ? '调整' :
-                                              sug.action === 'Resolved' ? '已解决' : '取消'}
-                                        </p>
-                                        <p className="text-default-500">{sug.reason}</p>
-                                        {sug.toCode && <p className="text-primary">建议: {sug.toCode}</p>}
-                                      </div>
-                                      {sug.toCode && sug.action === 'Adjust' && (
-                                        <Button size="sm" variant="flat" color="primary" onPress={() => applySuggestion(index, sug)}>
-                                          应用
-                                        </Button>
-                                      )}
-                                    </div>
-                                  ))}
-                                </div>
-                              ) : meta.conflict.currentPhrase && watch(`items.${index}.action`) === 'Create' ? (
-                                // Check if this conflict is resolved by other items in the batch
-                                meta.conflict.suggestions.some((sug) => sug.action === 'Resolved') ? (
-                                  <div>
-                                    <div className="flex items-center gap-2 mb-2">
-                                      <Chip color="success" variant="flat" size="sm" startContent={<Check className="w-3 h-3" />}>
-                                        已解决
-                                      </Chip>
-                                      {meta.conflict.impact && (
-                                        <div className="flex items-center gap-1 text-small text-success-600 dark:text-success-400">
-                                          <Lightbulb className="w-3 h-3" />
-                                          <span>{meta.conflict.impact}</span>
-                                        </div>
-                                      )}
-                                    </div>
-                                    {meta.conflict.suggestions.length > 0 && (
-                                      <div className="mt-2 space-y-1">
-                                        {meta.conflict.suggestions.map((sug, idx) => (
-                                          <div key={idx} className="p-2 bg-success-50 dark:bg-success-100/10 rounded text-small">
-                                            <p className="font-medium text-success-700 dark:text-success-400 flex items-center gap-1">
-                                              <Check className="w-3 h-3" />
-                                              {sug.reason}
-                                            </p>
+                                            <Controller
+                                              name={`items.${index}.oldWord`}
+                                              control={control}
+                                              rules={{ required: '旧词不能为空' }}
+                                              render={({ field: f, fieldState }) => (
+                                                <Input
+                                                  value={f.value} label="旧词" placeholder="当前编码对应的词"
+                                                  isRequired isInvalid={!!fieldState.error} errorMessage={fieldState.error?.message}
+                                                  size="sm" className="flex-1"
+                                                  onValueChange={v => { f.onChange(v); updateMeta(field.id, { hasChecked: false, conflict: null }) }}
+                                                  onBlur={() => autoCheckConflictForItem(index, field.id)}
+                                                  endContent={f.value && <WordCodesPopover word={f.value}><Button size="sm" variant="light" isIconOnly className="min-w-unit-6 w-6 h-6"><Eye className="w-4 h-4" /></Button></WordCodesPopover>}
+                                                />
+                                              )}
+                                            />
+                                            <Controller
+                                              name={`items.${index}.word`}
+                                              control={control}
+                                              rules={{ required: '新词不能为空' }}
+                                              render={({ field: f, fieldState }) => {
+                                                const inf = inferResults.get(field.id)
+                                                return (
+                                                  <Input
+                                                    value={f.value} label="新词" placeholder="请输入新词"
+                                                    isRequired isInvalid={!!fieldState.error} errorMessage={fieldState.error?.message}
+                                                    size="sm" className="flex-1"
+                                                    onValueChange={v => { f.onChange(v); updateMeta(field.id, { hasChecked: false, conflict: null }) }}
+                                                    endContent={
+                                                      <div className="flex items-center gap-1">
+                                                        {inf && inf.wordExists.length > 0 && <Tooltip content={`词条已存在，编码：${inf.wordExists.map(e => e.code).join('、')}`}><Chip size="sm" variant="flat" color="warning" className="h-5 text-[10px] cursor-default">已存在</Chip></Tooltip>}
+                                                        {f.value && <WordCodesPopover word={f.value}><Button size="sm" variant="light" isIconOnly className="min-w-unit-6 w-6 h-6"><Eye className="w-4 h-4" /></Button></WordCodesPopover>}
+                                                      </div>
+                                                    }
+                                                  />
+                                                )
+                                              }}
+                                            />
                                           </div>
-                                        ))}
+                                          {/* Group 2: 编码 + 权重 */}
+                                          <div className="flex gap-2">
+                                            <Controller
+                                              name={`items.${index}.code`}
+                                              control={control}
+                                              rules={{ required: '编码不能为空', pattern: { value: CODE_PATTERN, message: '编码格式错误' } }}
+                                              render={({ field: f, fieldState }) => (
+                                                <Input
+                                                  value={f.value} label="编码" placeholder="请输入编码"
+                                                  isRequired isInvalid={!!fieldState.error} errorMessage={fieldState.error?.message}
+                                                  size="sm" className="flex-1"
+                                                  onValueChange={v => { f.onChange(v); updateMeta(field.id, { hasChecked: false, conflict: null }) }}
+                                                  onBlur={() => autoCheckConflictForItem(index, field.id)}
+                                                  endContent={f.value && <CodePhrasesPopover code={f.value}><Button size="sm" variant="light" isIconOnly className="min-w-unit-6 w-6 h-6"><Eye className="w-4 h-4" /></Button></CodePhrasesPopover>}
+                                                />
+                                              )}
+                                            />
+                                            <Controller
+                                              name={`items.${index}.weight`}
+                                              control={control}
+                                              render={({ field: f }) => {
+                                                const t = watch(`items.${index}.type`) as PhraseType
+                                                return <Input value={f.value} label="权重" type="number" placeholder={`${getDefaultWeight(t)}`} size="sm" className="w-16 shrink-0" onValueChange={v => f.onChange(v)} />
+                                              }}
+                                            />
+                                          </div>
+                                        </div>
+                                      </>
+                                    ) : act === 'Delete' ? (
+                                      <div className="flex flex-wrap gap-2">
+                                        <Controller
+                                          name={`items.${index}.word`}
+                                          control={control}
+                                          rules={{ required: '词不能为空' }}
+                                          render={({ field: f, fieldState }) => (
+                                            <Input
+                                              value={f.value} label="词" placeholder="请输入词"
+                                              isRequired isInvalid={!!fieldState.error} errorMessage={fieldState.error?.message}
+                                              size="sm" className="flex-1 min-w-30"
+                                              onValueChange={v => { f.onChange(v); updateMeta(field.id, { hasChecked: false, conflict: null }) }}
+                                            />
+                                          )}
+                                        />
+                                        <Controller
+                                          name={`items.${index}.code`}
+                                          control={control}
+                                          rules={{ required: '编码不能为空', pattern: { value: CODE_PATTERN, message: '编码格式错误' } }}
+                                          render={({ field: f, fieldState }) => (
+                                            <Input
+                                              value={f.value} label="编码" placeholder="请输入编码"
+                                              isRequired isInvalid={!!fieldState.error} errorMessage={fieldState.error?.message}
+                                              size="sm" className="w-28 shrink-0"
+                                              onValueChange={v => { f.onChange(v); updateMeta(field.id, { hasChecked: false, conflict: null }) }}
+                                            />
+                                          )}
+                                        />
+                                      </div>
+                                    ) : (
+                                      /* Create */
+                                      <div className="flex flex-wrap gap-2">
+                                        {/* Group 1: 类型 + 词 */}
+                                        <div className="flex gap-2 flex-1 min-w-44">
+                                          <Controller
+                                            name={`items.${index}.type`}
+                                            control={control}
+                                            render={({ field: f }) => (
+                                              <Select label="类型" selectedKeys={[f.value]} onSelectionChange={keys => f.onChange(Array.from(keys)[0] as string)} disallowEmptySelection size="sm" className="w-24 shrink-0">
+                                                {getPhraseTypeOptions().map(o => <SelectItem key={o.value}>{o.label}</SelectItem>)}
+                                              </Select>
+                                            )}
+                                          />
+                                          <Controller
+                                            name={`items.${index}.word`}
+                                            control={control}
+                                            rules={{ required: '词不能为空' }}
+                                            render={({ field: f, fieldState }) => {
+                                              const inf = inferResults.get(field.id)
+                                              return (
+                                                <Input
+                                                  value={f.value} label="词" placeholder="请输入词"
+                                                  isRequired isInvalid={!!fieldState.error} errorMessage={fieldState.error?.message}
+                                                  size="sm" className="flex-1"
+                                                  onValueChange={v => { f.onChange(v); updateMeta(field.id, { hasChecked: false, conflict: null }) }}
+                                                  endContent={
+                                                    <div className="flex items-center gap-1">
+                                                      {inf && inf.wordExists.length > 0 && <Tooltip content={`词条已存在，编码：${inf.wordExists.map(e => e.code).join('、')}`}><Chip size="sm" variant="flat" color="warning" className="h-5 text-[10px] cursor-default">已存在</Chip></Tooltip>}
+                                                      {f.value && <WordCodesPopover word={f.value}><Button size="sm" variant="light" isIconOnly className="min-w-unit-6 w-6 h-6"><Eye className="w-4 h-4" /></Button></WordCodesPopover>}
+                                                    </div>
+                                                  }
+                                                />
+                                              )
+                                            }}
+                                          />
+                                        </div>
+                                        {/* Group 2: 编码 + 权重 */}
+                                        <div className="flex gap-2">
+                                          <Controller
+                                            name={`items.${index}.code`}
+                                            control={control}
+                                            rules={{ required: '编码不能为空', pattern: { value: CODE_PATTERN, message: '编码格式错误' } }}
+                                            render={({ field: f, fieldState }) => (
+                                              <Input
+                                                value={f.value} label="编码" placeholder="请输入编码"
+                                                isRequired isInvalid={!!fieldState.error} errorMessage={fieldState.error?.message}
+                                                color={fieldState.error ? 'danger' : 'default'}
+                                                size="sm" className="flex-1"
+                                                onValueChange={v => { f.onChange(v); updateMeta(field.id, { hasChecked: false, conflict: null }); autoFilledRef.current.delete(field.id) }}
+                                                endContent={
+                                                  encodingFields.has(field.id) ? (
+                                                    <span className="text-xs text-default-400 animate-pulse">…</span>
+                                                  ) : f.value ? (
+                                                    <div className="flex items-center gap-1">
+                                                      {autoFilledRef.current.has(field.id) && (() => {
+                                                        const inf = inferResults.get(field.id)
+                                                        const slotIdx = inf?.suggestionIndex ?? 0
+                                                        return inf?.isBaseConflict ? (
+                                                          <Tooltip content={`基础码已占用，跳至第 ${slotIdx + 1} 位`}><Chip size="sm" variant="flat" color="warning" className="h-5 text-[10px]">+{slotIdx}</Chip></Tooltip>
+                                                        ) : (
+                                                          <Tooltip content="自动识别编码"><Chip size="sm" variant="flat" color="primary" className="h-5 text-[10px]">自动</Chip></Tooltip>
+                                                        )
+                                                      })()}
+                                                      <CodePhrasesPopover code={f.value}><Button size="sm" variant="light" isIconOnly className="min-w-unit-6 w-6 h-6"><Eye className="w-4 h-4" /></Button></CodePhrasesPopover>
+                                                    </div>
+                                                  ) : null
+                                                }
+                                              />
+                                            )}
+                                          />
+                                          <Controller
+                                            name={`items.${index}.weight`}
+                                            control={control}
+                                            render={({ field: f }) => {
+                                              const t = watch(`items.${index}.type`) as PhraseType
+                                              return <Input value={f.value} label="权重" type="number" placeholder={`${getDefaultWeight(t)}`} size="sm" className="w-16 shrink-0" onValueChange={v => f.onChange(v)} />
+                                            }}
+                                          />
+                                        </div>
                                       </div>
                                     )}
-                                  </div>
-                                ) : (
-                                  (() => {
-                                    const currentWord = watch(`items.${index}.word`)
-                                    const currentCode = watch(`items.${index}.code`)
-                                    const isWordDuplicate =
-                                      meta.conflict.currentPhrase!.word === currentWord &&
-                                      meta.conflict.currentPhrase!.code !== currentCode
 
-                                    return (
-                                      <div>
-                                        <div className="flex items-center gap-2 mb-2">
-                                          <Chip color="warning" variant="flat" size="sm" startContent={<AlertTriangle className="w-3 h-3" />}>
-                                            {isWordDuplicate ? '词条重复警告' : '重码警告'}
-                                          </Chip>
-                                          <p className="text-small text-warning-600 dark:text-warning-400">
-                                            {meta.conflict.impact || (isWordDuplicate ? '该词条已存在其他编码，将创建多编码词条' : '此编码已存在其他词条，将创建重码')}
-                                          </p>
+                                    {/* Type mismatch inline warning */}
+                                    {(() => {
+                                      const cw = watch(`items.${index}.word`)
+                                      const cc = watch(`items.${index}.code`)
+                                      const ct = watch(`items.${index}.type`) as PhraseType
+                                      if (!cw) return null
+                                      const tm = checkTypeMismatch(cw, cc, ct)
+                                      if (!tm.hasTypeMismatch) return null
+                                      return (
+                                        <div className="flex items-center gap-2 px-2 py-1 bg-warning-50/60 dark:bg-warning-100/5 rounded-lg border border-warning-200/60">
+                                          <AlertTriangle className="w-3.5 h-3.5 text-warning shrink-0" />
+                                          <span className="text-xs text-warning-700 dark:text-warning-400 flex-1">类型应为 {tm.suggestedTypeLabel}</span>
+                                          <Button size="sm" color="warning" variant="flat" className="h-6 px-2 text-xs shrink-0" onPress={() => { if (tm.suggestedType) { setValue(`items.${index}.type`, tm.suggestedType); toast.success(`已修改为${tm.suggestedTypeLabel}`) } }}>修改</Button>
                                         </div>
-                                        <div className="mb-2 p-2 bg-warning-50 dark:bg-warning-100/10 rounded text-small">
-                                          <p className="font-medium text-warning-700 dark:text-warning-400">现有词条:</p>
-                                          <p>{meta.conflict.currentPhrase!.word} @ {meta.conflict.currentPhrase!.code} (权重: {meta.conflict.currentPhrase!.weight})</p>
-                                        </div>
-                                        <div className="p-2 bg-warning-50 dark:bg-warning-100/10 rounded text-small">
-                                          <p className="font-medium text-warning-700 dark:text-warning-400">即将创建:</p>
-                                          {isWordDuplicate ? (
-                                            <p>{currentWord} @ {currentCode}</p>
-                                          ) : (
-                                            <p>{currentWord} @ {currentCode} (权重: {(() => {
-                                              // Extract suggested weight from impact message
-                                              const match = meta.conflict.impact?.match(/权重: (\d+)/)
-                                              if (match) return match[1]
-                                              // Fallback: calculate based on current phrase weight
-                                              return meta.conflict.currentPhrase!.weight + 1
-                                            })()})</p>
-                                          )}
-                                        </div>
-                                        {meta.conflict.suggestions.length > 0 && (
-                                          <div className="mt-2 space-y-1">
-                                            <p className="text-small font-medium">建议:</p>
-                                            {meta.conflict.suggestions.map((sug, idx) => (
-                                              <div key={idx} className="p-2 bg-primary-50 dark:bg-primary-100/10 rounded text-small flex justify-between items-start">
-                                                <div className="flex-1">
-                                                  <p className="text-default-600 dark:text-default-400">{sug.reason}</p>
-                                                  {sug.toCode && <p className="text-primary">建议编码: {sug.toCode}</p>}
-                                                </div>
-                                                {sug.toCode && sug.action === 'Adjust' && (
-                                                  <Button size="sm" variant="flat" color="primary" onPress={() => applySuggestion(index, sug)}>
-                                                    应用
-                                                  </Button>
-                                                )}
+                                      )
+                                    })()}
+
+                                    {/* Remark (optional) */}
+                                    {act !== 'Delete' && (
+                                      <Controller
+                                        name={`items.${index}.remark`}
+                                        control={control}
+                                        render={({ field: f }) => (
+                                          <Textarea value={f.value} label="备注" placeholder="可选，说明修改原因" minRows={1} size="sm" onValueChange={v => f.onChange(v)} />
+                                        )}
+                                      />
+                                    )}
+
+                                    {/* Conflict info — compact */}
+                                    {meta.conflict && (
+                                      <div className={`rounded-lg px-3 py-2 text-xs space-y-1 ${meta.conflict.hasConflict ? 'bg-danger-50 dark:bg-danger-100/10 border border-danger-200' :
+                                        meta.conflict.currentPhrase && act === 'Create' ? 'bg-warning-50 dark:bg-warning-100/10 border border-warning-200' :
+                                          'bg-success-50 dark:bg-success-100/10 border border-success-200'
+                                        }`}>
+                                        {meta.conflict.hasConflict ? (
+                                          <>
+                                            <div className="flex items-center gap-1.5 font-medium text-danger-700 dark:text-danger-400">
+                                              <AlertTriangle className="w-3 h-3 shrink-0" /> 冲突：{meta.conflict.impact}
+                                            </div>
+                                            {meta.conflict.suggestions.filter(s => s.action !== 'Resolved').map((sug, i) => (
+                                              <div key={i} className="flex justify-between items-center">
+                                                <span className="text-default-600">{sug.reason}{sug.toCode && ` → ${sug.toCode}`}</span>
+                                                {sug.toCode && sug.action === 'Adjust' && <Button size="sm" color="danger" variant="flat" className="h-5 px-2 text-[10px]" onPress={() => applySuggestion(index, sug)}>应用</Button>}
                                               </div>
                                             ))}
+                                          </>
+                                        ) : isResolved ? (
+                                          <div className="flex items-center gap-1.5 text-success-700 dark:text-success-400"><Check className="w-3 h-3" /> 已解决</div>
+                                        ) : meta.conflict.currentPhrase && act === 'Create' ? (
+                                          <>
+                                            <div className="flex items-center gap-1.5 font-medium text-warning-700 dark:text-warning-400">
+                                              <AlertTriangle className="w-3 h-3 shrink-0" /> {meta.conflict.impact || '重码警告'}
+                                            </div>
+                                            <div className="text-default-600">现有：{meta.conflict.currentPhrase.word} @ {meta.conflict.currentPhrase.code}</div>
+                                            {meta.conflict.suggestions.filter(s => s.action === 'Adjust').map((sug, i) => (
+                                              <div key={i} className="flex justify-between items-center">
+                                                <span className="text-default-600">{sug.reason}{sug.toCode && ` → ${sug.toCode}`}</span>
+                                                {sug.toCode && <Button size="sm" color="warning" variant="flat" className="h-5 px-2 text-[10px]" onPress={() => applySuggestion(index, sug)}>应用</Button>}
+                                              </div>
+                                            ))}
+                                          </>
+                                        ) : (
+                                          <div className="flex items-center gap-1.5 text-success-700 dark:text-success-400">
+                                            <Check className="w-3 h-3" /> 无冲突{meta.conflict.impact ? `：${meta.conflict.impact}` : ''}
                                           </div>
                                         )}
                                       </div>
-                                    )
-                                  })()
+                                    )}
+                                  </>
                                 )
+                              }}
+                            />
+                          </div>
+                          {/* Context after */}
+                          {context?.after && context.after.length > 0 && context.after.map((p, i) => (
+                            <div key={i} className="flex items-center gap-2 px-3 py-0.5 font-mono text-xs text-default-500 dark:text-default-400 bg-default-100 dark:bg-default-50/30">
+                              <span className="w-4 shrink-0 text-center text-default-300"> </span>
+                              <span className="shrink-0">{p.word}</span>
+                              <span className="shrink-0">{p.code}</span>
+                              {p.type && <span className="shrink-0 text-default-400 dark:text-default-300 text-[10px]">[{getPhraseTypeOptions().find(o => o.value === p.type)?.label ?? p.type}]</span>}
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        /* ── DIFF ROW (collapsed) ────────────────── */
+                        <div
+                          onClick={() => setExpandedIndex(index)}
+                          className={`rounded-xl border cursor-pointer select-none group transition-colors overflow-hidden ${isIncomplete ? 'border-dashed border-default-300' :
+                            hasConflict ? 'border-danger-300' :
+                              hasWarning ? 'border-warning-300' :
+                                currentAction === 'Delete' ? 'border-danger-200/60' :
+                                  currentAction === 'Change' ? 'border-warning-200/60' :
+                                    'border-success-200/60'
+                            }`}
+                        >
+                          {/* Context before */}
+                          {context?.before && context.before.length > 0 && context.before.map((p, i) => (
+                            <div key={i} className="flex items-center gap-2 px-3 py-0.5 font-mono text-xs text-default-500 dark:text-default-400 bg-default-100 dark:bg-default-50/30">
+                              <span className="w-4 shrink-0 text-center text-default-300"> </span>
+                              <span className="shrink-0">{p.word}</span>
+                              <span className="shrink-0">{p.code}</span>
+                              {p.type && <span className="shrink-0 text-default-400 dark:text-default-300 text-[10px]">[{getPhraseTypeOptions().find(o => o.value === p.type)?.label ?? p.type}]</span>}
+                            </div>
+                          ))}
+                          {/* Main action line */}
+                          <div className={`flex items-center gap-2 px-3 py-2 ${isIncomplete ? 'bg-default-50 dark:bg-default-100/10' :
+                            hasConflict ? 'bg-danger-50/50 dark:bg-danger-950/30' :
+                              hasWarning ? 'bg-warning-50/50 dark:bg-warning-950/30' :
+                                currentAction === 'Delete' ? 'bg-danger-50/20 dark:bg-danger-950/25' :
+                                  currentAction === 'Change' ? 'bg-warning-50/20 dark:bg-warning-950/25' :
+                                    'bg-success-50/20 dark:bg-success-950/25'
+                            }`}>
+                            {/* Action symbol */}
+                            <span className={`font-mono font-bold text-base shrink-0 w-4 text-center ${currentAction === 'Delete' ? 'text-danger' :
+                              currentAction === 'Change' ? 'text-warning' : 'text-success'
+                              }`}>
+                              {currentAction === 'Delete' ? '−' : currentAction === 'Change' ? '~' : '+'}
+                            </span>
+                            {/* Content */}
+                            <div className="flex-1 font-mono text-sm min-w-0">
+                              {currentAction === 'Change' ? (
+                                <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
+                                  <span className="text-danger/60 line-through shrink-0">{currentOldWord || <span className="text-default-300 font-normal text-xs">旧词</span>}</span>
+                                  <span className="text-default-300 shrink-0">→</span>
+                                  <span className="font-semibold text-default-800 dark:text-white shrink-0">{currentWord || <span className="text-default-300 font-normal text-xs">新词</span>}</span>
+                                  {currentCode && <><span className="text-default-300 shrink-0">·</span><span className="text-primary shrink-0">{currentCode}</span></>}
+                                  {currentType && <span className="text-default-400 text-xs shrink-0">[{getPhraseTypeOptions().find(o => o.value === currentType)?.label || currentType}]</span>}
+                                </div>
                               ) : (
-                                <div>
-                                  <div className="flex items-center gap-2 mb-2">
-                                    <Chip color="success" variant="flat" size="sm" startContent={<Check className="w-3 h-3" />}>
-                                      无冲突
-                                    </Chip>
-                                  </div>
-                                  {meta.conflict.impact && (
-                                    <div className="flex items-center gap-1 text-small text-success-600 dark:text-success-400">
-                                      <Lightbulb className="w-3 h-3" />
-                                      <span>{meta.conflict.impact}</span>
-                                    </div>
+                                <div className="flex items-center gap-1.5 min-w-0">
+                                  <span className={`font-semibold truncate ${currentAction === 'Delete' ? 'text-danger' : 'text-default-800 dark:text-white'}`}>
+                                    {currentWord || <span className="text-default-300 font-normal text-xs">未填写</span>}
+                                  </span>
+                                  {currentCode && (
+                                    <><span className="text-default-300 shrink-0">→</span><span className="text-primary shrink-0">{currentCode}</span></>
                                   )}
-                                  {meta.conflict.suggestions.length > 0 && (
-                                    <div className="mt-2 space-y-1">
-                                      {meta.conflict.suggestions.map((sug, idx) => (
-                                        <div key={idx} className="p-2 bg-success-50 dark:bg-success-100/10 rounded text-small">
-                                          <p className="font-medium text-success-700 dark:text-success-400 flex items-center gap-1">
-                                            {sug.action === 'Resolved' && <Check className="w-3 h-3" />}
-                                            {sug.action === 'Resolved' ? '已解决' : sug.action}
-                                          </p>
-                                          <p className="text-default-600 dark:text-default-400">{sug.reason}</p>
-                                        </div>
-                                      ))}
-                                    </div>
+                                  {currentAction !== 'Delete' && currentType && (
+                                    <span className="text-default-400 text-xs shrink-0">[{getPhraseTypeOptions().find(o => o.value === currentType)?.label || currentType}] {currentWeight}</span>
                                   )}
                                 </div>
                               )}
-                            </CardBody>
-                          </Card>
-                        )}
-                      </CardBody>
-                    </Card>
+                            </div>
+                            {/* Status chips */}
+                            {isIncomplete && <Chip size="sm" variant="flat" color="default" className="h-4 text-[10px] shrink-0">未完成</Chip>}
+                            {hasConflict && <Chip size="sm" variant="flat" color="danger" className="h-4 text-[10px] shrink-0">冲突</Chip>}
+                            {hasWarning && <Chip size="sm" variant="flat" color="warning" className="h-4 text-[10px] shrink-0">重码</Chip>}
+                            {infer?.wordExists && infer.wordExists.length > 0 && <Chip size="sm" variant="flat" color="warning" className="h-4 text-[10px] shrink-0">词存在</Chip>}
+                            {isResolved && <Chip size="sm" variant="flat" color="success" className="h-4 text-[10px] shrink-0">✓</Chip>}
+                            {/* Hover actions */}
+                            {!isEditMode && fields.length > 1 && (
+                              <div className="flex gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
+                                <Button size="sm" color="danger" variant="light" isIconOnly className="w-6 h-6 min-w-0" onPress={() => handleRemoveItem(index)}><Trash2 className="w-3" /></Button>
+                              </div>
+                            )}
+                          </div>
+                          {/* Context after */}
+                          {context?.after && context.after.length > 0 && context.after.map((p, i) => (
+                            <div key={i} className="flex items-center gap-2 px-3 py-0.5 font-mono text-xs text-default-500 dark:text-default-400 bg-default-100 dark:bg-default-50/30">
+                              <span className="w-4 shrink-0 text-center text-default-300"> </span>
+                              <span className="shrink-0">{p.word}</span>
+                              <span className="shrink-0">{p.code}</span>
+                              {p.type && <span className="shrink-0 text-default-400 dark:text-default-300 text-[10px]">[{getPhraseTypeOptions().find(o => o.value === p.type)?.label ?? p.type}]</span>}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   )
                 })}
+                {/* Add button — full-width below accordion */}
+                {!isEditMode && (
+                  <div className="flex gap-2 pt-1.5 pb-1">
+                    <Button size="sm" color="primary" variant="bordered" className="flex-1" onPress={handleAddItem} startContent={<Plus size={13} />}>添加</Button>
+                  </div>
+                )}
               </ModalBody>
               <ModalFooter className="flex-col gap-2">
                 <div className="flex gap-2 w-full items-center">
                   <Button
                     color="secondary"
                     variant="flat"
+                    size="sm"
                     onPress={handleCheckAllConflicts}
                     isLoading={checkingAll}
-                    className="flex-1"
-                    startContent={!checkingAll && <Search className="w-4 h-4" />}
+                    startContent={!checkingAll && <Search className="w-3.5 h-3.5" />}
                   >
-                    检测所有冲突
+                    检测冲突
                   </Button>
                   {conflictStats.hasChecked && (
                     <>
@@ -1584,18 +1543,11 @@ export default function CreatePRModal({
                   {!isEditMode && (
                     <div className="flex gap-2">
                       <Button
-                        color="primary"
-                        variant="bordered"
-                        onPress={handleAddItem}
-                        startContent={<Plus size={16} />}
-                      >
-                        添加
-                      </Button>
-                      <Button
                         color="secondary"
                         variant="bordered"
+                        size="sm"
                         onPress={() => setShowDictParser(true)}
-                        startContent={<FileText size={16} />}
+                        startContent={<FileText size={14} />}
                       >
                         词典解析
                       </Button>
@@ -1641,49 +1593,128 @@ export default function CreatePRModal({
       {/* Dictionary Parser Modal */}
       <Modal
         isOpen={showDictParser}
-        onClose={() => {
-          setShowDictParser(false)
-          setDictInput('')
-        }}
-        size="2xl"
+        onClose={closeDictParser}
+        size={dictStep === 'preview' ? '3xl' : '2xl'}
+        scrollBehavior="inside"
       >
         <ModalContent>
-          {(onClose) => (
+          {() => (
             <>
-              <ModalHeader>Rime词典解析</ModalHeader>
-              <ModalBody>
-                <div className="space-y-3">
-                  <div>
-                    <p className="text-sm text-default-600 mb-2">
-                      请粘贴Rime词典格式的内容，每行格式：<code className="bg-content2 px-1 rounded">词条[Tab]编码</code>
+              <ModalHeader>
+                <div className="flex items-center justify-between w-full gap-2">
+                  <span>Rime词典解析</span>
+                  {dictStep === 'preview' && !dictInferring && (
+                    <Chip size="sm" variant="flat" className="shrink-0">
+                      {dictItems.filter(i => !i.excluded && i.finalCode.trim()).length}/{dictItems.length} 条待导入
+                    </Chip>
+                  )}
+                </div>
+              </ModalHeader>
+              <ModalBody className="gap-3">
+                {dictStep === 'input' ? (
+                  <div className="space-y-3">
+                    <p className="text-sm text-default-600">
+                      支持两种格式，每行一条：
+                      <code className="bg-content2 px-1 rounded mx-1">词条</code>（自动推断编码）
+                      或
+                      <code className="bg-content2 px-1 rounded mx-1">词条[Tab]编码</code>（使用提供的编码）
                     </p>
                     <Textarea
-                      placeholder={"示例：\n程序员\tjxyu\nalgorithm\tstfs\n的\td"}
+                      placeholder={"程序员\n算法\t可选编码\n的\n..."}
                       value={dictInput}
                       onValueChange={setDictInput}
-                      minRows={10}
-                      className="font-mono text-sm"
+                      minRows={12}
+                      classNames={{ input: "font-mono text-sm" }}
                     />
                   </div>
-                  <div className="bg-default-100 p-3 rounded-lg text-sm space-y-1">
-                    <p className="font-semibold text-default-700">自动识别规则：</p>
-                    <p className="text-default-600">• <span className="font-medium">纯英文</span> → 英文类型</p>
-                    <p className="text-default-600">• <span className="font-medium">单个字符</span> → 单字类型</p>
-                    <p className="text-default-600">• <span className="font-medium">其他</span> → 词组类型</p>
+                ) : (
+                  <div className="space-y-2">
+                    {dictInferring && (
+                      <div className="px-3 py-2 bg-primary-50 dark:bg-primary-100/10 rounded-lg text-sm text-primary-600 dark:text-primary-400 animate-pulse">
+                        正在批量推断编码并检查词库…
+                      </div>
+                    )}
+                    <div className="flex justify-between items-center px-1">
+                      <span className="text-xs text-default-500">{dictItems.length} 个词条</span>
+                      <div className="flex gap-1">
+                        <Button size="sm" variant="light" className="h-6 min-w-0 px-2 text-xs" onPress={() => setDictItems(prev => prev.map(i => ({ ...i, excluded: false })))}>全选</Button>
+                        <Button size="sm" variant="light" className="h-6 min-w-0 px-2 text-xs" onPress={() => setDictItems(prev => prev.map(i => ({ ...i, excluded: true })))}>全不选</Button>
+                      </div>
+                    </div>
+                    <div className="space-y-1">
+                      {dictItems.map((item, idx) => (
+                        <div
+                          key={item.key}
+                          className={`flex items-center gap-2 px-2 py-1.5 rounded-lg border text-sm transition-opacity ${item.excluded ? 'opacity-40 bg-default-50 border-default-100' :
+                            item.status === 'overflow' ? 'bg-danger-50/50 dark:bg-danger-50/10 border-danger-100 dark:border-danger-800' :
+                              item.status === 'error' ? 'bg-danger-50/50 dark:bg-danger-50/10 border-danger-100 dark:border-danger-800' :
+                                (item.infer?.wordExists?.length ?? 0) > 0 ? 'bg-warning-50/50 dark:bg-warning-50/10 border-warning-100 dark:border-warning-800' :
+                                  item.status === 'shifted' ? 'bg-primary-50/50 dark:bg-primary-50/10 border-primary-100 dark:border-primary-800' :
+                                    'bg-success-50/50 dark:bg-success-50/10 border-success-100 dark:border-success-800'
+                            }`}
+                        >
+                          {/* Toggle */}
+                          <button
+                            onClick={() => setDictItems(prev => prev.map((d, i) => i === idx ? { ...d, excluded: !d.excluded } : d))}
+                            className={`w-4 h-4 rounded border-2 shrink-0 flex items-center justify-center text-[8px] font-bold transition-colors ${!item.excluded ? 'bg-primary border-primary text-white' : 'border-default-300 bg-content1'
+                              }`}
+                          >
+                            {!item.excluded && '✓'}
+                          </button>
+                          {/* Word */}
+                          <span className="w-20 font-mono font-semibold text-sm truncate shrink-0">{item.word}</span>
+                          {/* Code (editable) */}
+                          <Input
+                            size="sm"
+                            value={item.finalCode}
+                            placeholder={item.status === 'inferring' ? '推断中…' : '编码'}
+                            isDisabled={item.status === 'inferring' || item.excluded}
+                            className="w-24 shrink-0"
+                            classNames={{ input: "font-mono text-xs" }}
+                            onValueChange={v => updateDictItemCode(idx, v)}
+                          />
+                          {/* Status badges */}
+                          <div className="flex-1 flex items-center gap-1 min-w-0 overflow-hidden">
+                            {item.status === 'inferring' && <Chip size="sm" variant="flat" className="h-4 text-[10px] shrink-0 animate-pulse">推断中</Chip>}
+                            {item.status === 'new' && <Chip size="sm" variant="flat" color="success" className="h-4 text-[10px] shrink-0">✓ 新词条</Chip>}
+                            {item.status === 'shifted' && <Chip size="sm" variant="flat" color="primary" className="h-4 text-[10px] shrink-0">码位跳转</Chip>}
+                            {item.status === 'overflow' && <Chip size="sm" variant="flat" color="danger" className="h-4 text-[10px] shrink-0">重码</Chip>}
+                            {item.status === 'error' && <Chip size="sm" variant="flat" color="danger" className="h-4 text-[10px] shrink-0">推断失败</Chip>}
+                            {(item.infer?.wordExists?.length ?? 0) > 0 && (
+                              <Chip size="sm" variant="flat" color="warning" className="h-4 text-[10px] shrink-0">词已存在</Chip>
+                            )}
+                            {item.statusDetail && (
+                              <span className="text-[10px] text-default-500 truncate">{item.statusDetail}</span>
+                            )}
+                          </div>
+                          <Chip size="sm" variant="flat" className="h-4 text-[10px] shrink-0">{item.type}</Chip>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                </div>
+                )}
               </ModalBody>
               <ModalFooter>
-                <Button variant="light" onPress={onClose}>
-                  取消
-                </Button>
-                <Button
-                  color="primary"
-                  onPress={handleParseDictionary}
-                  isDisabled={!dictInput.trim()}
-                >
-                  解析并导入
-                </Button>
+                {dictStep === 'input' ? (
+                  <>
+                    <Button variant="light" onPress={closeDictParser}>取消</Button>
+                    <Button color="primary" onPress={handleDictPreview} isDisabled={!dictInput.trim()}>
+                      解析预览
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <Button variant="light" onPress={() => { setDictStep('input'); setDictItems([]) }}>重新输入</Button>
+                    <Button variant="light" onPress={closeDictParser}>取消</Button>
+                    <Button
+                      color="primary"
+                      onPress={handleDictConfirm}
+                      isDisabled={dictInferring || dictItems.filter(i => !i.excluded && i.finalCode.trim()).length === 0}
+                    >
+                      一键导入 ({dictItems.filter(i => !i.excluded && i.finalCode.trim()).length}条)
+                    </Button>
+                  </>
+                )}
               </ModalFooter>
             </>
           )}
