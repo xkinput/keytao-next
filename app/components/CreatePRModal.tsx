@@ -1009,8 +1009,8 @@ export default function CreatePRModal({
                             <div key={i} className="flex items-center gap-2 px-3 py-0.5 font-mono text-xs text-default-500 dark:text-default-400 bg-default-100 dark:bg-default-50/30">
                               <span className="w-4 shrink-0 text-center text-default-300"> </span>
                               <span className="shrink-0">{p.word}</span>
-                              <span className="shrink-0">{p.code}</span>
-                              {p.type && <span className="shrink-0 text-default-400 dark:text-default-300 text-[10px]">[{getPhraseTypeOptions().find(o => o.value === p.type)?.label ?? p.type}]</span>}
+                              <span className="shrink-0">{p.code}</span><span className="shrink-0 text-default-300">{p.weight}</span>
+                              
                             </div>
                           ))}
                           <div className="p-3 flex flex-col gap-2.5">
@@ -1383,8 +1383,8 @@ export default function CreatePRModal({
                             <div key={i} className="flex items-center gap-2 px-3 py-0.5 font-mono text-xs text-default-500 dark:text-default-400 bg-default-100 dark:bg-default-50/30">
                               <span className="w-4 shrink-0 text-center text-default-300"> </span>
                               <span className="shrink-0">{p.word}</span>
-                              <span className="shrink-0">{p.code}</span>
-                              {p.type && <span className="shrink-0 text-default-400 dark:text-default-300 text-[10px]">[{getPhraseTypeOptions().find(o => o.value === p.type)?.label ?? p.type}]</span>}
+                              <span className="shrink-0">{p.code}</span><span className="shrink-0 text-default-300">{p.weight}</span>
+                              
                             </div>
                           ))}
                         </div>
@@ -1405,8 +1405,8 @@ export default function CreatePRModal({
                             <div key={i} className="flex items-center gap-2 px-3 py-0.5 font-mono text-xs text-default-500 dark:text-default-400 bg-default-100 dark:bg-default-50/30">
                               <span className="w-4 shrink-0 text-center text-default-300"> </span>
                               <span className="shrink-0">{p.word}</span>
-                              <span className="shrink-0">{p.code}</span>
-                              {p.type && <span className="shrink-0 text-default-400 dark:text-default-300 text-[10px]">[{getPhraseTypeOptions().find(o => o.value === p.type)?.label ?? p.type}]</span>}
+                              <span className="shrink-0">{p.code}</span><span className="shrink-0 text-default-300">{p.weight}</span>
+                              
                             </div>
                           ))}
                           {/* Main action line */}
@@ -1465,8 +1465,8 @@ export default function CreatePRModal({
                             <div key={i} className="flex items-center gap-2 px-3 py-0.5 font-mono text-xs text-default-500 dark:text-default-400 bg-default-100 dark:bg-default-50/30">
                               <span className="w-4 shrink-0 text-center text-default-300"> </span>
                               <span className="shrink-0">{p.word}</span>
-                              <span className="shrink-0">{p.code}</span>
-                              {p.type && <span className="shrink-0 text-default-400 dark:text-default-300 text-[10px]">[{getPhraseTypeOptions().find(o => o.value === p.type)?.label ?? p.type}]</span>}
+                              <span className="shrink-0">{p.code}</span><span className="shrink-0 text-default-300">{p.weight}</span>
+                              
                             </div>
                           ))}
                         </div>

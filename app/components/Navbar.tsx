@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useCallback, memo, useState, useRef } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import { Button, Dropdown, DropdownTrigger, DropdownMenu, DropdownItem, DropdownSection, Link } from '@heroui/react'
-import { Menu, User, Database, Shield, ChevronDown, Edit, Download, BookOpen, Code, Github } from 'lucide-react'
+import { Menu, User, Database, Shield, ChevronDown, Edit, Download, BookOpen, Code, Github, Coffee } from 'lucide-react'
 import { useAuthStore } from '@/lib/store/auth'
 import { useAPI } from '@/lib/hooks/useSWR'
 import Logo from './Logo'
@@ -142,6 +142,7 @@ function Navbar() {
         { label: '批次审核', href: '/admin/batches' },
         { label: '用户管理', href: '/admin/users' },
         { label: '词库导入', href: '/admin/import', requireRootAdmin: true },
+        { label: '赞助管理', href: '/admin/sponsors', requireRootAdmin: true },
       ]
     }
   ], [docsUrl])
@@ -351,6 +352,29 @@ function Navbar() {
 
           <div className="flex items-center gap-2">
             <Button
+              variant="flat"
+              size="sm"
+              startContent={<Coffee className="w-4 h-4" />}
+              aria-label="赞助键道开发"
+              as={Link}
+              href="/sponsor"
+              className="hidden sm:flex text-pink-600 dark:text-pink-400"
+            >
+              赞助
+            </Button>
+            <Button
+              variant="light"
+              size="sm"
+              isIconOnly
+              color="warning"
+              aria-label="赞助键道开发"
+              as={Link}
+              href="/sponsor"
+              className="sm:hidden"
+            >
+              <Coffee className="w-5 h-5" />
+            </Button>
+            <Button
               variant="light"
               size="sm"
               isIconOnly
@@ -389,13 +413,12 @@ function Navbar() {
                     <DropdownItem key="profile" onPress={() => router.push('/profile')}>
                       {user?.nickname || user?.name}
                     </DropdownItem>
-                    <DropdownItem key="logout" color="danger" onPress={handleLogout}>
+                    <DropdownItem key="logout" onPress={handleLogout}>
                       退出登录
                     </DropdownItem>
                   </DropdownMenu>
                 </Dropdown>
                 <Button
-                  color="danger"
                   variant="light"
                   size="sm"
                   onPress={handleLogout}

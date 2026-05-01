@@ -432,3 +432,23 @@ model LinkKey {
   @@index([userId])
   @@map("link_keys")
 }
+
+/// 赞助者记录
+model Sponsor {
+  id        Int      @id @default(autoincrement())
+  /// 付款姓名（必填，手动录入）
+  payerName String
+  /// 备注名（赞助者填写，展示优先于 payerName）
+  remark    String?
+  /// 赞助金额（元）
+  amount    Int
+  /// 留言
+  message   String?  @db.Text
+  /// 赞助渠道：wechat / alipay / other
+  channel   String   @default("other")
+  /// 是否在列表中公开展示
+  visible   Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  @@map("sponsors")
+}

@@ -5,7 +5,6 @@ export interface ContextPhrase {
   word: string
   code: string
   weight: number
-  type: string | null
 }
 
 export interface ContextResponse {
@@ -26,7 +25,7 @@ export async function GET(request: NextRequest) {
   if (!code) return NextResponse.json({ error: '缺少参数 code' }, { status: 400 })
   if (code.length > 20) return NextResponse.json({ error: 'code 过长' }, { status: 400 })
 
-  const select = { word: true, code: true, weight: true, type: true } as const
+  const select = { word: true, code: true, weight: true } as const
   const baseFilter = { status: 'Finish' as const, ...(type ? { type: type as never } : {}) }
 
   const [beforeRaw, at, after] = await Promise.all([
