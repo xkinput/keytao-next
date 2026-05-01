@@ -237,8 +237,8 @@ function ChatPanel({ onClose }: { onClose: () => void }) {
           <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
             <div
               className={`max-w-[88%] px-3 py-2 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap break-words shadow-sm ${msg.role === 'user'
-                  ? 'bg-primary text-primary-foreground'
-                  : 'text-foreground'
+                ? 'bg-primary text-primary-foreground'
+                : 'text-foreground'
                 }`}
               style={
                 msg.role === 'assistant'
@@ -378,74 +378,67 @@ export default function ChatWidget() {
   }, [isOpen, open])
 
   // ── Drag handling ─────────────────────────────────────────────────────────
-  const dragRef = useRef<{
-    startX: number; startY: number
-    origX: number; origY: number
-    moved: boolean
-  } | null>(null)
+  // Use refs for values needed inside window-listener closures
+  const canvasWRef = useRef(canvasW)
+  const canvasHRef = useRef(canvasH)
+  const closeRef = useRef(close)
+  useEffect(() => { canvasWRef.current = canvasW }, [canvasW])
+  useEffect(() => { canvasHRef.current = canvasH }, [canvasH])
+  useEffect(() => { closeRef.current = close }, [close])
 
   const handlePointerDown = useCallback((e: React.PointerEvent) => {
-    e.currentTarget.setPointerCapture(e.pointerId)
-    dragRef.current = {
-      startX: e.clientX,
-      startY: e.clientY,
-      origX: posRef.current.x,
-      origY: posRef.current.y,
-      moved: false,
+    // Do NOT call setPointerCapture — it also captures mouse/click events,
+    // which would prevent Live2D canvas from receiving click and opening chat.
+    const startX = e.clientX
+    const startY = e.clientY
+    const origX = posRef.current.x
+    const origY = posRef.current.y
+    let moved = false
+
+    const onMove = (ev: PointerEvent) => {
+      const dx = ev.clientX - startX
+      const dy = ev.clientY - startY
+      if (!moved && dx * dx + dy * dy > 25) moved = true
+      if (moved) {
+        const p = { x: origX + dx, y: origY + dy }
+        posRef.current = p
+        setPos(p)
+      }
     }
-  }, [])
 
-  const handlePointerMove = useCallback((e: React.PointerEvent) => {
-    const d = dragRef.current
-    if (!d) return
-    const dx = e.clientX - d.startX
-    const dy = e.clientY - d.startY
-    if (!d.moved && dx * dx + dy * dy > 25) d.moved = true
-    if (d.moved) {
-      const p = { x: d.origX + dx, y: d.origY + dy }
-      posRef.current = p
-      setPos(p)
+    const onUp = (ev: PointerEvent) => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      if (!moved) return
+
+      dragEndTimeRef.current = Date.now()
+      const vw = window.innerWidth
+      const vh = window.innerHeight
+      const x = origX + (ev.clientX - startX)
+      const y = origY + (ev.clientY - startY)
+      const cW = canvasWRef.current
+      const cH = canvasHRef.current
+
+      const cx = x + cW / 2
+      const cy = y + cH / 2
+      let newSnap: SnapEdge = null
+      if (cx < SNAP_THRESHOLD) newSnap = 'left'
+      else if (cx > vw - SNAP_THRESHOLD) newSnap = 'right'
+      else if (cy < SNAP_THRESHOLD) newSnap = 'top'
+      else if (cy > vh - SNAP_THRESHOLD) newSnap = 'bottom'
+
+      const clampedX = Math.max(0, Math.min(vw - cW, x))
+      const clampedY = Math.max(0, Math.min(vh - cH, y))
+      const finalPos = { x: clampedX, y: clampedY }
+      posRef.current = finalPos
+      setPos(finalPos)
+      setSnap(newSnap)
+      if (newSnap) closeRef.current()
+      saveWidgetState({ ...finalPos, snap: newSnap })
     }
-  }, [])
 
-  const handlePointerUp = useCallback((e: React.PointerEvent) => {
-    const d = dragRef.current
-    dragRef.current = null
-    if (!d?.moved) return
-
-    dragEndTimeRef.current = Date.now()
-    const vw = window.innerWidth
-    const vh = window.innerHeight
-    const x = d.origX + (e.clientX - d.startX)
-    const y = d.origY + (e.clientY - d.startY)
-
-    // Snap when character center is within SNAP_THRESHOLD of any edge
-    const cx = x + canvasW / 2
-    const cy = y + canvasH / 2
-    let newSnap: SnapEdge = null
-    if (cx < SNAP_THRESHOLD) newSnap = 'left'
-    else if (cx > vw - SNAP_THRESHOLD) newSnap = 'right'
-    else if (cy < SNAP_THRESHOLD) newSnap = 'top'
-    else if (cy > vh - SNAP_THRESHOLD) newSnap = 'bottom'
-
-    const clampedX = Math.max(0, Math.min(vw - canvasW, x))
-    const clampedY = Math.max(0, Math.min(vh - canvasH, y))
-    const finalPos = { x: clampedX, y: clampedY }
-    posRef.current = finalPos
-    setPos(finalPos)
-    setSnap(newSnap)
-    if (newSnap) close()
-    saveWidgetState({ ...finalPos, snap: newSnap })
-  }, [canvasW, canvasH, close])
-
-  const handlePointerCancel = useCallback(() => {
-    const d = dragRef.current
-    dragRef.current = null
-    if (d?.moved) {
-      const p = { x: d.origX, y: d.origY }
-      posRef.current = p
-      setPos(p)
-    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
   }, [])
 
   const handleRestore = useCallback(() => {
@@ -517,9 +510,6 @@ export default function ChatWidget() {
             <div
               style={{ cursor: 'grab', pointerEvents: 'auto' }}
               onPointerDown={handlePointerDown}
-              onPointerMove={handlePointerMove}
-              onPointerUp={handlePointerUp}
-              onPointerCancel={handlePointerCancel}
             >
               <Live2DCanvas width={canvasW} height={canvasH} onHit={handleHit} />
             </div>
