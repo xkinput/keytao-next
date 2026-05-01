@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useCallback, memo, useState, useRef } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
-import { Button, Dropdown, DropdownTrigger, DropdownMenu, DropdownItem, DropdownSection, Link } from '@heroui/react'
+import { Button, Dropdown, DropdownTrigger, DropdownMenu, DropdownItem, Link, Drawer, DrawerContent, DrawerHeader, DrawerBody, Divider } from '@heroui/react'
 import { Menu, User, Database, Shield, ChevronDown, Edit, Download, BookOpen, Code, Github, Coffee } from 'lucide-react'
 import { useAuthStore } from '@/lib/store/auth'
 import { useAPI } from '@/lib/hooks/useSWR'
@@ -178,32 +178,110 @@ function Navbar() {
   }, [])
 
   return (
-    <nav className="bg-content1 shadow-sm">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex justify-between items-center h-16">
-          <div className="flex items-center gap-4 md:gap-8">
-            <Logo />
-            {/* Desktop Navigation */}
-            <div className="hidden md:flex gap-1 items-center">
-              {visibleMenuCategories.map((category) => {
-                const IconComponent = category.icon
-                const firstItem = category.items[0]
-                const firstHref = firstItem?.href
-                const isSingleItem = category.items.length === 1
-
-                // Single item category - render as direct button
-                if (isSingleItem) {
+    <>
+      <Drawer
+        isOpen={isMobileMenuOpen}
+        onOpenChange={setIsMobileMenuOpen}
+        placement="left"
+        size="xs"
+      >
+        <DrawerContent>
+          {(onClose) => (
+            <>
+              <DrawerHeader className="border-b border-divider">
+                <Logo />
+              </DrawerHeader>
+              <DrawerBody className="px-3 py-4 gap-0">
+                {visibleMenuCategories.map((category, index) => {
+                  const IconComponent = category.icon
                   return (
-                    <Button
+                    <div key={category.key}>
+                      {index > 0 && <Divider className="my-3" />}
+                      <div className="flex items-center gap-2 px-2 py-1.5 text-xs font-semibold text-default-400 uppercase tracking-wider">
+                        <IconComponent className="w-3.5 h-3.5" />
+                        {category.label}
+                      </div>
+                      <div className="mt-1 flex flex-col gap-0.5">
+                        {category.items.map((item) => (
+                          <Button
+                            key={item.href}
+                            variant={pathname === item.href ? 'flat' : 'light'}
+                            color={pathname === item.href ? 'primary' : 'default'}
+                            className="w-full justify-start pl-7 font-normal h-9"
+                            size="sm"
+                            onPress={() => {
+                              onClose()
+                              if (item.isExternal) {
+                                window.open(item.href, '_blank', 'noopener,noreferrer')
+                              } else {
+                                router.push(item.href)
+                              }
+                            }}
+                          >
+                            {item.label}
+                          </Button>
+                        ))}
+                      </div>
+                    </div>
+                  )
+                })}
+              </DrawerBody>
+            </>
+          )}
+        </DrawerContent>
+      </Drawer>
+      <nav className="bg-content1 shadow-sm">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex justify-between items-center h-16">
+            <div className="flex items-center gap-4 md:gap-8">
+              <Logo />
+              {/* Desktop Navigation */}
+              <div className="hidden md:flex gap-1 items-center">
+                {visibleMenuCategories.map((category) => {
+                  const IconComponent = category.icon
+                  const firstItem = category.items[0]
+                  const firstHref = firstItem?.href
+                  const isSingleItem = category.items.length === 1
+
+                  // Single item category - render as direct button
+                  if (isSingleItem) {
+                    return (
+                      <Button
+                        key={category.key}
+                        variant="light"
+                        size="sm"
+                        startContent={<IconComponent className="w-4 h-4" />}
+                        className={pathname === firstHref
+                          ? 'bg-primary text-primary-foreground data-[hover=true]:bg-primary-600'
+                          : 'text-default-700 hover:bg-default-200 dark:hover:bg-default-100 hover:text-default-900'}
+                        onPress={() => {
+                          if (firstHref) {
+                            if (firstItem?.isExternal) {
+                              window.open(firstHref, '_blank', 'noopener,noreferrer')
+                            } else {
+                              router.push(firstHref)
+                            }
+                          }
+                        }}
+                      >
+                        {category.label}
+                      </Button>
+                    )
+                  }
+
+                  // Multiple items - render with dropdown
+                  return (
+                    <div
                       key={category.key}
-                      variant="light"
-                      size="sm"
-                      startContent={<IconComponent className="w-4 h-4" />}
-                      className={pathname === firstHref
-                        ? 'bg-primary text-primary-foreground data-[hover=true]:bg-primary-600'
-                        : 'text-default-700 hover:bg-default-200 dark:hover:bg-default-100 hover:text-default-900'}
-                      onPress={() => {
+                      onMouseEnter={() => handleMouseEnter(category.key)}
+                      onMouseLeave={handleMouseLeave}
+                      onClick={() => {
                         if (firstHref) {
+                          if (closeTimeoutRef.current) {
+                            clearTimeout(closeTimeoutRef.current)
+                            closeTimeoutRef.current = null
+                          }
+                          setOpenDropdown(null)
                           if (firstItem?.isExternal) {
                             window.open(firstHref, '_blank', 'noopener,noreferrer')
                           } else {
@@ -211,235 +289,159 @@ function Navbar() {
                           }
                         }
                       }}
+                      className="cursor-pointer rounded-lg hover:bg-default-200 dark:hover:bg-default-100 transition-colors"
                     >
-                      {category.label}
-                    </Button>
+                      <Dropdown
+                        isOpen={openDropdown === category.key}
+                      >
+                        <DropdownTrigger>
+                          <Button
+                            variant="light"
+                            size="sm"
+                            startContent={<IconComponent className="w-4 h-4" />}
+                            endContent={<ChevronDown className="w-4 h-4" />}
+                            className="text-default-700 hover:bg-default-100 hover:text-default-900 pointer-events-none"
+                            as="div"
+                          >
+                            {category.label}
+                          </Button>
+                        </DropdownTrigger>
+                        <DropdownMenu
+                          aria-label={`${category.label} menu`}
+                          onAction={(key) => {
+                            if (closeTimeoutRef.current) {
+                              clearTimeout(closeTimeoutRef.current)
+                              closeTimeoutRef.current = null
+                            }
+                            setOpenDropdown(null)
+
+                            const item = category.items.find(i => i.href === key)
+                            if (item?.isExternal) {
+                              window.open(key as string, '_blank', 'noopener,noreferrer')
+                            } else {
+                              router.push(key as string)
+                            }
+                          }}
+                        >
+                          {category.items.map((item) => (
+                            <DropdownItem
+                              key={item.href}
+                              className={pathname === item.href ? 'bg-primary text-primary-foreground' : ''}
+                            >
+                              {item.label}
+                            </DropdownItem>
+                          ))}
+                        </DropdownMenu>
+                      </Dropdown>
+                    </div>
                   )
-                }
+                })}
+              </div>
 
-                // Multiple items - render with dropdown
-                return (
-                  <div
-                    key={category.key}
-                    onMouseEnter={() => handleMouseEnter(category.key)}
-                    onMouseLeave={handleMouseLeave}
-                    onClick={() => {
-                      if (firstHref) {
-                        if (closeTimeoutRef.current) {
-                          clearTimeout(closeTimeoutRef.current)
-                          closeTimeoutRef.current = null
-                        }
-                        setOpenDropdown(null)
-                        if (firstItem?.isExternal) {
-                          window.open(firstHref, '_blank', 'noopener,noreferrer')
-                        } else {
-                          router.push(firstHref)
-                        }
-                      }
-                    }}
-                    className="cursor-pointer rounded-lg hover:bg-default-200 dark:hover:bg-default-100 transition-colors"
-                  >
-                    <Dropdown
-                      isOpen={openDropdown === category.key}
-                    >
-                      <DropdownTrigger>
-                        <Button
-                          variant="light"
-                          size="sm"
-                          startContent={<IconComponent className="w-4 h-4" />}
-                          endContent={<ChevronDown className="w-4 h-4" />}
-                          className="text-default-700 hover:bg-default-100 hover:text-default-900 pointer-events-none"
-                          as="div"
-                        >
-                          {category.label}
-                        </Button>
-                      </DropdownTrigger>
-                      <DropdownMenu
-                        aria-label={`${category.label} menu`}
-                        onAction={(key) => {
-                          if (closeTimeoutRef.current) {
-                            clearTimeout(closeTimeoutRef.current)
-                            closeTimeoutRef.current = null
-                          }
-                          setOpenDropdown(null)
-
-                          const item = category.items.find(i => i.href === key)
-                          if (item?.isExternal) {
-                            window.open(key as string, '_blank', 'noopener,noreferrer')
-                          } else {
-                            router.push(key as string)
-                          }
-                        }}
-                      >
-                        {category.items.map((item) => (
-                          <DropdownItem
-                            key={item.href}
-                            className={pathname === item.href ? 'bg-primary text-primary-foreground' : ''}
-                          >
-                            {item.label}
-                          </DropdownItem>
-                        ))}
-                      </DropdownMenu>
-                    </Dropdown>
-                  </div>
-                )
-              })}
-            </div>
-
-            {/* Mobile Menu Button */}
-            <div className="md:hidden">
-              <Dropdown
-                isOpen={isMobileMenuOpen}
-                onOpenChange={setIsMobileMenuOpen}
-                placement="bottom-end"
-              >
-                <DropdownTrigger>
-                  <Button
-                    variant="light"
-                    isIconOnly
-                    aria-label="Toggle menu"
-                  >
-                    <Menu className="w-6 h-6" />
-                  </Button>
-                </DropdownTrigger>
-                <DropdownMenu
-                  aria-label="Navigation menu"
-                  onAction={(key) => {
-                    setIsMobileMenuOpen(false)
-                    const href = key as string
-                    // Check if it's an external link
-                    if (href.startsWith('http://') || href.startsWith('https://')) {
-                      window.open(href, '_blank', 'noopener,noreferrer')
-                    } else {
-                      router.push(href)
-                    }
-                  }}
-                  className="w-full"
-                  itemClasses={{
-                    base: "gap-4",
-                  }}
-                >
-                  {visibleMenuCategories.map((category) => {
-                    const IconComponent = category.icon
-                    return (
-                      <DropdownSection
-                        key={category.key}
-                        showDivider
-                      >
-                        <DropdownItem
-                          key={`${category.key}-header`}
-                          isReadOnly
-                          className="opacity-100 font-semibold cursor-default data-[hover=true]:bg-transparent"
-                          startContent={<IconComponent className="w-5 h-5" />}
-                        >
-                          {category.label}
-                        </DropdownItem>
-                        {category.items.map((item) => (
-                          <DropdownItem
-                            key={item.href}
-                            className={`${pathname === item.href ? 'bg-primary text-primary-foreground' : ''} pl-9`}
-                          >
-                            {item.label}
-                          </DropdownItem>
-                        )) as any}
-                      </DropdownSection>
-                    )
-                  })}
-                </DropdownMenu>
-              </Dropdown>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <Button
-              variant="flat"
-              size="sm"
-              startContent={<Coffee className="w-4 h-4" />}
-              aria-label="赞助键道开发"
-              as={Link}
-              href="/sponsor"
-              className="hidden sm:flex text-pink-600 dark:text-pink-400"
-            >
-              赞助
-            </Button>
-            <Button
-              variant="flat"
-              size="sm"
-              isIconOnly
-              aria-label="赞助键道开发"
-              as={Link}
-              href="/sponsor"
-              className="sm:hidden text-pink-600 dark:text-pink-400"
-            >
-              <Coffee className="w-5 h-5" />
-            </Button>
-            <Button
-              variant="light"
-              size="sm"
-              isIconOnly
-              aria-label="GitHub"
-              as={Link}
-              href="https://github.com/xkinput/KeyTao"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              <Github className="w-5 h-5" />
-            </Button>
-            <ThemeSwitch />
-            {isAuthenticatedValue ? (
-              <>
+              {/* Mobile Menu Button */}
+              <div className="md:hidden">
                 <Button
                   variant="light"
-                  size="sm"
-                  onPress={() => router.push('/profile')}
-                  className="hidden sm:flex"
+                  isIconOnly
+                  aria-label="Toggle menu"
+                  onPress={() => setIsMobileMenuOpen(true)}
                 >
-                  {user?.nickname || user?.name}
+                  <Menu className="w-6 h-6" />
                 </Button>
-                <Dropdown>
-                  <DropdownTrigger>
-                    <Button
-                      variant="light"
-                      size="sm"
-                      isIconOnly
-                      className="sm:hidden"
-                      aria-label="User menu"
-                    >
-                      <User className="w-5 h-5" />
-                    </Button>
-                  </DropdownTrigger>
-                  <DropdownMenu aria-label="User actions">
-                    <DropdownItem key="profile" onPress={() => router.push('/profile')}>
-                      {user?.nickname || user?.name}
-                    </DropdownItem>
-                    <DropdownItem key="logout" onPress={handleLogout}>
-                      退出登录
-                    </DropdownItem>
-                  </DropdownMenu>
-                </Dropdown>
-                <Button
-                  variant="light"
-                  size="sm"
-                  onPress={handleLogout}
-                  className="hidden sm:flex"
-                >
-                  退出登录
-                </Button>
-              </>
-            ) : (
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
               <Button
-                color="primary"
                 variant="flat"
                 size="sm"
-                onPress={handleLoginClick}
+                startContent={<Coffee className="w-4 h-4" />}
+                aria-label="赞助键道开发"
+                as={Link}
+                href="/sponsor"
+                className="hidden sm:flex text-pink-600 dark:text-pink-400"
               >
-                登录
+                赞助
               </Button>
-            )}
+              <Button
+                variant="flat"
+                size="sm"
+                isIconOnly
+                aria-label="赞助键道开发"
+                as={Link}
+                href="/sponsor"
+                className="sm:hidden text-pink-600 dark:text-pink-400"
+              >
+                <Coffee className="w-5 h-5" />
+              </Button>
+              <Button
+                variant="light"
+                size="sm"
+                isIconOnly
+                aria-label="GitHub"
+                as={Link}
+                href="https://github.com/xkinput/KeyTao"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <Github className="w-5 h-5" />
+              </Button>
+              <ThemeSwitch />
+              {isAuthenticatedValue ? (
+                <>
+                  <Button
+                    variant="light"
+                    size="sm"
+                    onPress={() => router.push('/profile')}
+                    className="hidden sm:flex"
+                  >
+                    {user?.nickname || user?.name}
+                  </Button>
+                  <Dropdown>
+                    <DropdownTrigger>
+                      <Button
+                        variant="light"
+                        size="sm"
+                        isIconOnly
+                        className="sm:hidden"
+                        aria-label="User menu"
+                      >
+                        <User className="w-5 h-5" />
+                      </Button>
+                    </DropdownTrigger>
+                    <DropdownMenu aria-label="User actions">
+                      <DropdownItem key="profile" onPress={() => router.push('/profile')}>
+                        {user?.nickname || user?.name}
+                      </DropdownItem>
+                      <DropdownItem key="logout" onPress={handleLogout}>
+                        退出登录
+                      </DropdownItem>
+                    </DropdownMenu>
+                  </Dropdown>
+                  <Button
+                    variant="light"
+                    size="sm"
+                    onPress={handleLogout}
+                    className="hidden sm:flex"
+                  >
+                    退出登录
+                  </Button>
+                </>
+              ) : (
+                <Button
+                  color="primary"
+                  variant="flat"
+                  size="sm"
+                  onPress={handleLoginClick}
+                >
+                  登录
+                </Button>
+              )}
+            </div>
           </div>
         </div>
-      </div>
-    </nav>
+      </nav>
+    </>
   )
 }
 

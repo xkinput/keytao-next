@@ -113,6 +113,9 @@ export default function SponsorPage() {
             <Heart className="w-4 h-4 text-pink-400" />
             赞助者名单
           </h2>
+          <p className="text-xs text-default-400 flex items-center gap-1">
+            名单将在 24 小时内更新，由人工审核后添加至列表中
+          </p>
           {isLoading ? (
             <div className="flex justify-center py-8"><Spinner size="sm" /></div>
           ) : !sponsors || sponsors.length === 0 ? (
