@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { Button, Card, CardBody, Code, Listbox, ListboxItem, Progress, Alert, Link } from '@heroui/react'
 import { Folder, File, Apple, Monitor, Check, Download, RefreshCw, Smartphone, TabletSmartphone, Lightbulb, Package, ClipboardList } from 'lucide-react'
-import JSZip from 'jszip'
+import { unzip } from 'fflate'
 
 const INSTALLER_RELEASES_URL = 'https://github.com/xkinput/keytao-installer/releases/latest'
 
@@ -14,17 +14,20 @@ interface FileItem {
   kind: 'file' | 'directory'
 }
 
+type DownloadSource = 'github' | 'gitee'
+
+interface PlatformRelease {
+  version: string
+  downloadUrls: Record<string, string>
+}
+
 interface ReleaseInfo {
   version: string
   name: string
   publishedAt: string
   body: string
-  downloadUrls: {
-    macos?: string
-    windows?: string
-    linux?: string
-    android?: string
-  }
+  github: PlatformRelease | null
+  gitee: PlatformRelease | null
 }
 
 interface RimeDownloadInfo {
@@ -49,6 +52,7 @@ export default function InstallPage() {
   const [error, setError] = useState<string | null>(null)
   const [browserInfo, setBrowserInfo] = useState<string>('')
   const [releaseInfo, setReleaseInfo] = useState<ReleaseInfo | null>(null)
+  const [downloadSource, setDownloadSource] = useState<DownloadSource>('gitee')
   const [isInstalling, setIsInstalling] = useState(false)
   const [installProgress, setInstallProgress] = useState(0)
   const [installStatus, setInstallStatus] = useState<string>('')
@@ -337,9 +341,10 @@ export default function InstallPage() {
       return
     }
 
-    const downloadUrl = releaseInfo.downloadUrls[osType as keyof typeof releaseInfo.downloadUrls]
+    const sourceData = downloadSource === 'gitee' ? releaseInfo.gitee : releaseInfo.github
+    const downloadUrl = sourceData?.downloadUrls?.[osType]
     if (!downloadUrl) {
-      setError(`没有找到适用于 ${getOSName()} 的安装包`)
+      setError(`没有找到适用于 ${getOSName()} 的安装包（${downloadSource === 'gitee' ? 'Gitee' : 'GitHub'}）`)
       return
     }
 
@@ -349,19 +354,41 @@ export default function InstallPage() {
       setInstallStatus('正在下载...')
       setError(null)
 
-      // Download the file through proxy API to avoid CORS issues
+      // Download through proxy with streaming progress
       const response = await fetch(`/api/install/download?url=${encodeURIComponent(downloadUrl)}`)
       if (!response.ok) {
         throw new Error('下载失败')
       }
 
-      const blob = await response.blob()
+      const contentLength = Number(response.headers.get('Content-Length') ?? 0)
+      const reader = response.body!.getReader()
+      const chunks: Uint8Array[] = []
+      let receivedLength = 0
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        chunks.push(value)
+        receivedLength += value.length
+        if (contentLength > 0) {
+          const mb = (receivedLength / 1_048_576).toFixed(1)
+          const totalMb = (contentLength / 1_048_576).toFixed(1)
+          setInstallProgress(Math.round((receivedLength / contentLength) * 50))
+          setInstallStatus(`正在下载... ${mb}MB / ${totalMb}MB`)
+        }
+      }
+
+      const zipData = new Uint8Array(receivedLength)
+      let pos = 0
+      for (const chunk of chunks) { zipData.set(chunk, pos); pos += chunk.length }
+
       setInstallProgress(50)
       setInstallStatus('正在解压...')
 
-      // Unzip the file
-      const zip = new JSZip()
-      const zipContent = await zip.loadAsync(blob)
+      // Decompress with fflate (3-5x faster than JSZip)
+      const unzipped = await new Promise<Record<string, Uint8Array>>((resolve, reject) => {
+        unzip(zipData, (err, data) => { if (err) reject(err); else resolve(data) })
+      })
 
       // Check and request write permission for the directory
       type DirectoryHandleWithPermission = FileSystemDirectoryHandle & {
@@ -380,86 +407,59 @@ export default function InstallPage() {
         } else if (permission === 'denied') {
           throw new Error('没有目录写入权限，请重新选择可写目录')
         }
-      } else {
-        console.warn('Permission API not available, attempting to write directly')
       }
 
-      // Extract files
-      const fileCount = Object.keys(zipContent.files).length
-      let processedCount = 0
+      // Separate file entries from directory-only entries
+      const fileEntries = Object.entries(unzipped).filter(([path]) => !path.endsWith('/'))
+      const fileCount = fileEntries.length
 
-      for (const [relativePath, file] of Object.entries(zipContent.files)) {
-        // Skip the root folder name (e.g., "keytao-mac/")
-        const pathParts = relativePath.split('/')
-        const actualPath = pathParts.slice(1).join('/')
+      // Helper: write a single file (with read-only fallback)
+      const writeEntry = async (path: string, content: Uint8Array, idx: number) => {
+        const parts = path.split('/')
+        const fileName = parts.pop()!
+        let currentDir = selectedDirectory
+        for (const part of parts) {
+          if (part) currentDir = await currentDir.getDirectoryHandle(part, { create: true })
+        }
 
-        if (!actualPath) continue // Skip root folder itself
+        const doWrite = async () => {
+          const fileHandle = await currentDir.getFileHandle(fileName, { create: true })
+          const writable = await fileHandle.createWritable()
+          await writable.write(new Uint8Array(content))
+          await writable.close()
+        }
 
-        if (file.dir) {
-          // Create directory
-          const dirParts = actualPath.split('/')
-          let currentDir = selectedDirectory
-          for (const part of dirParts) {
-            if (part) {
-              currentDir = await currentDir.getDirectoryHandle(part, { create: true })
-            }
-          }
-        } else {
-          // Write file
-          const dirParts = actualPath.split('/')
-          const fileName = dirParts.pop()!
-          let currentDir = selectedDirectory
-
-          // Create parent directories
-          for (const part of dirParts) {
-            if (part) {
-              currentDir = await currentDir.getDirectoryHandle(part, { create: true })
-            }
-          }
-
-          const content = await file.async('blob')
-
-          const writeFile = async () => {
-            const fileHandle = await currentDir.getFileHandle(fileName, { create: true })
-            const writable = await fileHandle.createWritable()
-            await writable.write(content)
-            await writable.close()
-          }
-
+        try {
+          await doWrite()
+        } catch (writeErr) {
+          const errName = writeErr instanceof Error ? writeErr.name : ''
+          const errMsg = writeErr instanceof Error ? writeErr.message.toLowerCase() : ''
+          const isReadOnly = errName === 'NoModificationAllowedError' || errName === 'NotAllowedError' || errMsg.includes('read-only')
+          if (!isReadOnly) throw writeErr
           try {
-            await writeFile()
-          } catch (writeErr) {
-            const errName = writeErr instanceof Error ? writeErr.name : ''
-            const errMessage = writeErr instanceof Error ? writeErr.message.toLowerCase() : ''
-            const isReadOnlyError =
-              errName === 'NoModificationAllowedError' ||
-              errName === 'NotAllowedError' ||
-              errMessage.includes('read-only')
-
-            if (!isReadOnlyError) {
-              throw writeErr
-            }
-
-            try {
-              await currentDir.removeEntry(fileName)
-              await writeFile()
-            } catch {
-              throw new Error(`文件 ${actualPath} 为只读且无法覆盖，请检查目录权限或手动删除后重试`)
-            }
+            await currentDir.removeEntry(fileName)
+            await doWrite()
+          } catch {
+            throw new Error(`文件 ${path} 为只读且无法覆盖，请检查目录权限或手动删除后重试`)
           }
         }
 
-        processedCount++
-        setInstallProgress(50 + (processedCount / fileCount) * 50)
+        setInstallProgress(50 + Math.round((idx / fileCount) * 50))
+        setInstallStatus(`正在安装... ${idx}/${fileCount}: ${fileName}`)
+      }
+
+      // Write files in parallel batches of 8
+      const BATCH = 8
+      for (let i = 0; i < fileEntries.length; i += BATCH) {
+        const batch = fileEntries.slice(i, i + BATCH)
+        await Promise.all(batch.map(([path, content], j) => writeEntry(path, content, i + j + 1)))
       }
 
       setInstallStatus('安装完成！')
       setInstallProgress(100)
 
-      // Reload directory contents
       await loadDirectoryContents(selectedDirectory)
 
-      // Show success message
       setInstallSuccess(true)
       setIsInstalling(false)
       setInstallStatus('')
@@ -660,7 +660,7 @@ export default function InstallPage() {
                   {releaseInfo && (
                     <Alert
                       color="success"
-                      title={`最新 KeyTao 版本: ${releaseInfo.version}`}
+                      title={`最新 KeyTao 版本: ${releaseInfo.github?.version ?? releaseInfo.version}${releaseInfo.gitee ? ` · Gitee: ${releaseInfo.gitee.version}` : ''}`}
                       description={`发布时间: ${new Date(releaseInfo.publishedAt).toLocaleString('zh-CN')}`}
                       icon={<Download className="w-5 h-5" />}
                     />
@@ -702,7 +702,7 @@ export default function InstallPage() {
                   {releaseInfo && (
                     <Alert
                       color="success"
-                      title={`最新 KeyTao 版本: ${releaseInfo.version}`}
+                      title={`最新 KeyTao 版本: ${releaseInfo.github?.version ?? releaseInfo.version}${releaseInfo.gitee ? ` · Gitee: ${releaseInfo.gitee.version}` : ''}`}
                       description={`发布时间: ${new Date(releaseInfo.publishedAt).toLocaleString('zh-CN')}`}
                       icon={<Download className="w-5 h-5" />}
                     />
@@ -747,11 +747,33 @@ export default function InstallPage() {
                   {releaseInfo && (
                     <Alert
                       color="success"
-                      title={`最新版本: ${releaseInfo.version}`}
+                      title={`最新版本: ${releaseInfo.github?.version ?? releaseInfo.version}${releaseInfo.gitee ? ` · Gitee: ${releaseInfo.gitee.version}` : ''}`}
                       description={`发布时间: ${new Date(releaseInfo.publishedAt).toLocaleString('zh-CN')}`}
                       icon={<Download className="w-5 h-5" />}
                       className="mb-3"
                     />
+                  )}
+
+                  {releaseInfo && (releaseInfo.github || releaseInfo.gitee) && (
+                    <div className="flex items-center gap-2 mb-3">
+                      <span className="text-xs text-default-500">下载源：</span>
+                      {(['github', 'gitee'] as const).map((src) => {
+                        const info = src === 'github' ? releaseInfo.github : releaseInfo.gitee
+                        if (!info) return null
+                        return (
+                          <button
+                            key={src}
+                            onClick={() => setDownloadSource(src)}
+                            className={`px-3 py-1 text-xs rounded-full border transition-colors ${downloadSource === src
+                              ? 'bg-primary text-white border-primary'
+                              : 'bg-transparent text-default-500 border-default-300 hover:border-default-400'
+                              }`}
+                          >
+                            {src === 'github' ? `GitHub ${info.version}` : `Gitee ${info.version}`}
+                          </button>
+                        )
+                      })}
+                    </div>
                   )}
 
                   {!hasWriteSupport && (

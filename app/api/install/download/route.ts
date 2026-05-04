@@ -11,8 +11,11 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    // Validate that the URL is from GitHub releases
-    if (!url.startsWith('https://github.com/xkinput/KeyTao/releases/download/')) {
+    const allowedPrefixes = [
+      'https://github.com/xkinput/KeyTao/releases/download/',
+      'https://gitee.com/xkinput/KeyTao/releases/download/',
+    ]
+    if (!allowedPrefixes.some((prefix) => url.startsWith(prefix))) {
       return NextResponse.json(
         { error: 'Invalid download URL' },
         { status: 400 }
@@ -30,8 +33,9 @@ export async function GET(request: NextRequest) {
       throw new Error(`Failed to download file: ${response.status}`)
     }
 
-    // Stream the response back to the client
+    // Stream the response back to the client, forwarding Content-Length for progress tracking
     const blob = await response.blob()
+    const upstreamLength = response.headers.get('Content-Length')
 
     return new NextResponse(blob, {
       status: 200,
@@ -39,6 +43,7 @@ export async function GET(request: NextRequest) {
         'Content-Type': 'application/zip',
         'Content-Disposition': `attachment; filename="${url.split('/').pop()}"`,
         'Access-Control-Allow-Origin': '*',
+        ...(upstreamLength ? { 'Content-Length': upstreamLength } : {}),
       },
     })
   } catch (error) {
