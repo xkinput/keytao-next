@@ -6,7 +6,6 @@ import {
     CardHeader,
     Chip,
     Button,
-    Badge
 } from '@heroui/react'
 import { AlertTriangle } from 'lucide-react'
 import CodePhrasesPopover from './CodePhrasesPopover'

@@ -1274,7 +1274,7 @@ export default function CreatePRModal({
                                                 onValueChange={v => { f.onChange(v); updateMeta(field.id, { hasChecked: false, conflict: null }); autoFilledRef.current.delete(field.id) }}
                                                 endContent={
                                                   encodingFields.has(field.id) ? (
-                                                    <WandSparkles className="w-4 h-4 text-default-400 animate-pulse" />
+                                                    <WandSparkles className="w-4 h-4 animate-pulse" />
                                                   ) : f.value ? (
                                                     <div className="flex items-center gap-1">
                                                       {autoFilledRef.current.has(field.id) && (() => {
