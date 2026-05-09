@@ -307,6 +307,7 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
 
   const batchData = batch.batch
   const isOwner = user?.id === batchData.creator.id
+  const isDraftOwnedByViewer = batchData.status === 'Draft' && isOwner
   const editableStatuses = isAdmin
     ? ['Draft', 'Rejected', 'Submitted']
     : ['Draft', 'Rejected']
@@ -397,6 +398,8 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
                     <Chip
                       color={STATUS_COLOR_MAP[batchData.status] || 'default'}
                       variant="flat"
+                      size="lg"
+                      className={batchData.status === 'Draft' ? 'font-semibold bg-warning-100 text-warning-700 border border-warning-300 shadow-sm' : undefined}
                     >
                       {BATCH_STATUS_MAP[batchData.status] || batchData.status}
                     </Chip>
@@ -453,6 +456,20 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
               </CardBody>
             )}
           </Card>
+
+          {isDraftOwnedByViewer && (
+            <Card className="mt-4 border-warning border-2 bg-warning-50/70 dark:bg-warning-100/5">
+              <CardHeader className="pb-0">
+                <h3 className="text-large font-bold text-warning flex items-center gap-2">
+                  <AlertTriangle className="w-5 h-5" />
+                  当前仍是草稿
+                </h3>
+              </CardHeader>
+              <CardBody>
+                <p className="text-default-700 font-medium">未提交，提交后才会进入审核流程！</p>
+              </CardBody>
+            </Card>
+          )}
 
           {batchData.status === 'Rejected' && batchData.reviewNote && (
             <Card className="mt-4 border-danger border-2">
