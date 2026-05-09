@@ -23,7 +23,7 @@ import { apiRequest } from '@/lib/hooks/useSWR'
 import { getPhraseTypeOptions, getDefaultWeight, checkTypeMismatch, detectPhraseType, type PhraseType } from '@/lib/constants/phraseTypes'
 import { CODE_PATTERN } from '@/lib/constants/codeValidation'
 import { useUIStore } from '@/lib/store/ui'
-import { Trash2, FileText, CornerUpLeft, CornerDownLeft, ChevronUp, ChevronDown, Plus, Edit2, AlertTriangle, Eye, Check, Search } from 'lucide-react'
+import { Trash2, FileText, CornerUpLeft, CornerDownLeft, ChevronUp, ChevronDown, Plus, Edit2, AlertTriangle, Eye, Check, Search, WandSparkles } from 'lucide-react'
 import CodePhrasesPopover from './CodePhrasesPopover'
 import WordCodesPopover from './WordCodesPopover'
 import type { InferResponse } from '@/app/api/phrases/infer/route'
@@ -1274,7 +1274,7 @@ export default function CreatePRModal({
                                                 onValueChange={v => { f.onChange(v); updateMeta(field.id, { hasChecked: false, conflict: null }); autoFilledRef.current.delete(field.id) }}
                                                 endContent={
                                                   encodingFields.has(field.id) ? (
-                                                    <span className="text-xs text-default-400 animate-pulse">…</span>
+                                                    <WandSparkles className="w-4 h-4 text-default-400 animate-pulse" />
                                                   ) : f.value ? (
                                                     <div className="flex items-center gap-1">
                                                       {autoFilledRef.current.has(field.id) && (() => {
