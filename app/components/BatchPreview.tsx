@@ -1,6 +1,4 @@
 'use client'
-
-import { diffArrays } from 'diff'
 import { Chip, Spinner } from '@heroui/react'
 import { AlertTriangle, X } from 'lucide-react'
 import { useAPI } from '@/lib/hooks/useSWR'
@@ -70,38 +68,106 @@ interface Hunk {
 
 const phraseKey = (p: PreviewPhrase) => `${p.word}@@${p.code}`
 
+function comparePhrases(a: PreviewPhrase, b: PreviewPhrase): number {
+    const codeCmp = a.code.localeCompare(b.code)
+    if (codeCmp !== 0) return codeCmp
+
+    if (a.weight !== b.weight) return a.weight - b.weight
+
+    return a.word.localeCompare(b.word, 'zh')
+}
+
+function compareAddedLinesForDisplay(a: Extract<UnifiedLine, { kind: 'add' }>, b: Extract<UnifiedLine, { kind: 'add' }>): number {
+    if (a.phrase.weight !== b.phrase.weight) return a.phrase.weight - b.phrase.weight
+
+    const codeCmp = a.phrase.code.localeCompare(b.phrase.code)
+    if (codeCmp !== 0) return codeCmp
+
+    return a.phrase.word.localeCompare(b.phrase.word, 'zh')
+}
+
+function normalizeHunkLinesForDisplay(lines: UnifiedLine[]): UnifiedLine[] {
+    const normalized: UnifiedLine[] = []
+    let segment: UnifiedLine[] = []
+
+    const flushSegment = () => {
+        if (segment.length === 0) return
+
+        const removes = segment.filter((line): line is Extract<UnifiedLine, { kind: 'remove' }> => line.kind === 'remove')
+        const adds = segment
+            .filter((line): line is Extract<UnifiedLine, { kind: 'add' }> => line.kind === 'add')
+            .sort(compareAddedLinesForDisplay)
+
+        normalized.push(...removes, ...adds)
+        segment = []
+    }
+
+    for (const line of lines) {
+        if (line.kind === 'context') {
+            flushSegment()
+            normalized.push(line)
+            continue
+        }
+
+        segment.push(line)
+    }
+
+    flushSegment()
+    return normalized
+}
+
 function computeUnifiedDiff(before: PreviewPhrase[], after: PreviewPhrase[], contextSize = 3, startLine = 1): Hunk[] {
     const beforeMap = new Map(before.map(p => [phraseKey(p), p]))
     const afterMap = new Map(after.map(p => [phraseKey(p), p]))
-
-    // diffArrays on word@@code keys to get optimal Myers edit script
-    const changes = diffArrays(
-        before.map(phraseKey),
-        after.map(phraseKey)
-    )
 
     const lines: UnifiedLine[] = []
     let oldLine = startLine
     let newLine = startLine
 
-    for (const change of changes) {
-        for (const key of change.value) {
-            if (change.removed) {
-                lines.push({ kind: 'remove', phrase: beforeMap.get(key)!, oldLine: oldLine++ })
-            } else if (change.added) {
-                lines.push({ kind: 'add', phrase: afterMap.get(key)!, newLine: newLine++ })
-            } else {
-                // same phrase in both — check if metadata changed
-                const b = beforeMap.get(key)!
-                const a = afterMap.get(key)!
-                if (b.type !== a.type || b.weight !== a.weight || b.remark !== a.remark) {
-                    lines.push({ kind: 'remove', phrase: b, oldLine: oldLine++ })
-                    lines.push({ kind: 'add', phrase: a, newLine: newLine++ })
-                } else {
-                    lines.push({ kind: 'context', phrase: b, oldLine: oldLine++, newLine: newLine++ })
-                }
-            }
+    let beforeIndex = 0
+    let afterIndex = 0
+
+    while (beforeIndex < before.length || afterIndex < after.length) {
+        const beforePhrase = before[beforeIndex]
+        const afterPhrase = after[afterIndex]
+
+        if (!beforePhrase && afterPhrase) {
+            lines.push({ kind: 'add', phrase: afterPhrase, newLine: newLine++ })
+            afterIndex++
+            continue
         }
+
+        if (beforePhrase && !afterPhrase) {
+            lines.push({ kind: 'remove', phrase: beforePhrase, oldLine: oldLine++ })
+            beforeIndex++
+            continue
+        }
+
+        const beforeKey = phraseKey(beforePhrase!)
+        const afterKey = phraseKey(afterPhrase!)
+
+        if (beforeKey === afterKey) {
+            const b = beforeMap.get(beforeKey)!
+            const a = afterMap.get(afterKey)!
+            if (b.type !== a.type || b.weight !== a.weight || b.remark !== a.remark) {
+                lines.push({ kind: 'remove', phrase: b, oldLine: oldLine++ })
+                lines.push({ kind: 'add', phrase: a, newLine: newLine++ })
+            } else {
+                lines.push({ kind: 'context', phrase: b, oldLine: oldLine++, newLine: newLine++ })
+            }
+            beforeIndex++
+            afterIndex++
+            continue
+        }
+
+        if (comparePhrases(beforePhrase!, afterPhrase!) < 0) {
+            lines.push({ kind: 'remove', phrase: beforePhrase!, oldLine: oldLine++ })
+            beforeIndex++
+            continue
+        }
+
+        lines.push({ kind: 'add', phrase: afterPhrase!, newLine: newLine++ })
+        afterIndex++
     }
 
     // Find changed line indices
@@ -140,15 +206,16 @@ function computeUnifiedDiff(before: PreviewPhrase[], after: PreviewPhrase[], con
 }
 
 function buildHunk(lines: UnifiedLine[]): Hunk {
-    const first = lines[0]
+    const normalizedLines = normalizeHunkLinesForDisplay(lines)
+    const first = normalizedLines[0]
 
-    const oldStart = first.kind === 'add' ? (lines.find(l => l.kind !== 'add') as Extract<UnifiedLine, { oldLine: number }>)?.oldLine ?? 1 : (first as Extract<UnifiedLine, { oldLine: number }>).oldLine
-    const newStart = first.kind === 'remove' ? (lines.find(l => l.kind !== 'remove') as Extract<UnifiedLine, { newLine: number }>)?.newLine ?? 1 : (first as Extract<UnifiedLine, { newLine: number }>).newLine
+    const oldStart = first.kind === 'add' ? (normalizedLines.find(l => l.kind !== 'add') as Extract<UnifiedLine, { oldLine: number }>)?.oldLine ?? 1 : (first as Extract<UnifiedLine, { oldLine: number }>).oldLine
+    const newStart = first.kind === 'remove' ? (normalizedLines.find(l => l.kind !== 'remove') as Extract<UnifiedLine, { newLine: number }>)?.newLine ?? 1 : (first as Extract<UnifiedLine, { newLine: number }>).newLine
 
-    const oldCount = lines.filter(l => l.kind !== 'add').length
-    const newCount = lines.filter(l => l.kind !== 'remove').length
+    const oldCount = normalizedLines.filter(l => l.kind !== 'add').length
+    const newCount = normalizedLines.filter(l => l.kind !== 'remove').length
 
-    return { oldStart: oldStart ?? 1, newStart: newStart ?? 1, oldCount, newCount, lines }
+    return { oldStart: oldStart ?? 1, newStart: newStart ?? 1, oldCount, newCount, lines: normalizedLines }
 }
 
 function formatPhraseLine(p: PreviewPhrase): string {
