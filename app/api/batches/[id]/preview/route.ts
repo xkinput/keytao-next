@@ -36,7 +36,7 @@ interface RejectedOperation {
 
 function sortPhrases(phrases: PreviewPhrase[]): PreviewPhrase[] {
     return [...phrases].sort((a, b) => {
-        if (b.weight !== a.weight) return b.weight - a.weight
+        if (a.weight !== b.weight) return a.weight - b.weight
         return a.word.localeCompare(b.word, 'zh')
     })
 }
@@ -69,7 +69,7 @@ async function clusterAffectedCodes(affectedCodes: string[], type: string): Prom
     return clusters
 }
 
-// Count how many phrases come before `p` in the global sort order (code ASC, weight DESC)
+// Count how many phrases come before `p` in the global sort order (code ASC, weight ASC)
 // Only counts same type and Finish status to match the exported phrase library
 async function fetchStartLine(p: PreviewPhrase): Promise<number> {
     const count = await prisma.phrase.count({
@@ -78,7 +78,7 @@ async function fetchStartLine(p: PreviewPhrase): Promise<number> {
             status: 'Finish',
             OR: [
                 { code: { lt: p.code } },
-                { code: p.code, weight: { gt: p.weight } }
+                { code: p.code, weight: { lt: p.weight } }
             ]
         }
     })
@@ -104,7 +104,7 @@ async function fetchTypeContext(
         const codeB = affectedCodes[i + 1]
         const gapWhere = { code: { gt: codeA, lt: codeB }, type: type as any, status: 'Finish' } as const
         gapPromises.push(
-            prisma.phrase.findMany({ where: gapWhere, orderBy: [{ code: 'asc' }, { weight: 'desc' }], take: CONTEXT_SIZE, select: sel }),
+            prisma.phrase.findMany({ where: gapWhere, orderBy: [{ code: 'asc' }, { weight: 'asc' }], take: CONTEXT_SIZE, select: sel }),
             prisma.phrase.findMany({ where: gapWhere, orderBy: [{ code: 'desc' }, { weight: 'desc' }], take: CONTEXT_SIZE, select: sel })
         )
     }
@@ -118,7 +118,7 @@ async function fetchTypeContext(
         }),
         prisma.phrase.findMany({
             where: { code: { gt: maxCode }, type: type as any, status: 'Finish' },
-            orderBy: [{ code: 'asc' }, { weight: 'desc' }],
+            orderBy: [{ code: 'asc' }, { weight: 'asc' }],
             take: CONTEXT_SIZE,
             select: sel
         }),
