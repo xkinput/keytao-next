@@ -78,10 +78,12 @@ function comparePhrases(a: PreviewPhrase, b: PreviewPhrase): number {
 }
 
 function compareAddedLinesForDisplay(a: Extract<UnifiedLine, { kind: 'add' }>, b: Extract<UnifiedLine, { kind: 'add' }>): number {
-    if (a.phrase.weight !== b.phrase.weight) return a.phrase.weight - b.phrase.weight
+    if (a.phrase.code.length !== b.phrase.code.length) return a.phrase.code.length - b.phrase.code.length
 
     const codeCmp = a.phrase.code.localeCompare(b.phrase.code)
     if (codeCmp !== 0) return codeCmp
+
+    if (a.phrase.weight !== b.phrase.weight) return a.phrase.weight - b.phrase.weight
 
     return a.phrase.word.localeCompare(b.phrase.word, 'zh')
 }
