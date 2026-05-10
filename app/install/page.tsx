@@ -5,7 +5,7 @@ import { Button, Card, CardBody, Code, Listbox, ListboxItem, Progress, Alert, Li
 import { Folder, File, Apple, Monitor, Check, Download, RefreshCw, Smartphone, TabletSmartphone, Lightbulb, Package, ClipboardList } from 'lucide-react'
 import { unzip } from 'fflate'
 
-const INSTALLER_RELEASES_URL = 'https://github.com/xkinput/keytao-installer/releases/latest'
+const INSTALLER_RELEASES_URL = 'https://github.com/xkinput/keytao-installer/releases'
 
 type OSType = 'windows' | 'macos' | 'linux' | 'android' | 'ios' | 'unknown'
 
