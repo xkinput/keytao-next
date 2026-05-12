@@ -320,7 +320,8 @@ export default function CreatePRModal({
       const timer = setTimeout(async () => {
         timers.delete(fieldId)
         try {
-          const res = await fetch(`/api/phrases/infer?word=${encodeURIComponent(word)}`)
+          const params = new URLSearchParams({ word, ...(code.trim() ? { code: code.trim() } : {}) })
+          const res = await fetch(`/api/phrases/infer?${params}`)
           if (!res.ok) return
           const data: InferResponse = await res.json()
 
@@ -359,6 +360,8 @@ export default function CreatePRModal({
       if (!fieldId) return
 
       const code = (values.items?.[index]?.code ?? '').trim()
+      const word = (values.items?.[index]?.word ?? '').trim()
+      const action = values.items?.[index]?.action
       const type = (values.items?.[index]?.type ?? '').trim()
       if (!code) {
         setContextResults(prev => { const n = new Map(prev); n.delete(fieldId); return n })
@@ -370,6 +373,14 @@ export default function CreatePRModal({
 
       const timer = setTimeout(async () => {
         try {
+          if (word && action !== 'Delete') {
+            const inferParams = new URLSearchParams({ word, code })
+            const inferRes = await fetch(`/api/phrases/infer?${inferParams}`)
+            if (inferRes.ok) {
+              const inferData: InferResponse = await inferRes.json()
+              setInferResult(fieldId, inferData)
+            }
+          }
           const params = new URLSearchParams({ code, count: '3', ...(type ? { type } : {}) })
           const res = await fetch(`/api/phrases/context?${params}`)
           if (res.ok) {
@@ -1318,6 +1329,22 @@ export default function CreatePRModal({
                                           <AlertTriangle className="w-3.5 h-3.5 text-warning shrink-0" />
                                           <span className="text-xs text-warning-700 dark:text-warning-400 flex-1">类型应为 {tm.suggestedTypeLabel}</span>
                                           <Button size="sm" color="warning" variant="flat" className="h-6 px-2 text-xs shrink-0" onPress={() => { if (tm.suggestedType) { setValue(`items.${index}.type`, tm.suggestedType); toast.success(`已修改为${tm.suggestedTypeLabel}`) } }}>修改</Button>
+                                        </div>
+                                      )
+                                    })()}
+
+                                    {(() => {
+                                      const cc = watch(`items.${index}.code`)
+                                      const analysis = inferResults.get(field.id)?.requestedCodeAnalysis
+                                      if (!cc || !analysis || analysis.supported) return null
+                                      const supported = analysis.seriesCodes?.join('、') || analysis.alternatives.slice(0, 8).join('、')
+                                      const tone = analysis.matchType === 'sameSeries' ? 'warning' : 'danger'
+                                      return (
+                                        <div className={`flex items-center gap-2 px-2 py-1 rounded-lg border ${tone === 'warning' ? 'bg-warning-50/60 dark:bg-warning-100/5 border-warning-200/60' : 'bg-danger-50/60 dark:bg-danger-100/5 border-danger-200/60'}`}>
+                                          <AlertTriangle className={`w-3.5 h-3.5 shrink-0 ${tone === 'warning' ? 'text-warning' : 'text-danger'}`} />
+                                          <span className={`text-xs flex-1 ${tone === 'warning' ? 'text-warning-700 dark:text-warning-400' : 'text-danger-700 dark:text-danger-400'}`}>
+                                            {analysis.message}{supported ? `；支持：${supported}` : ''}
+                                          </span>
                                         </div>
                                       )
                                     })()}

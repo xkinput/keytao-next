@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { verifyApiKey } from '@/lib/apiKeyAuth'
-import { encodePhrase } from '@/lib/services/keytaoEncoder'
+import { analyzeRequestedCode, encodePhrase } from '@/lib/services/keytaoEncoder'
 
 export async function GET(request: NextRequest) {
   const auth = await verifyApiKey()
   if (!auth.success) return auth.response
 
   const word = request.nextUrl.searchParams.get('word')
+  const requestedCode = request.nextUrl.searchParams.get('code')?.trim()
   if (!word || word.trim() === '') {
     return NextResponse.json({ error: '缺少参数 word' }, { status: 400 })
   }
@@ -16,5 +17,5 @@ export async function GET(request: NextRequest) {
   }
 
   const result = await encodePhrase(word.trim())
-  return NextResponse.json(result)
+  return NextResponse.json(requestedCode ? { ...result, requestedCodeAnalysis: analyzeRequestedCode(result, requestedCode) } : result)
 }

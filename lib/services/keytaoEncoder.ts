@@ -65,13 +65,17 @@ const FINAL_KEY: Record<string, string> = {
   ao: 'z',
 }
 
-// zh outer finals → Q key as initial
-const ZH_OUTER = new Set(['an', 'ang', 'ei', 'en', 'eng', 'u', 'un', 'ai', 'ao', 'e'])
+// zh outer finals → Q key as initial; ai/ao/e can also fly to F
+const ZH_OUTER_BASE = new Set(['an', 'ang', 'ei', 'en', 'eng', 'u', 'un'])
+const ZH_FLY_FINALS = new Set(['ai', 'ao', 'e'])
+const ZH_OUTER = new Set([...ZH_OUTER_BASE, ...ZH_FLY_FINALS])
 // zh inner finals → F key as initial (uang uses X as final key when zh-inner)
 const ZH_INNER = new Set(['a', 'i', 'ong', 'ou', 'ua', 'uai', 'uan', 'uang', 'ui', 'uo'])
 
-// ch outer finals → J key as initial
-const CH_OUTER = new Set(['ai', 'an', 'ang', 'en', 'eng', 'u', 'un', 'ao', 'e'])
+// ch outer finals → J key as initial; ao/e can also fly to W
+const CH_OUTER_BASE = new Set(['ai', 'an', 'ang', 'en', 'eng', 'u', 'un'])
+const CH_FLY_FINALS = new Set(['ao', 'e'])
+const CH_OUTER = new Set([...CH_OUTER_BASE, ...CH_FLY_FINALS])
 // ch inner finals → W key as initial (uang uses X as final key when ch-inner)
 const CH_INNER = new Set(['a', 'i', 'ong', 'ou', 'ua', 'uai', 'uan', 'uang', 'ui', 'uo'])
 
@@ -139,25 +143,6 @@ export function encodeShape(char: string): { c1: string; c2: string; code: strin
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-// Returns the 飞键 alternative initial key for zh/ch (if applicable)
-function altInitialKey(initial: string, final: string): string | null {
-  if (initial === 'zh') {
-    // zh 飞键: ai/ao/e can use either Q or F
-    if (['ai', 'ao', 'e'].includes(final)) {
-      const primary = ZH_OUTER.has(final) ? 'q' : 'f'
-      return primary === 'q' ? 'f' : 'q'
-    }
-  }
-  if (initial === 'ch') {
-    // ch 飞键: ao/e can use either J or W
-    if (['ao', 'e'].includes(final)) {
-      const primary = CH_OUTER.has(final) ? 'j' : 'w'
-      return primary === 'j' ? 'w' : 'j'
-    }
-  }
-  return null
-}
 
 // Returns alternative final key for uang (M↔X)
 function altFinalKey(initial: string, final: string): string | null {
@@ -238,6 +223,36 @@ export interface CharEncoding {
   fullCode: string       // phoneticCode + shapeCode
 }
 
+export type FlyKeyRule = 'zh-outer' | 'zh-inner' | 'ch-outer' | 'ch-inner' | 'uang-final'
+
+export interface FlyKeyChange {
+  index: number
+  char: string
+  pinyin: string
+  fromKey: string
+  toKey: string
+  rule: FlyKeyRule
+  kind: 'initial' | 'final'
+}
+
+export interface FlyKeyVariant {
+  baseCode: string
+  codes: string[]
+  changes: FlyKeyChange[]
+}
+
+export interface RequestedCodeAnalysis {
+  code: string
+  supported: boolean
+  matchType: 'standard' | 'flyKey' | 'sameSeries' | 'unsupported'
+  message: string
+  matchedCode?: string
+  seriesBase?: string
+  seriesCodes?: string[]
+  changes?: FlyKeyChange[]
+  alternatives: string[]
+}
+
 export async function encodeChar(char: string): Promise<CharEncoding> {
   const pinyins = await getPinyinFromZdic(char)
   const pinyinStr = pinyins[0] ?? ''
@@ -268,6 +283,8 @@ export interface PhraseEncoding {
   codes: string[]
   // 飞键 variants for base code (zh/ch/uang alt positions)
   altCodes: string[]
+  // Grouped fly-key series. Each series contains its own progressive shape codes.
+  flyKeyVariants: FlyKeyVariant[]
 }
 
 function firstShapeKey(enc: CharEncoding): string {
@@ -285,36 +302,155 @@ function buildCodes(base: string, shapeSteps: string[]): string[] {
   return codes
 }
 
-function buildAltCodes(
+interface KeyChoice {
+  initKey: string
+  finKey: string
+  change: FlyKeyChange | null
+}
+
+function initialFlyChoice(char: CharEncoding, info: { initial: string; final: string }, index: number): KeyChoice | null {
+  const initKey = char.phoneticCode[0] ?? ''
+  const finKey = char.phoneticCode[1] ?? ''
+  if (info.initial === 'zh' && ZH_FLY_FINALS.has(info.final) && initKey === 'q') {
+    return {
+      initKey: 'f',
+      finKey,
+      change: { index, char: char.char, pinyin: char.pinyin, fromKey: 'q', toKey: 'f', rule: 'zh-inner', kind: 'initial' },
+    }
+  }
+  if (info.initial === 'ch' && CH_FLY_FINALS.has(info.final) && initKey === 'j') {
+    return {
+      initKey: 'w',
+      finKey,
+      change: { index, char: char.char, pinyin: char.pinyin, fromKey: 'j', toKey: 'w', rule: 'ch-inner', kind: 'initial' },
+    }
+  }
+  return null
+}
+
+function finalFlyChoice(char: CharEncoding, info: { initial: string; final: string }, index: number): KeyChoice | null {
+  const initKey = char.phoneticCode[0] ?? ''
+  const finKey = char.phoneticCode[1] ?? ''
+  const altFin = altFinalKey(info.initial, info.final)
+  if (!altFin) return null
+  return {
+    initKey,
+    finKey: altFin,
+    change: { index, char: char.char, pinyin: char.pinyin, fromKey: finKey, toKey: altFin, rule: 'uang-final', kind: 'final' },
+  }
+}
+
+function phraseCodePositions(length: number): number[] {
+  if (length <= 3) return Array.from({ length }, (_, index) => index)
+  return [0, 1, 2, length - 1]
+}
+
+function buildBaseFromChoices(length: number, choices: KeyChoice[]): string {
+  if (length <= 2) return choices.map(choice => choice.initKey + choice.finKey).join('')
+  return choices.map(choice => choice.initKey).join('')
+}
+
+function buildFlyKeyVariants(
   chars: CharEncoding[],
   pinyinInfos: Array<{ initial: string; final: string }>,
-  baseBuilder: (altInitKeys: (string | null)[], altFinKeys: (string | null)[]) => string | null
-): string[] {
-  const alts: string[] = []
-
-  // Try alt initial for each char that has one
-  for (let i = 0; i < chars.length; i++) {
-    const { initial, final } = pinyinInfos[i]
-    const altInit = altInitialKey(initial, final)
-    const altFin = altFinalKey(initial, final)
-
-    if (altInit !== null) {
-      const altInitKeys = pinyinInfos.map((_, j) => (j === i ? altInit : null))
-      const code = baseBuilder(altInitKeys, pinyinInfos.map(() => null))
-      if (code) alts.push(code)
+  base: string,
+  shapeSteps: string[]
+): FlyKeyVariant[] {
+  const positions = phraseCodePositions(chars.length)
+  const choicesByPosition = positions.map((charIndex) => {
+    const char = chars[charIndex]
+    const info = pinyinInfos[charIndex]
+    const primary: KeyChoice = {
+      initKey: char.phoneticCode[0] ?? '',
+      finKey: char.phoneticCode[1] ?? '',
+      change: null,
     }
-    if (altFin !== null) {
-      const altFinKeys = pinyinInfos.map((_, j) => (j === i ? altFin : null))
-      const code = baseBuilder(pinyinInfos.map(() => null), altFinKeys)
-      if (code) alts.push(code)
+    const choices = [primary]
+    const initChoice = initialFlyChoice(char, info, charIndex)
+    if (initChoice) choices.push(initChoice)
+    if (chars.length <= 2) {
+      const finChoice = finalFlyChoice(char, info, charIndex)
+      if (finChoice) choices.push(finChoice)
+    }
+    return choices
+  })
+
+  const variants: FlyKeyVariant[] = []
+  const walk = (positionIndex: number, selected: KeyChoice[]) => {
+    if (positionIndex >= choicesByPosition.length) {
+      const changes = selected.map(choice => choice.change).filter((change): change is FlyKeyChange => change !== null)
+      if (changes.length === 0) return
+      const altBase = buildBaseFromChoices(chars.length, selected)
+      if (altBase === base) return
+      variants.push({ baseCode: altBase, codes: buildCodes(altBase, shapeSteps), changes })
+      return
+    }
+    for (const choice of choicesByPosition[positionIndex]) {
+      walk(positionIndex + 1, [...selected, choice])
     }
   }
 
-  return [...new Set(alts)]
+  walk(0, [])
+
+  const unique = new Map<string, FlyKeyVariant>()
+  for (const variant of variants) {
+    if (!unique.has(variant.baseCode)) unique.set(variant.baseCode, variant)
+  }
+
+  return [...unique.values()].sort((a, b) => {
+    const changeCount = a.changes.length - b.changes.length
+    if (changeCount !== 0) return changeCount
+    const firstIndex = a.changes[0].index - b.changes[0].index
+    if (firstIndex !== 0) return firstIndex
+    return a.baseCode.localeCompare(b.baseCode)
+  })
 }
 
-export async function encodePhrase(word: string): Promise<PhraseEncoding> {
-  const chars = await Promise.all([...word].map(encodeChar))
+export function analyzeRequestedCode(encoding: PhraseEncoding, requestedCode: string): RequestedCodeAnalysis {
+  const code = requestedCode.trim().toLowerCase()
+  const alternatives = [...new Set([...encoding.codes, ...encoding.altCodes])]
+
+  if (!code) {
+    return { code, supported: false, matchType: 'unsupported', message: '未提供目标编码', alternatives }
+  }
+
+  if (encoding.codes.includes(code)) {
+    return { code, supported: true, matchType: 'standard', matchedCode: code, seriesBase: encoding.codes[0], seriesCodes: encoding.codes, message: `${code} 是标准候选编码`, alternatives }
+  }
+
+  const exactFly = encoding.flyKeyVariants.find(variant => variant.codes.includes(code))
+  if (exactFly) {
+    return {
+      code,
+      supported: true,
+      matchType: 'flyKey',
+      matchedCode: code,
+      seriesBase: exactFly.baseCode,
+      seriesCodes: exactFly.codes,
+      changes: exactFly.changes,
+      message: `${code} 是固定飞键候选编码`,
+      alternatives,
+    }
+  }
+
+  const sameSeries = encoding.flyKeyVariants.find(variant => code.startsWith(variant.baseCode) || variant.codes.some(candidate => candidate.startsWith(code)))
+  if (sameSeries) {
+    return {
+      code,
+      supported: false,
+      matchType: 'sameSeries',
+      seriesBase: sameSeries.baseCode,
+      seriesCodes: sameSeries.codes,
+      changes: sameSeries.changes,
+      message: `${code} 属于 ${sameSeries.baseCode} 系列，但不是当前规则生成的候选码`,
+      alternatives,
+    }
+  }
+
+  return { code, supported: false, matchType: 'unsupported', message: `${code} 不在当前固定飞键规则生成的候选中`, alternatives }
+}
+
+export function buildPhraseEncodingFromChars(word: string, chars: CharEncoding[]): PhraseEncoding {
   const pinyinInfos = chars.map((c) => parsePinyin(c.pinyin))
 
   const n = chars.length
@@ -343,26 +479,13 @@ export async function encodePhrase(word: string): Promise<PhraseEncoding> {
   }
 
   const codes = buildCodes(base, shapeSteps)
+  const flyKeyVariants = buildFlyKeyVariants(chars, pinyinInfos, base, shapeSteps)
+  const altCodes = [...new Set(flyKeyVariants.flatMap(variant => variant.codes))]
 
-  const altCodes = buildAltCodes(chars, pinyinInfos, (altInitKeys, altFinKeys) => {
-    const parts: string[] = []
-    for (let i = 0; i < n; i++) {
-      if (n === 1 || n === 2) {
-        let initKey = chars[i].phoneticCode[0]
-        let finKey = chars[i].phoneticCode[1]
-        if (altInitKeys[i]) initKey = altInitKeys[i]!
-        if (altFinKeys[i]) finKey = altFinKeys[i]!
-        parts.push(initKey + finKey)
-      } else {
-        if (n >= 4 && i > 2 && i < n - 1) continue
-        let initKey = chars[i].phoneticCode[0]
-        if (altInitKeys[i]) initKey = altInitKeys[i]!
-        parts.push(initKey)
-      }
-    }
-    const code = parts.join('')
-    return code !== base ? code : null
-  })
+  return { input: word, type, chars, codes, altCodes, flyKeyVariants }
+}
 
-  return { input: word, type, chars, codes, altCodes }
+export async function encodePhrase(word: string): Promise<PhraseEncoding> {
+  const chars = await Promise.all([...word].map(encodeChar))
+  return buildPhraseEncodingFromChars(word, chars)
 }

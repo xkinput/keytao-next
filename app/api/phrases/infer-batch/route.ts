@@ -62,7 +62,7 @@ export async function POST(request: NextRequest) {
 
     const results: InferResponse[] = encodings.map((encoding, i) => {
       const word = validWords[i]
-      const { codes, altCodes, type } = encoding
+      const { codes, altCodes, type, flyKeyVariants } = encoding
 
       let suggestion: string | null = null
       let suggestionIndex = 0
@@ -89,6 +89,7 @@ export async function POST(request: NextRequest) {
         type,
         codes,
         altCodes,
+        flyKeyVariants,
         suggestion,
         suggestionIndex,
         isBaseConflict: codes.length > 0 && occupiedCodes.has(codes[0]),

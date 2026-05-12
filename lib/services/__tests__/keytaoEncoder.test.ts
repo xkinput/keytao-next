@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { encodePhonetic, parsePinyin, getPinyinFromZdic, encodeChar, encodePhrase } from '../keytaoEncoder'
+import { analyzeRequestedCode, buildPhraseEncodingFromChars, encodePhonetic, parsePinyin, getPinyinFromZdic, encodeChar, encodePhrase, type CharEncoding } from '../keytaoEncoder'
 
 // encodePhonetic(initial, final) → 2-char phonetic code
 // finals are as returned by pinyin-pro (toneType:'none')
@@ -300,6 +300,64 @@ describe('parsePinyin', () => {
     ['zhong', { initial: 'zh', final: 'ong' }],
   ])('parsePinyin(%s) → %o', (input, expected) => {
     expect(parsePinyin(input)).toEqual(expected)
+  })
+})
+
+function charEncoding(char: string, pinyin: string, phoneticCode: string, shapeCode: string): CharEncoding {
+  return {
+    char,
+    pinyin,
+    pinyins: [pinyin],
+    phoneticCode,
+    c1: null,
+    c2: null,
+    shapeCode,
+    fullCode: phoneticCode + shapeCode,
+  }
+}
+
+describe('fixed fly-key phrase variants', () => {
+  it('generates combined zh fly-key series for repeated zh syllables', () => {
+    const result = buildPhraseEncodingFromChars('啫啫煲', [
+      charEncoding('啫', 'zhě', 'qe', 'ouov'),
+      charEncoding('啫', 'zhě', 'qe', 'ouov'),
+      charEncoding('煲', 'bāo', 'bz', 'ioou'),
+    ])
+
+    expect(result.codes).toEqual(['qqb', 'qqbo', 'qqboo', 'qqbooi'])
+    expect(result.flyKeyVariants.map(variant => variant.baseCode)).toEqual(['fqb', 'qfb', 'ffb'])
+    expect(result.flyKeyVariants.find(variant => variant.baseCode === 'ffb')?.codes).toEqual(['ffb', 'ffbo', 'ffboo', 'ffbooi'])
+    expect(result.altCodes).toContain('ffb')
+    expect(result.altCodes).toContain('ffbooi')
+  })
+
+  it('generates combined ch fly-key series only for fixed ch fly finals', () => {
+    const result = buildPhraseEncodingFromChars('车车包', [
+      charEncoding('车', 'chē', 'je', 'vo'),
+      charEncoding('车', 'chē', 'je', 'vo'),
+      charEncoding('包', 'bāo', 'bz', 'av'),
+    ])
+
+    expect(result.codes[0]).toBe('jjb')
+    expect(result.flyKeyVariants.map(variant => variant.baseCode)).toEqual(['wjb', 'jwb', 'wwb'])
+  })
+
+  it('analyzes user-requested fixed fly-key codes and unsupported same-series codes', () => {
+    const result = buildPhraseEncodingFromChars('啫啫煲', [
+      charEncoding('啫', 'zhě', 'qe', 'ouov'),
+      charEncoding('啫', 'zhě', 'qe', 'ouov'),
+      charEncoding('煲', 'bāo', 'bz', 'ioou'),
+    ])
+
+    const supported = analyzeRequestedCode(result, 'ffb')
+    expect(supported.supported).toBe(true)
+    expect(supported.matchType).toBe('flyKey')
+    expect(supported.seriesCodes).toEqual(['ffb', 'ffbo', 'ffboo', 'ffbooi'])
+
+    const sameSeries = analyzeRequestedCode(result, 'ffba')
+    expect(sameSeries.supported).toBe(false)
+    expect(sameSeries.matchType).toBe('sameSeries')
+    expect(sameSeries.seriesCodes).toEqual(['ffb', 'ffbo', 'ffboo', 'ffbooi'])
   })
 })
 
