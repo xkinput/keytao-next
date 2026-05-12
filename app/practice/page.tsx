@@ -104,10 +104,11 @@ const PRACTICE_SCHEME_OPTIONS: Array<{ key: PracticeSchemeKey; label: string; as
   { key: 'keytao', label: '键道6', asset: 'keytao-linux' },
   { key: 'xmjd', label: '星猫键道', asset: 'xmjd6.zip' },
   { key: 'txjx', label: '天行键', asset: 'txjx.zip' },
+  { key: 'keydo', label: '键道·我流', asset: 'main.zip' },
 ]
 
 function isPracticeSchemeKey(value: string | null): value is PracticeSchemeKey {
-  return value === 'keytao' || value === 'xmjd' || value === 'txjx'
+  return value === 'keytao' || value === 'xmjd' || value === 'txjx' || value === 'keydo'
 }
 
 const ARTICLE_OPTIONS = [

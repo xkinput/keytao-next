@@ -18,6 +18,7 @@ const EMPTY_CACHED_SCHEMES: CachedSchemeVersions = {
   keytao: [],
   xmjd: [],
   txjx: [],
+  keydo: [],
 }
 
 function sortCachedVersions(versions: CachedPracticeSchemeVersion[]): CachedPracticeSchemeVersion[] {
