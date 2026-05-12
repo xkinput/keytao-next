@@ -896,6 +896,12 @@ export default function CreatePRModal({
     }
   }
 
+  const applyFlyKeyCode = (fieldIndex: number, fieldId: string, code: string) => {
+    setValue(`items.${fieldIndex}.code`, code, { shouldDirty: true, shouldValidate: true })
+    autoFilledRef.current.delete(fieldId)
+    updateMeta(fieldId, { hasChecked: false, conflict: null })
+  }
+
   // Navigate to next/previous conflict or warning
   const navigateToIssue = (direction: 'next' | 'prev') => {
     const issueIndices: number[] = []
@@ -1315,6 +1321,36 @@ export default function CreatePRModal({
                                         </div>
                                       </div>
                                     )}
+
+                                    {(() => {
+                                      const inf = inferResults.get(field.id)
+                                      const currentCode = watch(`items.${index}.code`)
+                                      const flyKeyCodes = [...new Set((inf?.flyKeyVariants ?? []).flatMap(variant => variant.codes))]
+                                      if (act === 'Delete' || flyKeyCodes.length === 0) return null
+                                      const visibleCodes = flyKeyCodes.slice(0, 12)
+                                      return (
+                                        <div className="flex items-center gap-1.5 overflow-x-auto px-1 py-0.5">
+                                          <span className="text-xs text-default-500 shrink-0">飞键</span>
+                                          {visibleCodes.map(code => (
+                                            <Button
+                                              key={code}
+                                              size="sm"
+                                              variant={currentCode === code ? 'solid' : 'flat'}
+                                              color={currentCode === code ? 'primary' : 'default'}
+                                              className="h-6 min-w-0 px-2 text-xs shrink-0"
+                                              onPress={() => applyFlyKeyCode(index, field.id, code)}
+                                            >
+                                              {code}
+                                            </Button>
+                                          ))}
+                                          {flyKeyCodes.length > visibleCodes.length && (
+                                            <Tooltip content={flyKeyCodes.slice(visibleCodes.length).join('、')}>
+                                              <Chip size="sm" variant="flat" className="h-6 text-xs shrink-0">+{flyKeyCodes.length - visibleCodes.length}</Chip>
+                                            </Tooltip>
+                                          )}
+                                        </div>
+                                      )
+                                    })()}
 
                                     {/* Type mismatch inline warning */}
                                     {(() => {
