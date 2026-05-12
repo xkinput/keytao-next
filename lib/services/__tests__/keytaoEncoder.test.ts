@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { analyzeRequestedCode, buildPhraseEncodingFromChars, encodePhonetic, parsePinyin, getPinyinFromZdic, encodeChar, encodePhrase, type CharEncoding } from '../keytaoEncoder'
+import { analyzeRequestedCode, buildPhraseEncodingFromChars, encodePhonetic, getPhrasePinyins, parsePinyin, getPinyinFromZdic, encodeChar, encodePhrase, type CharEncoding } from '../keytaoEncoder'
 
 // encodePhonetic(initial, final) → 2-char phonetic code
 // finals are as returned by pinyin-pro (toneType:'none')
@@ -300,6 +300,29 @@ describe('parsePinyin', () => {
     ['zhong', { initial: 'zh', final: 'ong' }],
   ])('parsePinyin(%s) → %o', (input, expected) => {
     expect(parsePinyin(input)).toEqual(expected)
+  })
+})
+
+describe('phrase-level pinyin disambiguation', () => {
+  it.each([
+    ['吓了', ['xià', 'le']],
+    ['了解', ['liǎo', 'jiě']],
+    ['为了', ['wèi', 'le']],
+    ['知了', ['zhī', 'liǎo']],
+    ['读着', ['dú', 'zhe']],
+    ['学着', ['xué', 'zhe']],
+    ['着想', ['zhuó', 'xiǎng']],
+  ])('resolves contextual pinyin for %s', (word, expected) => {
+    expect(getPhrasePinyins(word)).toEqual(expected)
+  })
+
+  it('encodes 吓了 with le instead of liao', () => {
+    const result = buildPhraseEncodingFromChars('吓了', [
+      charEncoding('吓', 'xià', 'xs', 'ovio'),
+      charEncoding('了', 'le', 'le', 'ai'),
+    ])
+
+    expect(result.codes).toEqual(['xsle', 'xsleo', 'xsleoa'])
   })
 })
 

@@ -2,7 +2,18 @@ import { NextRequest, NextResponse } from 'next/server'
 import { verifyBotToken } from '@/lib/botAuth'
 import { prisma } from '@/lib/prisma'
 import { checkBatchConflictsWithWeight } from '@/lib/services/batchConflictService'
+import { buildBatchSubmitWarnings } from '@/lib/services/batchSubmitWarnings'
 import { PhraseType } from '@/lib/constants/phraseTypes'
+
+function getErrorCode(error: unknown): string | undefined {
+  return typeof error === 'object' && error !== null && 'code' in error
+    ? String((error as { code: unknown }).code)
+    : undefined
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : '未知错误'
+}
 
 /**
  * Bot API: Submit batch for review
@@ -50,10 +61,10 @@ export async function POST(
           [platformField]: platformId
         }
       })
-    } catch (prismaError: any) {
+    } catch (prismaError: unknown) {
       console.error('[Bot API] Prisma error:', prismaError)
 
-      if (prismaError.code === 'P2022') {
+      if (getErrorCode(prismaError) === 'P2022') {
         return NextResponse.json(
           { success: false, message: '系统配置错误，请联系管理员更新数据库' },
           { status: 500 }
@@ -147,21 +158,7 @@ export async function POST(
 
     // Check for warnings (重码/多编码) — block until confirmed
     if (!confirmed) {
-      const warnings = results
-        .filter((result, i) => {
-          const isResolved = result.conflict.suggestions?.some(sug => sug.action === 'Resolved')
-          const pr = batch.pullRequests[i]
-          // Skip Change items whose currentPhrase is the old word being replaced
-          const isChangeOldWord = pr.action === 'Change' &&
-            result.conflict.currentPhrase?.word === pr.oldWord
-          return result.conflict.currentPhrase && !isResolved && !isChangeOldWord
-        })
-        .map((result, _, arr) => ({
-          word: result.conflict.currentPhrase!.word,
-          code: result.conflict.code,
-          weight: result.conflict.currentPhrase!.weight,
-          impact: result.conflict.impact
-        }))
+      const warnings = buildBatchSubmitWarnings(items, results)
 
       if (warnings.length > 0) {
         return NextResponse.json(
@@ -193,18 +190,19 @@ export async function POST(
         status: updated.status
       }
     })
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('[Bot API] Submit error:', error)
 
     // Handle specific error types
-    if (error.code === 'P2022') {
+    const errorCode = getErrorCode(error)
+    if (errorCode === 'P2022') {
       return NextResponse.json(
         { success: false, message: '数据库配置错误，请联系管理员检查数据库迁移状态' },
         { status: 500 }
       )
     }
 
-    if (error.code === 'P2025') {
+    if (errorCode === 'P2025') {
       return NextResponse.json(
         { success: false, message: '批次或用户不存在' },
         { status: 404 }
@@ -212,7 +210,7 @@ export async function POST(
     }
 
     return NextResponse.json(
-      { success: false, message: `提交失败：${error.message || '未知错误'}` },
+      { success: false, message: `提交失败：${getErrorMessage(error)}` },
       { status: 500 }
     )
   }

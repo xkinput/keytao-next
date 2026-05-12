@@ -1,5 +1,6 @@
 import * as fs from 'fs'
 import * as path from 'path'
+import { pinyin } from 'pinyin-pro'
 
 // ── Data loading ──────────────────────────────────────────────────────────────
 
@@ -173,6 +174,12 @@ export function parsePinyin(p: string): { initial: string; final: string } {
   return { initial: '', final: norm }
 }
 
+export function getPhrasePinyins(word: string): string[] {
+  const result = pinyin(word, { type: 'array', toneType: 'symbol' })
+  if (!Array.isArray(result)) return []
+  return result.map(item => item.trim()).filter(Boolean)
+}
+
 // Tone-mark regex: matches one pinyin syllable with at least one toned vowel
 const TONED_PINYIN_RE = /((?:zh|ch|sh|[bpmfdtnlgkhjqxrzcswy])?[āáǎàēéěèīíǐìōóǒòūúǔùǖǘǚǜ][a-züāáǎàēéěèīíǐìōóǒòūúǔùǖǘǚǜ]*)/
 
@@ -253,8 +260,9 @@ export interface RequestedCodeAnalysis {
   alternatives: string[]
 }
 
-export async function encodeChar(char: string): Promise<CharEncoding> {
-  const pinyins = await getPinyinFromZdic(char)
+export async function encodeChar(char: string, preferredPinyin?: string): Promise<CharEncoding> {
+  const zdicPinyins = await getPinyinFromZdic(char)
+  const pinyins = [...new Set([preferredPinyin, ...zdicPinyins].filter((item): item is string => Boolean(item)))]
   const pinyinStr = pinyins[0] ?? ''
   const { initial, final } = parsePinyin(pinyinStr)
   const phoneticCode = encodePhonetic(initial, final)
@@ -486,6 +494,7 @@ export function buildPhraseEncodingFromChars(word: string, chars: CharEncoding[]
 }
 
 export async function encodePhrase(word: string): Promise<PhraseEncoding> {
-  const chars = await Promise.all([...word].map(encodeChar))
+  const phrasePinyins = getPhrasePinyins(word)
+  const chars = await Promise.all([...word].map((char, index) => encodeChar(char, phrasePinyins[index])))
   return buildPhraseEncodingFromChars(word, chars)
 }
