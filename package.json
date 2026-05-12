@@ -3,7 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "prepare:librime-wasm": "node scripts/prepare-librime-wasm-assets.mjs",
+    "dev": "pnpm run prepare:librime-wasm && next dev",
+    "prebuild": "pnpm run prepare:librime-wasm",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",

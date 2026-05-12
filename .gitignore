@@ -16,6 +16,11 @@
 # next.js
 /.next/
 /out/
+/public/librime-wasm/
+/.cache/librime-wasm/
+/lib/librime-wasm/runtime/rime.js
+/lib/librime-wasm/runtime/rime.wasm
+/lib/librime-wasm/runtime/rime.data
 
 # production
 /build
