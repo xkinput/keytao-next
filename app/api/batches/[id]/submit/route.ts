@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { checkBatchConflictsWithWeight } from '@/lib/services/batchConflictService'
+import { buildBatchSubmitWarnings } from '@/lib/services/batchSubmitWarnings'
 import { PhraseType } from '@/lib/constants/phraseTypes'
 
 // POST /api/batches/:id/submit - Submit batch for review
@@ -15,6 +16,8 @@ export async function POST(
     if (!session) {
       return NextResponse.json({ error: '未登录' }, { status: 401 })
     }
+    const body = await request.json().catch(() => ({})) as { confirmed?: boolean }
+    const confirmed = body.confirmed === true
 
     const batch = await prisma.batch.findUnique({
       where: { id },
@@ -78,6 +81,21 @@ export async function POST(
         },
         { status: 400 }
       )
+    }
+
+    if (!confirmed) {
+      const warnings = buildBatchSubmitWarnings(items, results)
+
+      if (warnings.length > 0) {
+        return NextResponse.json(
+          {
+            error: `批次中存在 ${warnings.length} 个重码/多编码警告，确认后可继续提交`,
+            warnings,
+            requiresConfirmation: true,
+          },
+          { status: 400 }
+        )
+      }
     }
 
     // Update batch status

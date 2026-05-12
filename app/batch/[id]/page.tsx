@@ -22,6 +22,7 @@ import BatchActionsDropdown from '@/app/components/BatchActionsDropdown'
 import { useUIStore } from '@/lib/store/ui'
 import { BATCH_STATUS_MAP, STATUS_COLOR_MAP } from '@/lib/constants/status'
 import type { PhraseType } from '@/lib/constants/phraseTypes'
+import { formatBatchSubmitWarnings, type BatchSubmitWarning } from '@/lib/services/batchSubmitWarnings'
 import { Edit, AlertTriangle, Lightbulb } from 'lucide-react'
 
 interface PullRequest {
@@ -154,11 +155,22 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
   const handleSubmit = async () => {
     if (!batch) return
 
-    const submitBatch = async () => {
+    const items = batch.batch.pullRequests.map((pr) => ({
+      id: pr.id.toString(),
+      action: pr.action,
+      word: pr.word || '',
+      oldWord: pr.oldWord || undefined,
+      code: pr.code || '',
+      type: (pr.type || 'Phrase') as PhraseType,
+      weight: pr.weight || undefined
+    }))
+
+    const submitBatch = async (confirmed = false) => {
       setSubmitting(true)
       try {
         await apiRequest(`/api/batches/${resolvedParams.id}/submit`, {
           method: 'POST',
+          body: confirmed ? { confirmed: true } : undefined,
           withAuth: true
         })
         openAlert('批次已提交审核', '提交成功')
@@ -168,6 +180,8 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
         const error = err as Error & {
           info?: {
             error?: string
+            requiresConfirmation?: boolean
+            warnings?: BatchSubmitWarning[]
             conflicts?: Array<{
               hasConflict: boolean
               code: string
@@ -176,6 +190,18 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
             }>
           }
           status?: number
+        }
+
+        if (error.info?.requiresConfirmation && error.info.warnings?.length) {
+          const message =
+            '! 重要提示 - 请仔细阅读以下警告\n\n' +
+            formatBatchSubmitWarnings(error.info.warnings, items).join('\n\n' + '─'.repeat(50) + '\n\n') +
+            '\n\n确认要继续提交吗？'
+
+          openConfirm(message, async () => {
+            await submitBatch(true)
+          }, '提交审核', '确认提交', '取消')
+          return
         }
 
         // Construct detailed error message with conflicts
@@ -189,88 +215,6 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
       } finally {
         setSubmitting(false)
       }
-    }
-
-    const items = batch.batch.pullRequests.map((pr) => ({
-      id: pr.id.toString(),
-      action: pr.action,
-      word: pr.word || '',
-      oldWord: pr.oldWord || undefined,
-      code: pr.code || '',
-      type: (pr.type || 'Phrase') as PhraseType,
-      weight: pr.weight || undefined
-    }))
-
-    try {
-      const result = await apiRequest('/api/pull-requests/check-conflicts-batch', {
-        method: 'POST',
-        body: { items },
-        withAuth: true
-      }) as {
-        results: Array<{
-          id: string
-          conflict: {
-            hasConflict: boolean
-            currentPhrase?: { word: string; code: string; weight: number }
-            impact?: string
-            suggestions: Array<{ action: string }>
-          }
-        }>
-      }
-
-      const conflictMap = new Map(result.results.map((entry) => [entry.id, entry.conflict]))
-      const warnings: string[] = []
-
-      batch.batch.pullRequests.forEach((pr, index) => {
-        if (pr.action !== 'Create') return
-        const conflict = conflictMap.get(pr.id.toString())
-        if (!conflict?.currentPhrase || conflict.hasConflict) return
-
-        const isResolved = conflict.suggestions?.some((sug) => sug.action === 'Resolved')
-        if (isResolved) return
-
-        const isWordDuplicate =
-          conflict.currentPhrase.word === pr.word &&
-          conflict.currentPhrase.code !== pr.code
-
-        if (isWordDuplicate) {
-          warnings.push(
-            `▶ 项目 #${index + 1} - 词条重复警告:\n` +
-            `   词条: ${pr.word}\n` +
-            `   已存在编码: ${conflict.currentPhrase.code}\n` +
-            `   新增编码: ${pr.code}\n` +
-            `   ! 同一词条将拥有多个编码！`
-          )
-        } else {
-          const match = conflict.impact?.match(/权重: (\d+)/)
-          const actualWeight = match ? match[1] : (conflict.currentPhrase.weight + 1).toString()
-
-          warnings.push(
-            `▶ 项目 #${index + 1} - 创建重码警告:\n` +
-            `   编码: ${pr.code}\n` +
-            `   现有词条: ${conflict.currentPhrase.word} (权重: ${conflict.currentPhrase.weight})\n` +
-            `   新增词条: ${pr.word} (权重: ${actualWeight})\n` +
-            `   ! 这将创建重码（同一编码对应多个词条）！`
-          )
-        }
-      })
-
-      if (warnings.length > 0) {
-        const message =
-          '! 重要提示 - 请仔细阅读以下警告\n\n' +
-          warnings.join('\n\n' + '─'.repeat(50) + '\n\n') +
-          '确认要继续提交吗？'
-
-        openConfirm(message, async () => {
-          await submitBatch()
-        }, '提交审核', '确认提交', '取消')
-        return
-      }
-    } catch (err) {
-      const error = err as Error
-      const message = error.message ? `${error.message}\n请重试` : '检测失败，请重试'
-      openAlert(message, '检测失败')
-      return
     }
 
     openConfirm('确定要提交审核吗？', async () => {

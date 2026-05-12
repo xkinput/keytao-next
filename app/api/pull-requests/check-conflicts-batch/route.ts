@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/auth'
 import { checkBatchConflictsWithWeight } from '@/lib/services/batchConflictService'
+import { buildBatchSubmitWarnings } from '@/lib/services/batchSubmitWarnings'
 import { PhraseType } from '@/lib/constants/phraseTypes'
 
 interface PRItemInput {
@@ -32,8 +33,9 @@ export async function POST(request: NextRequest) {
 
     // Use unified batch conflict detection service
     const results = await checkBatchConflictsWithWeight(items)
+    const warnings = buildBatchSubmitWarnings(items, results)
 
-    return NextResponse.json({ results })
+    return NextResponse.json({ results, warnings })
   } catch (error) {
     console.error('Batch conflict check error:', error)
     return NextResponse.json(

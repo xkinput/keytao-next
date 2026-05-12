@@ -23,6 +23,8 @@ import { apiRequest } from '@/lib/hooks/useSWR'
 import { getPhraseTypeOptions, getDefaultWeight, checkTypeMismatch, detectPhraseType, type PhraseType } from '@/lib/constants/phraseTypes'
 import { CODE_PATTERN } from '@/lib/constants/codeValidation'
 import { useUIStore } from '@/lib/store/ui'
+import type { BatchPRItem } from '@/lib/services/batchConflictService'
+import { buildBatchSubmitWarnings, formatBatchSubmitWarnings, type BatchSubmitWarning } from '@/lib/services/batchSubmitWarnings'
 import { Trash2, FileText, CornerUpLeft, CornerDownLeft, ChevronUp, ChevronDown, Plus, Edit2, AlertTriangle, Eye, Check, Search, WandSparkles } from 'lucide-react'
 import CodePhrasesPopover from './CodePhrasesPopover'
 import WordCodesPopover from './WordCodesPopover'
@@ -73,6 +75,11 @@ interface ConflictInfo {
     toCode?: string
     reason: string
   }>
+}
+
+interface BatchConflictCheckResponse {
+  results: Array<{ id: string; conflict: ConflictInfo }>
+  warnings: BatchSubmitWarning[]
 }
 
 // Form data managed by react-hook-form
@@ -144,6 +151,17 @@ export default function CreatePRModal({
     control,
     name: 'items'
   })
+  const watchedItems = watch('items')
+
+  const buildBatchCheckItems = (items: FormItem[]): BatchPRItem[] => items.map((item, index) => ({
+    id: fields[index]?.id ?? String(index),
+    action: item.action,
+    word: item.word,
+    oldWord: item.action === 'Change' ? item.oldWord || undefined : undefined,
+    code: item.code,
+    weight: item.weight ? parseInt(item.weight) : undefined,
+    type: item.type as PhraseType,
+  }))
 
   // Meta states (conflict detection, checking status)
   const [metaStates, setMetaStates] = useState<Map<string, MetaState>>(new Map())
@@ -201,8 +219,24 @@ export default function CreatePRModal({
     })
   }
 
+  const checkedSubmitWarningIds = (() => {
+    const entries = fields
+      .map((field, index) => ({ field, index, item: watchedItems[index], meta: metaStates.get(field.id) }))
+      .filter((entry): entry is {
+        field: typeof fields[number]
+        index: number
+        item: FormItem
+        meta: MetaState & { conflict: ConflictInfo }
+      } => Boolean(entry.item && entry.meta?.hasChecked && entry.meta.conflict))
+
+    const items = entries.map(entry => buildBatchCheckItems([entry.item]).map(item => ({ ...item, id: entry.field.id }))[0])
+    const results = entries.map(entry => ({ id: entry.field.id, conflict: entry.meta.conflict }))
+
+    return new Set(buildBatchSubmitWarnings(items, results).map(warning => warning.id))
+  })()
+
   // Calculate conflict and warning statistics
-  const conflictStats = useMemo(() => {
+  const conflictStats = (() => {
     const checkedCount = fields.filter(field => {
       const meta = metaStates.get(field.id)
       return meta?.hasChecked
@@ -215,25 +249,23 @@ export default function CreatePRModal({
     let conflictCount = 0
     let warningCount = 0
 
-    fields.forEach((field, index) => {
+    fields.forEach((field) => {
       const meta = metaStates.get(field.id)
       if (!meta?.hasChecked) return
 
       const isResolved = meta.conflict?.suggestions?.some(sug => sug.action === 'Resolved')
-      const action = watch(`items.${index}.action`)
 
       // Conflict: has conflict and not resolved
       if (meta.conflict?.hasConflict && !isResolved) {
         conflictCount++
       }
-      // Warning: Create action with existing phrase (重码警告) but not a hard conflict
-      else if (meta.conflict?.currentPhrase && action === 'Create' && !isResolved) {
+      else if (checkedSubmitWarningIds.has(field.id)) {
         warningCount++
       }
     })
 
     return { hasChecked: true, conflictCount, warningCount }
-  }, [fields, metaStates, watch])
+  })()
 
   // Reset when modal opens/closes - only initialize once per modal session
   useEffect(() => {
@@ -621,18 +653,10 @@ export default function CreatePRModal({
       const result = await apiRequest('/api/pull-requests/check-conflicts-batch', {
         method: 'POST',
         body: {
-          items: formData.items.map((item, idx) => ({
-            id: fields[idx].id,
-            action: item.action,
-            word: item.word,
-            oldWord: item.action === 'Change' ? item.oldWord : undefined,
-            code: item.code,
-            weight: item.weight ? parseInt(item.weight) : undefined,
-            type: item.type
-          }))
+          items: buildBatchCheckItems(formData.items)
         },
         withAuth: true
-      }) as { results: Array<{ id: string; conflict: ConflictInfo }> }
+      }) as BatchConflictCheckResponse
 
       // Update meta states with conflict results
       result.results.forEach(({ id, conflict }) => {
@@ -645,9 +669,10 @@ export default function CreatePRModal({
 
       // Scroll to first conflict if any
       setTimeout(() => {
-        const firstConflictIndex = result.results.findIndex(({ conflict }) => {
+        const warningIds = new Set(result.warnings.map(warning => warning.id))
+        const firstConflictIndex = result.results.findIndex(({ id, conflict }) => {
           const isResolved = conflict.suggestions?.some(sug => sug.action === 'Resolved')
-          return conflict.hasConflict && !isResolved
+          return (conflict.hasConflict && !isResolved) || warningIds.has(id)
         })
 
         if (firstConflictIndex !== -1) {
@@ -694,7 +719,7 @@ export default function CreatePRModal({
           }]
         },
         withAuth: true
-      }) as { results: Array<{ id: string; conflict: ConflictInfo }> }
+      }) as BatchConflictCheckResponse
 
       const conflictData = result.results[0]
       if (conflictData) {
@@ -711,59 +736,44 @@ export default function CreatePRModal({
 
   // Submit handler renamed to avoid conflict
   const onSubmitForm = handleSubmit(async (data) => {
-    // Validate all items have been checked
-    for (let i = 0; i < fields.length; i++) {
-      const meta = getMeta(fields[i].id)
-      if (!meta.hasChecked) {
-        openAlert(`请先检测冲突（项目 #${i + 1}）`, '操作提示')
-        return
-      }
+    const items = buildBatchCheckItems(data.items)
+    let checkResult: BatchConflictCheckResponse
 
-      const isResolved = meta.conflict?.suggestions?.some((sug) => sug.action === 'Resolved')
-      if (meta.conflict?.hasConflict && !isResolved) {
+    try {
+      checkResult = await apiRequest('/api/pull-requests/check-conflicts-batch', {
+        method: 'POST',
+        body: { items },
+        withAuth: true
+      }) as BatchConflictCheckResponse
+    } catch (err) {
+      const error = err as Error
+      const message = error.message ? `${error.message}\n请重试` : '检测失败，请重试'
+      openAlert(message, '检测失败')
+      return
+    }
+
+    checkResult.results.forEach(({ id, conflict }) => {
+      updateMeta(id, {
+        conflict,
+        hasChecked: true,
+        checking: false,
+      })
+    })
+
+    for (let i = 0; i < checkResult.results.length; i++) {
+      const { conflict } = checkResult.results[i]
+      const isResolved = conflict.suggestions?.some((sug) => sug.action === 'Resolved')
+      if (conflict.hasConflict && !isResolved) {
         openAlert(`存在冲突，请解决后再提交（项目 #${i + 1}）`, '存在冲突')
         return
       }
     }
 
     // Collect items that need confirmation
-    const itemsNeedingConfirmation: string[] = []
+    const itemsNeedingConfirmation: string[] = formatBatchSubmitWarnings(checkResult.warnings, items)
 
     for (let i = 0; i < fields.length; i++) {
       const item = data.items[i]
-      const meta = getMeta(fields[i].id)
-
-      // Skip if conflict is resolved by batch
-      const isResolved = meta.conflict?.suggestions?.some((sug) => sug.action === 'Resolved')
-
-      // Check for Create action warnings
-      if (item.action === 'Create' && meta.conflict?.currentPhrase && !isResolved) {
-        const isWordDuplicate =
-          meta.conflict.currentPhrase.word === item.word &&
-          meta.conflict.currentPhrase.code !== item.code
-
-        if (isWordDuplicate) {
-          itemsNeedingConfirmation.push(
-            `▶ 项目 #${i + 1} - 词条重复警告:\n` +
-            `   词条: ${item.word}\n` +
-            `   已存在编码: ${meta.conflict.currentPhrase.code}\n` +
-            `   新增编码: ${item.code}\n` +
-            `   ! 同一词条将拥有多个编码！`
-          )
-        } else {
-          // Extract suggested weight from impact message
-          const match = meta.conflict.impact?.match(/权重: (\d+)/)
-          const actualWeight = match ? match[1] : (meta.conflict.currentPhrase.weight + 1).toString()
-
-          itemsNeedingConfirmation.push(
-            `▶ 项目 #${i + 1} - 创建重码警告:\n` +
-            `   编码: ${item.code}\n` +
-            `   现有词条: ${meta.conflict.currentPhrase.word} (权重: ${meta.conflict.currentPhrase.weight})\n` +
-            `   新增词条: ${item.word} (权重: ${actualWeight})\n` +
-            `   ! 这将创建重码（同一编码对应多个词条）！`
-          )
-        }
-      }
 
       // Check for Change action - warn about removal
       if (item.action === 'Change' && item.oldWord) {
@@ -911,12 +921,11 @@ export default function CreatePRModal({
       if (!meta?.hasChecked) return
 
       const isResolved = meta.conflict?.suggestions?.some(sug => sug.action === 'Resolved')
-      const action = watch(`items.${index}.action`)
 
       // Has conflict or warning
       const hasIssue =
         (meta.conflict?.hasConflict && !isResolved) ||
-        (meta.conflict?.currentPhrase && action === 'Create' && !isResolved)
+        checkedSubmitWarningIds.has(field.id)
 
       if (hasIssue) {
         issueIndices.push(index)
@@ -956,11 +965,10 @@ export default function CreatePRModal({
       if (!meta?.hasChecked) return
 
       const isResolved = meta.conflict?.suggestions?.some(sug => sug.action === 'Resolved')
-      const action = watch(`items.${index}.action`)
 
       const hasIssue =
         (meta.conflict?.hasConflict && !isResolved) ||
-        (meta.conflict?.currentPhrase && action === 'Create' && !isResolved)
+        checkedSubmitWarningIds.has(field.id)
 
       if (hasIssue) {
         issueIndices.push(index)
@@ -974,7 +982,7 @@ export default function CreatePRModal({
       current: position + 1,
       total: issueIndices.length
     }
-  }, [currentIssueIndex, fields, metaStates, watch])
+  }, [currentIssueIndex, fields, metaStates, checkedSubmitWarningIds])
 
 
   return (
@@ -1004,7 +1012,7 @@ export default function CreatePRModal({
                   const infer = inferResults.get(field.id)
                   const isResolved = meta.conflict?.suggestions?.some(s => s.action === 'Resolved')
                   const hasConflict = !!(meta.conflict?.hasConflict && !isResolved)
-                  const hasWarning = !!(meta.conflict?.currentPhrase && currentAction === 'Create' && !isResolved)
+                  const hasWarning = checkedSubmitWarningIds.has(field.id)
                   const isIncomplete = !currentWord || !currentCode
                   const context = contextResults.get(field.id)
 
@@ -1072,7 +1080,7 @@ export default function CreatePRModal({
                                               method: 'POST',
                                               body: { items: [{ id: field.id, action: 'Change', word: updatedData.word, oldWord: updatedData.oldWord || '', code: updatedData.code, weight: updatedData.weight ? parseInt(updatedData.weight) : undefined, type: updatedData.type }] },
                                               withAuth: true
-                                            }) as { results: Array<{ id: string; conflict: ConflictInfo }> }
+                                            }) as BatchConflictCheckResponse
                                             const conflictData = result.results[0]
                                             if (conflictData) updateMeta(field.id, { conflict: conflictData.conflict, hasChecked: true, checking: false })
                                           } catch { updateMeta(field.id, { checking: false }) }
@@ -1085,7 +1093,7 @@ export default function CreatePRModal({
                                             method: 'POST',
                                             body: { items: [{ id: field.id, action: value, word: currentData.word, oldWord: undefined, code: currentData.code, weight: currentData.weight ? parseInt(currentData.weight) : undefined, type: currentData.type }] },
                                             withAuth: true
-                                          }) as { results: Array<{ id: string; conflict: ConflictInfo }> }
+                                          }) as BatchConflictCheckResponse
                                           const conflictData = result.results[0]
                                           if (conflictData) updateMeta(field.id, { conflict: conflictData.conflict, hasChecked: true, checking: false })
                                         } catch { updateMeta(field.id, { checking: false }) }
@@ -1399,7 +1407,7 @@ export default function CreatePRModal({
                                     {/* Conflict info — compact */}
                                     {meta.conflict && (
                                       <div className={`rounded-lg px-3 py-2 text-xs space-y-1 ${meta.conflict.hasConflict ? 'bg-danger-50 dark:bg-danger-100/10 border border-danger-200' :
-                                        meta.conflict.currentPhrase && act === 'Create' ? 'bg-warning-50 dark:bg-warning-100/10 border border-warning-200' :
+                                        hasWarning ? 'bg-warning-50 dark:bg-warning-100/10 border border-warning-200' :
                                           'bg-success-50 dark:bg-success-100/10 border border-success-200'
                                         }`}>
                                         {meta.conflict.hasConflict ? (
@@ -1416,7 +1424,7 @@ export default function CreatePRModal({
                                           </>
                                         ) : isResolved ? (
                                           <div className="flex items-center gap-1.5 text-success-700 dark:text-success-400"><Check className="w-3 h-3" /> 已解决</div>
-                                        ) : meta.conflict.currentPhrase && act === 'Create' ? (
+                                        ) : hasWarning && meta.conflict.currentPhrase ? (
                                           <>
                                             <div className="flex items-center gap-1.5 font-medium text-warning-700 dark:text-warning-400">
                                               <AlertTriangle className="w-3 h-3 shrink-0" /> {meta.conflict.impact || '重码警告'}
