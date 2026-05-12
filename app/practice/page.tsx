@@ -27,6 +27,7 @@ import {
   RotateCcw,
   SkipForward,
   Sparkles,
+  Trash2,
   Upload,
 } from 'lucide-react'
 import {
@@ -46,6 +47,13 @@ import {
   type PracticeDictionary,
   type PracticeEntry,
 } from '@/lib/services/keytaoPracticeDictionary'
+import {
+  deleteCachedPracticeSchemeZip,
+  getCachedPracticeSchemeZip,
+  putCachedPracticeSchemeZip,
+  type CachedPracticeSchemeVersion,
+} from '@/lib/services/practiceSchemeCache'
+import { usePracticeStore, type PracticeSchemeKey } from '@/lib/store/practice'
 
 const DEFAULT_PRACTICE_TEXT = '我们可以通过键道练习输入文字词组编码方案系统开源词库用户学习效率中文输入法'
 const EMPTY_RIME_CANDIDATES: RimeComposition['candidates'] = []
@@ -84,9 +92,22 @@ interface PracticeInsight {
   characters: CharacterInsight[]
 }
 
-interface ReleaseInfo {
+interface PracticeSchemeReleaseInfo {
+  scheme: PracticeSchemeKey
+  label: string
   version: string
-  downloadUrls: Record<string, string>
+  downloadUrl: string
+  assetName: string
+}
+
+const PRACTICE_SCHEME_OPTIONS: Array<{ key: PracticeSchemeKey; label: string; asset: string }> = [
+  { key: 'keytao', label: '键道6', asset: 'keytao-linux' },
+  { key: 'xmjd', label: '星猫键道', asset: 'xmjd6.zip' },
+  { key: 'txjx', label: '天行键', asset: 'txjx.zip' },
+]
+
+function isPracticeSchemeKey(value: string | null): value is PracticeSchemeKey {
+  return value === 'keytao' || value === 'xmjd' || value === 'txjx'
 }
 
 const ARTICLE_OPTIONS = [
@@ -183,6 +204,12 @@ function formatElapsed(ms: number): string {
   const minutes = Math.floor(totalSeconds / 60).toString().padStart(2, '0')
   const seconds = (totalSeconds % 60).toString().padStart(2, '0')
   return `${minutes}:${seconds}`
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
 }
 
 function getCandidateLabel(index: number): string {
@@ -395,6 +422,32 @@ function mergeSchemaDisplayNames(schemas: RimeSchema[], files: RimeDeployFile[])
   }))
 }
 
+async function readDownloadBlob(response: Response, onProgress: (progress: number) => void): Promise<Blob> {
+  const contentLength = Number(response.headers.get('Content-Length') ?? 0)
+  if (!response.body || !Number.isFinite(contentLength) || contentLength <= 0) {
+    return await response.blob()
+  }
+
+  const reader = response.body.getReader()
+  const chunks: ArrayBuffer[] = []
+  let received = 0
+  onProgress(0)
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    if (!value) continue
+
+    const chunk = new ArrayBuffer(value.byteLength)
+    new Uint8Array(chunk).set(value)
+    chunks.push(chunk)
+    received += value.byteLength
+    onProgress(Math.min(100, Math.round((received / contentLength) * 100)))
+  }
+
+  return new Blob(chunks, { type: response.headers.get('Content-Type') ?? 'application/zip' })
+}
+
 function InsightPanel({ title, insight }: { title: string; insight: PracticeInsight | null }) {
   return (
     <div className="rounded-small border border-default-200 bg-default-50/70 p-3">
@@ -524,10 +577,20 @@ export default function KeyTaoPracticePage() {
   const pendingRimeDeployFilesRef = useRef<RimeDeployFile[]>([])
   const nextRimeDeployIdRef = useRef(0)
   const deployedRimeDeployIdRef = useRef(0)
+  const activeSchemeDownloadIdRef = useRef(0)
+  const didAutoLoadSchemeRef = useRef(false)
+
+  const selectedSchemeKey = usePracticeStore((state) => state.selectedSchemeKey)
+  const cachedSchemeVersions = usePracticeStore((state) => state.cachedSchemeVersions)
+  const hasHydratedPracticeStore = usePracticeStore((state) => state.hasHydrated)
+  const setSelectedSchemeKey = usePracticeStore((state) => state.setSelectedSchemeKey)
+  const upsertCachedSchemeVersion = usePracticeStore((state) => state.upsertCachedSchemeVersion)
+  const removeCachedSchemeVersion = usePracticeStore((state) => state.removeCachedSchemeVersion)
 
   const [dictionary, setDictionary] = useState<PracticeDictionary | null>(null)
   const [schemeStatus, setSchemeStatus] = useState<SchemeStatus>('idle')
   const [schemeMessage, setSchemeMessage] = useState('等待加载键道方案')
+  const [schemeDownloadProgress, setSchemeDownloadProgress] = useState<number | null>(null)
   const [practiceSource, setPracticeSource] = useState<PracticeSource>('common500')
   const [selectedArticleId, setSelectedArticleId] = useState(ARTICLE_OPTIONS[0].id)
   const [sourceText, setSourceText] = useState(DEFAULT_PRACTICE_TEXT)
@@ -560,6 +623,11 @@ export default function KeyTaoPracticePage() {
     () => ARTICLE_OPTIONS.find((article) => article.id === selectedArticleId) ?? ARTICLE_OPTIONS[0],
     [selectedArticleId]
   )
+  const selectedScheme = useMemo(
+    () => PRACTICE_SCHEME_OPTIONS.find((scheme) => scheme.key === selectedSchemeKey) ?? PRACTICE_SCHEME_OPTIONS[0],
+    [selectedSchemeKey]
+  )
+  const selectedSchemeCachedVersions = cachedSchemeVersions[selectedSchemeKey] ?? []
 
   const practiceItems = useMemo(() => {
     if (!dictionary) return []
@@ -691,28 +759,98 @@ export default function KeyTaoPracticePage() {
     setSchemeMessage(`已加载 ${entries.length.toLocaleString()} 条词典记录，来自 ${sourceFiles.length} 个 Rime 词典文件`)
   }, [])
 
-  const loadLatestScheme = useCallback(async () => {
+  const loadPracticeScheme = useCallback(async (schemeKey: PracticeSchemeKey) => {
+    const scheme = PRACTICE_SCHEME_OPTIONS.find((item) => item.key === schemeKey) ?? PRACTICE_SCHEME_OPTIONS[0]
+    const downloadId = ++activeSchemeDownloadIdRef.current
+    setSelectedSchemeKey(schemeKey)
     setSchemeStatus('loading')
-    setSchemeMessage('正在获取 latest Linux 键道方案')
+    setSchemeMessage(`正在获取 latest ${scheme.label} 方案`)
+    setSchemeDownloadProgress(null)
     setFeedback(null)
 
     try {
-      const releaseResponse = await fetch('/api/install/latest-release?platform=github')
-      if (!releaseResponse.ok) throw new Error('无法获取 GitHub latest release')
-      const release = await releaseResponse.json() as ReleaseInfo
-      const linuxUrl = release.downloadUrls?.linux
-      if (!linuxUrl) throw new Error('latest release 中没有 Linux 方案包')
+      const releaseResponse = await fetch(`/api/practice/scheme-release?scheme=${schemeKey}`)
+      if (!releaseResponse.ok) throw new Error(`无法获取 ${scheme.label} latest release`)
+      const release = await releaseResponse.json() as PracticeSchemeReleaseInfo
+      if (!release.downloadUrl) throw new Error(`latest release 中没有 ${scheme.asset}`)
+      if (activeSchemeDownloadIdRef.current !== downloadId) return
 
-      setSchemeMessage(`正在下载 ${release.version} Linux 方案包`)
-      const downloadResponse = await fetch(`/api/install/download?url=${encodeURIComponent(linuxUrl)}`)
-      if (!downloadResponse.ok) throw new Error('Linux 方案包下载失败')
+      const cachedZip = await getCachedPracticeSchemeZip(schemeKey, release.version)
+      if (activeSchemeDownloadIdRef.current !== downloadId) return
+      if (cachedZip) {
+        setSchemeMessage(`正在使用本地 ${release.label} ${release.version} 方案包`)
+        setSchemeDownloadProgress(null)
+        await loadDictionaryFromZip(cachedZip.blob, `${release.label} ${release.version}`, release.version)
+        return
+      }
 
-      await loadDictionaryFromZip(await downloadResponse.blob(), `KeyTao ${release.version} Linux`, release.version)
+      setSchemeMessage(`正在下载 ${release.label} ${release.version} 的 ${release.assetName}`)
+    setSchemeDownloadProgress(null)
+      const downloadResponse = await fetch(`/api/install/download?url=${encodeURIComponent(release.downloadUrl)}`)
+      if (!downloadResponse.ok) throw new Error(`${scheme.label} 方案包下载失败`)
+      if (activeSchemeDownloadIdRef.current !== downloadId) return
+
+      const blob = await readDownloadBlob(downloadResponse, (progress) => {
+        if (activeSchemeDownloadIdRef.current === downloadId) setSchemeDownloadProgress(progress)
+      })
+      if (activeSchemeDownloadIdRef.current !== downloadId) return
+
+      setSchemeMessage(`正在解析 ${release.label} ${release.version} 方案包`)
+    setSchemeDownloadProgress(null)
+      const cachedVersion: CachedPracticeSchemeVersion = {
+        schemeKey,
+        label: release.label,
+        version: release.version,
+        assetName: release.assetName,
+        downloadedAt: new Date().toISOString(),
+        size: blob.size,
+      }
+      await putCachedPracticeSchemeZip({
+        id: `${schemeKey}:${release.version}`,
+        ...cachedVersion,
+        blob,
+      })
+      upsertCachedSchemeVersion(cachedVersion)
+      if (activeSchemeDownloadIdRef.current !== downloadId) return
+
+      await loadDictionaryFromZip(blob, `${release.label} ${release.version}`, release.version)
+      if (activeSchemeDownloadIdRef.current !== downloadId) return
+      setSchemeDownloadProgress(null)
     } catch (error) {
+      if (activeSchemeDownloadIdRef.current !== downloadId) return
       setSchemeStatus('error')
+      setSchemeDownloadProgress(null)
       setSchemeMessage(error instanceof Error ? error.message : '键道方案加载失败')
     }
-  }, [loadDictionaryFromZip])
+  }, [loadDictionaryFromZip, setSelectedSchemeKey, upsertCachedSchemeVersion])
+
+  const loadCachedPracticeScheme = useCallback(async (version: CachedPracticeSchemeVersion) => {
+    const cachedZip = await getCachedPracticeSchemeZip(version.schemeKey, version.version)
+    if (!cachedZip) {
+      removeCachedSchemeVersion(version.schemeKey, version.version)
+      setSchemeStatus('error')
+      setSchemeMessage(`本地 ${version.label} ${version.version} 缓存已不存在`)
+      return
+    }
+
+    activeSchemeDownloadIdRef.current += 1
+    setSelectedSchemeKey(version.schemeKey)
+    setSchemeStatus('loading')
+    setSchemeDownloadProgress(null)
+    setSchemeMessage(`正在使用本地 ${version.label} ${version.version} 方案包`)
+    try {
+      await loadDictionaryFromZip(cachedZip.blob, `${version.label} ${version.version}`, version.version)
+    } catch (error) {
+      setSchemeStatus('error')
+      setSchemeMessage(error instanceof Error ? error.message : '本地方案包解析失败')
+    }
+  }, [loadDictionaryFromZip, removeCachedSchemeVersion, setSelectedSchemeKey])
+
+  const deleteCachedPracticeScheme = useCallback(async (version: CachedPracticeSchemeVersion) => {
+    await deleteCachedPracticeSchemeZip(version.schemeKey, version.version)
+    removeCachedSchemeVersion(version.schemeKey, version.version)
+    setFeedback(`已删除本地 ${version.label} ${version.version}`)
+  }, [removeCachedSchemeVersion])
 
   const resetSession = useCallback(() => {
     setCurrentIndex(0)
@@ -885,9 +1023,20 @@ export default function KeyTaoPracticePage() {
     }
   }, [loadDictionaryFromZip])
 
+  const handlePracticeSchemeChange = useCallback((event: React.ChangeEvent<HTMLSelectElement>) => {
+    const schemeKey = event.target.value
+    if (!isPracticeSchemeKey(schemeKey)) return
+
+    void loadPracticeScheme(schemeKey)
+  }, [loadPracticeScheme])
+
   useEffect(() => {
-    loadLatestScheme()
-  }, [loadLatestScheme])
+    if (!hasHydratedPracticeStore) return
+    if (didAutoLoadSchemeRef.current) return
+
+    didAutoLoadSchemeRef.current = true
+    void loadPracticeScheme(selectedSchemeKey)
+  }, [hasHydratedPracticeStore, loadPracticeScheme, selectedSchemeKey])
 
   useEffect(() => {
     let disposed = false
@@ -1029,15 +1178,27 @@ export default function KeyTaoPracticePage() {
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <Tooltip content="重新下载 latest Linux 键道方案">
+              <label className="flex h-10 items-center gap-2 rounded-small border border-default-200 bg-content1 px-3 text-small">
+                <span className="text-default-500">方案</span>
+                <select
+                  value={selectedSchemeKey}
+                  onChange={handlePracticeSchemeChange}
+                  className="bg-transparent text-small font-medium outline-none"
+                >
+                  {PRACTICE_SCHEME_OPTIONS.map((scheme) => (
+                    <option key={scheme.key} value={scheme.key}>{scheme.label}</option>
+                  ))}
+                </select>
+              </label>
+              <Tooltip content={`下载 latest ${selectedScheme.label} 方案`}>
                 <Button
                   color="primary"
                   variant="flat"
                   startContent={<Download className="h-4 w-4" />}
                   isLoading={schemeStatus === 'loading'}
-                  onPress={loadLatestScheme}
+                  onPress={() => loadPracticeScheme(selectedSchemeKey)}
                 >
-                  下载键道
+                  下载{selectedScheme.label}
                 </Button>
               </Tooltip>
               <Button variant="flat" startContent={<Upload className="h-4 w-4" />} onPress={() => schemeUploadRef.current?.click()}>
@@ -1057,12 +1218,49 @@ export default function KeyTaoPracticePage() {
         <input ref={schemeUploadRef} type="file" accept=".zip,application/zip" className="hidden" onChange={handleSchemeUpload} />
 
         <Alert color={schemeStatus === 'error' ? 'danger' : schemeStatus === 'ready' ? 'success' : 'primary'} variant="flat" className="w-full">
-          <div className="flex w-full flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-            <span>{schemeMessage}</span>
-            {dictionary && (
-              <span className="text-tiny text-default-500">
-                {dictionary.sourceName}{dictionary.version ? ` · ${dictionary.version}` : ''} · {dictionary.entries.length.toLocaleString()} 条去重记录
-              </span>
+          <div className="flex w-full flex-col gap-2">
+            <div className="flex w-full flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+              <span>{schemeMessage}</span>
+              {dictionary && (
+                <span className="text-tiny text-default-500">
+                  {dictionary.sourceName}{dictionary.version ? ` · ${dictionary.version}` : ''} · {dictionary.entries.length.toLocaleString()} 条去重记录
+                </span>
+              )}
+            </div>
+            {schemeDownloadProgress !== null && schemeStatus === 'loading' && (
+              <Progress
+                aria-label="方案下载进度"
+                value={schemeDownloadProgress}
+                color="primary"
+                size="sm"
+              />
+            )}
+            {selectedSchemeCachedVersions.length > 0 && (
+              <div className="flex flex-wrap items-center gap-2 pt-1">
+                <span className="text-tiny text-default-500">本地版本</span>
+                {selectedSchemeCachedVersions.map((version) => (
+                  <div key={`${version.schemeKey}-${version.version}`} className="inline-flex h-8 items-center gap-1 rounded-small border border-default-200 bg-content1 px-2 text-tiny">
+                    <button
+                      type="button"
+                      className="font-medium text-primary hover:underline"
+                      onClick={() => void loadCachedPracticeScheme(version)}
+                    >
+                      {version.version}
+                    </button>
+                    <span className="text-default-400">{formatBytes(version.size)}</span>
+                    <Button
+                      size="sm"
+                      variant="light"
+                      isIconOnly
+                      aria-label={`删除 ${version.label} ${version.version}`}
+                      className="h-6 min-w-6"
+                      onPress={() => void deleteCachedPracticeScheme(version)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
             )}
           </div>
         </Alert>

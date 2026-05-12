@@ -13,6 +13,8 @@ export async function GET(request: NextRequest) {
 
     const allowedPrefixes = [
       'https://github.com/xkinput/KeyTao/releases/download/',
+      'https://github.com/hugh7007/xmjd6-rere/releases/download/',
+      'https://github.com/wzxmer/rime-txjx/releases/download/',
       'https://gitee.com/xkinput/KeyTao/releases/download/',
     ]
     if (!allowedPrefixes.some((prefix) => url.startsWith(prefix))) {
@@ -22,7 +24,6 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    // Fetch the file from GitHub
     const response = await fetch(url, {
       headers: {
         'User-Agent': 'KeyTao-Next',
@@ -33,11 +34,9 @@ export async function GET(request: NextRequest) {
       throw new Error(`Failed to download file: ${response.status}`)
     }
 
-    // Stream the response back to the client, forwarding Content-Length for progress tracking
-    const blob = await response.blob()
     const upstreamLength = response.headers.get('Content-Length')
 
-    return new NextResponse(blob, {
+    return new NextResponse(response.body, {
       status: 200,
       headers: {
         'Content-Type': 'application/zip',
