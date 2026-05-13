@@ -50,6 +50,7 @@ import {
   type PracticeDictionary,
   type PracticeEntry,
 } from '@/lib/services/keytaoPracticeDictionary'
+import { resolvePracticeCommit } from '@/lib/services/practiceCommitFlow'
 import {
   deleteCachedPracticeSchemeZip,
   getCachedPracticeSchemeZip,
@@ -65,7 +66,7 @@ const COMMON_SINGLE_CHARACTER_ORDER = '的一是在不了有和人这中大为�
 const COMMON_CHARACTER_RANK = new Map(Array.from(COMMON_SINGLE_CHARACTER_ORDER).map((char, index) => [char, index]))
 
 type SchemeStatus = 'idle' | 'loading' | 'ready' | 'error'
-type PracticeSource = 'common500' | 'common1000' | 'article' | 'custom' | 'flyKey'
+type PracticeSource = 'common500' | 'common1000' | 'article' | 'custom' | 'flyKey' | 'keytao630'
 type PracticeMode = 'follow' | 'study'
 type FlyKeyRuleId = 'zh-outer' | 'zh-inner' | 'ch-outer' | 'ch-inner' | 'uang-m' | 'uang-x'
 
@@ -123,6 +124,12 @@ function getSingleSelectionValue(keys: 'all' | Set<Key>) {
   return null
 }
 
+const KEYTAO_630_TEXT = `不能 班级 不了 宝贝 不好 不敢 不但 不见 别人 不错 不少 不会 不是 不让 便是 表情 不断 毕竟 必须 不用 别的 爸爸 变得 不知 不过 不到 不想 本来 变成 不禁
+才能 曾经 村子 沧桑 参加 村民 操作 村里 此人 催促 从小 从此 此时 测试 才是 匆忙 从前 此刻 采用 匆匆 苍白 苍老 厕所 村长 存在 参与 从事 从来 才有 从未
+到了 大约 肚子 都能 打架 当即 多少 当中 大人 短信 动作 地上 但是 的话 都是 大家 弟弟 地方 当然 多么 独自 大爷 等待 打算 东西 得到 底下 大哥 对面 对于
+生活 视线 身子 深深 身边 手臂 时候 世界 是从 时光 双手 身上 时间 说话 瞬间 事情 说着 声音 什么 舒服 似的 十分 身后 少年 上面 甚至 剩下 上来 手机 属于
+只能 纷纷 房子 否则 只好 发展 这个 这里 这种 这样 方向 分钟 发现 这个 这里 这种 这样`
+
 const ARTICLE_OPTIONS = [
   {
     id: 'morning-note',
@@ -144,6 +151,7 @@ const ARTICLE_OPTIONS = [
 const PRACTICE_SOURCE_OPTIONS: Array<{ key: PracticeSource; label: string; detail: string }> = [
   { key: 'common500', label: '单字常用字前500', detail: '高频单字' },
   { key: 'common1000', label: '单字常用字前1000', detail: '扩展高频' },
+  { key: 'keytao630', label: '键道630练习', detail: '高频词组' },
   { key: 'article', label: '文章', detail: '下拉选择' },
   { key: 'flyKey', label: '键道飞键练习', detail: 'zh/ch/uang' },
   { key: 'custom', label: '自定义文本', detail: '上传或粘贴' },
@@ -698,6 +706,9 @@ export default function KeyTaoPracticePage() {
     if (!dictionary) return []
     if (practiceSource === 'common500') return createSingleCharacterItems(dictionary, 500)
     if (practiceSource === 'common1000') return createSingleCharacterItems(dictionary, 1000)
+    if (practiceSource === 'keytao630') {
+      return createPracticeItemsFromText(KEYTAO_630_TEXT, dictionary, Number.MAX_SAFE_INTEGER)
+    }
     if (practiceSource === 'flyKey') {
       return createSingleCharacterItems(dictionary, 1000, (entry) => {
         const charPinyin = getPinyinForChar(entry.text)
@@ -1083,8 +1094,9 @@ export default function KeyTaoPracticePage() {
     focusPracticeSurface()
   }, [bumpPracticeTurn, focusPracticeSurface, resetRimeSession])
 
-  const completeCurrentItem = useCallback(() => {
+  const completeCurrentItem = useCallback((carryOverComposition: RimeComposition | null = null) => {
     if (!currentItem) return
+    const nextComposition = currentIndex + 1 < practiceItems.length ? carryOverComposition : null
     bumpPracticeTurn()
     setCompletedText((value) => value + currentItem.text)
     setLastCompletedTarget(currentItem.text)
@@ -1092,13 +1104,13 @@ export default function KeyTaoPracticePage() {
     setCurrentIndex((value) => value + 1)
     currentCommittedTextRef.current = ''
     setCurrentCommittedText('')
-    setRimeComposition(null)
+    setRimeComposition(nextComposition)
     setItemHadMistake(false)
     setFeedback(null)
-    if (rimeStatusRef.current === 'ready') {
+    if (rimeStatusRef.current === 'ready' && !nextComposition) {
       void resetRimeSession().catch(() => undefined)
     }
-  }, [bumpPracticeTurn, currentItem, itemHadMistake, resetRimeSession])
+  }, [bumpPracticeTurn, currentIndex, currentItem, itemHadMistake, practiceItems.length, resetRimeSession])
 
   const skipCurrentItem = useCallback(() => {
     if (!currentItem) return
@@ -1137,26 +1149,31 @@ export default function KeyTaoPracticePage() {
     return true
   }, [bumpPracticeTurn, currentIndex, focusPracticeSurface, practiceItems, resetRimeSession])
 
-  const applyCommittedText = useCallback((committedText: string) => {
-    const currentTargetText = currentItemTextRef.current
-    if (!currentTargetText) return
+  const applyCommittedText = useCallback((committedText: string, composition?: RimeComposition | null) => {
+    const resolution = resolvePracticeCommit({
+      currentCommittedText: currentCommittedTextRef.current,
+      committedText,
+      currentTargetText: currentItemTextRef.current,
+      composition,
+    })
 
-    const nextCommittedText = `${currentCommittedTextRef.current}${committedText}`
-    if (nextCommittedText === currentTargetText) {
-      completeCurrentItem()
+    if (resolution.type === 'noop') return
+
+    if (resolution.type === 'complete') {
+      completeCurrentItem(resolution.carryOverComposition)
       return
     }
 
-    if (currentTargetText.startsWith(nextCommittedText)) {
-      currentCommittedTextRef.current = nextCommittedText
-      setCurrentCommittedText(nextCommittedText)
+    if (resolution.type === 'partial') {
+      currentCommittedTextRef.current = resolution.text
+      setCurrentCommittedText(resolution.text)
       setFeedback(null)
       return
     }
 
     setWrongKeys((value) => value + 1)
     setItemHadMistake(true)
-    setFeedback(`当前输入「${nextCommittedText}」，目标是「${currentTargetText}」`)
+    setFeedback(`当前输入「${resolution.attemptedText}」，目标是「${resolution.targetText}」`)
   }, [completeCurrentItem])
 
   const applyRimeResult = useCallback((result: RimeProcessResult) => {
@@ -1167,7 +1184,7 @@ export default function KeyTaoPracticePage() {
       return
     }
 
-    applyCommittedText(result.committedText)
+    applyCommittedText(result.committedText, result.composition ?? null)
   }, [applyCommittedText])
 
   const processRimeKey = useCallback(async (key: string) => {
