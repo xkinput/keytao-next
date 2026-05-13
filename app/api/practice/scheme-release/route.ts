@@ -6,18 +6,12 @@ interface ReleaseAssetSchemeSource {
   type: 'release-asset'
   owner: string
   repo: string
-  assetName: string
+  assetName?: string
   label: string
+  releaseChannel?: 'latest' | 'prerelease'
 }
 
-interface GithubMainArchiveSchemeSource {
-  type: 'github-main-archive'
-  owner: string
-  repo: string
-  label: string
-}
-
-type PracticeSchemeSource = ReleaseAssetSchemeSource | GithubMainArchiveSchemeSource
+type PracticeSchemeSource = ReleaseAssetSchemeSource
 
 const PRACTICE_SCHEME_SOURCES: Record<PracticeSchemeKey, PracticeSchemeSource> = {
   keytao: {
@@ -42,9 +36,10 @@ const PRACTICE_SCHEME_SOURCES: Record<PracticeSchemeKey, PracticeSchemeSource> =
     label: '天行键',
   },
   keydo: {
-    type: 'github-main-archive',
+    type: 'release-asset',
     owner: 'pingshunhuangalex',
     repo: 'rime-keydo',
+    releaseChannel: 'prerelease',
     label: '键道·我流',
   },
 }
@@ -54,6 +49,10 @@ function isPracticeSchemeKey(value: string | null): value is PracticeSchemeKey {
 }
 
 function findAsset(assets: { name: string; browser_download_url: string }[], source: ReleaseAssetSchemeSource) {
+  if (!source.assetName) {
+    return assets.find((asset) => asset.name.toLowerCase().endsWith('.zip'))
+  }
+
   const expectedName = source.assetName.toLowerCase()
   return assets.find((asset) => {
     const name = asset.name.toLowerCase()
@@ -71,41 +70,20 @@ async function fetchGithubJson(url: string) {
   return await response.json()
 }
 
-async function getGithubMainArchive(scheme: PracticeSchemeKey, source: GithubMainArchiveSchemeSource) {
-  const repo = await fetchGithubJson(`https://api.github.com/repos/${source.owner}/${source.repo}`)
-  if (!repo?.default_branch) {
-    return NextResponse.json({ error: `Failed to fetch ${source.label} repository` }, { status: 502 })
-  }
-
-  const branch = String(repo.default_branch)
-  const commit = await fetchGithubJson(`https://api.github.com/repos/${source.owner}/${source.repo}/commits/${encodeURIComponent(branch)}`)
-  const sha = commit?.sha ? String(commit.sha) : ''
-  if (!sha) {
-    return NextResponse.json({ error: `Failed to fetch ${source.label} main commit` }, { status: 502 })
-  }
-
-  const shortSha = sha.slice(0, 12)
-  return NextResponse.json({
-    scheme,
-    sourceType: source.type,
-    label: source.label,
-    version: shortSha,
-    name: `${source.repo}@${shortSha}`,
-    publishedAt: commit.commit?.committer?.date ?? commit.commit?.author?.date ?? '',
-    downloadUrl: `https://github.com/${source.owner}/${source.repo}/archive/${sha}.zip`,
-    assetName: `${source.repo}-${shortSha}.zip`,
-  })
-}
-
 async function getReleaseAsset(scheme: PracticeSchemeKey, source: ReleaseAssetSchemeSource) {
-  const release = await fetchGithubJson(`https://api.github.com/repos/${source.owner}/${source.repo}/releases/latest`)
+  const release = source.releaseChannel === 'prerelease'
+    ? await (async () => {
+      const releases = await fetchGithubJson(`https://api.github.com/repos/${source.owner}/${source.repo}/releases`)
+      return Array.isArray(releases) ? releases.find((item) => item?.prerelease && !item?.draft) ?? null : null
+    })()
+    : await fetchGithubJson(`https://api.github.com/repos/${source.owner}/${source.repo}/releases/latest`)
   if (!release) {
     return NextResponse.json({ error: `Failed to fetch ${source.label} release` }, { status: 502 })
   }
 
   const asset = findAsset(release.assets ?? [], source)
   if (!asset) {
-    return NextResponse.json({ error: `Latest release does not contain ${source.assetName}` }, { status: 404 })
+    return NextResponse.json({ error: `${source.label} release does not contain a usable zip asset` }, { status: 404 })
   }
 
   return NextResponse.json({
@@ -127,7 +105,5 @@ export async function GET(request: NextRequest) {
   }
 
   const source = PRACTICE_SCHEME_SOURCES[scheme]
-  return source.type === 'release-asset'
-    ? await getReleaseAsset(scheme, source)
-    : await getGithubMainArchive(scheme, source)
+  return await getReleaseAsset(scheme, source)
 }

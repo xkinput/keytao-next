@@ -15,7 +15,7 @@ export async function GET(request: NextRequest) {
       'https://github.com/xkinput/KeyTao/releases/download/',
       'https://github.com/hugh7007/xmjd6-rere/releases/download/',
       'https://github.com/wzxmer/rime-txjx/releases/download/',
-      'https://github.com/pingshunhuangalex/rime-keydo/archive/',
+      'https://github.com/pingshunhuangalex/rime-keydo/releases/download/',
       'https://gitee.com/xkinput/KeyTao/releases/download/',
     ]
     if (!allowedPrefixes.some((prefix) => url.startsWith(prefix))) {

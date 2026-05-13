@@ -52,7 +52,7 @@ import {
   type PracticeDictionary,
   type PracticeEntry,
 } from '@/lib/services/keytaoPracticeDictionary'
-import { resolvePracticeCommit } from '@/lib/services/practiceCommitFlow'
+import { resolveFollowPracticeCommit, resolvePracticeCommit, splitFollowRemainingTexts } from '@/lib/services/practiceCommitFlow'
 import {
   deleteCachedPracticeSchemeZip,
   getCachedPracticeSchemeZip,
@@ -112,7 +112,7 @@ const PRACTICE_SCHEME_OPTIONS: Array<{ key: PracticeSchemeKey; label: string; as
   { key: 'keytao', label: '键道6', asset: 'keytao-linux' },
   { key: 'xmjd', label: '星猫键道', asset: 'xmjd6.zip' },
   { key: 'txjx', label: '天行键', asset: 'txjx.zip' },
-  { key: 'keydo', label: '键道·我流', asset: 'main.zip' },
+  { key: 'keydo', label: '键道·我流', asset: 'nightly zip' },
 ]
 
 function isPracticeSchemeKey(value: string | null): value is PracticeSchemeKey {
@@ -204,6 +204,56 @@ const KEYBOARD_ROWS = [
     { keyName: ',', finals: [], tone: 'outer' },
     { keyName: '.', finals: [], tone: 'outer' },
     { keyName: '/', finals: ['键道6'], tone: 'brand' },
+  ],
+]
+
+type KeydoGraphTone = 'regular'
+
+interface KeydoGraphCell {
+  keyName: string
+  phonetic?: string
+  rootKey?: string
+  cornerLabel?: string
+  bodyRows?: string[][]
+  tone: KeydoGraphTone
+}
+
+const KEYDO_GRAPH_ROWS: KeydoGraphCell[][] = [
+  [
+    { keyName: 'Q', phonetic: 'zh', bodyRows: [['iu', 'ua']], tone: 'regular' },
+    { keyName: 'W', phonetic: 'ch', bodyRows: [['ei', 'un']], tone: 'regular' },
+    { keyName: 'F', phonetic: 'zh', bodyRows: [['an']], tone: 'regular' },
+    { keyName: 'P', bodyRows: [['ang']], tone: 'regular' },
+    { keyName: 'B', bodyRows: [['in', 'ui']], tone: 'regular' },
+    { keyName: 'J', phonetic: 'ch', bodyRows: [['er', 'u']], tone: 'regular' },
+    { keyName: 'L', bodyRows: [['o', 'uo', 'ü']], tone: 'regular' },
+    { keyName: 'U', rootKey: '丿', cornerLabel: '月', bodyRows: [['十 o']], tone: 'regular' },
+    { keyName: 'Y', bodyRows: [['iong', 'ong']], tone: 'regular' },
+    { keyName: ';', bodyRows: [['引导']], tone: 'regular' },
+  ],
+  [
+    { keyName: 'A', rootKey: '𠃌', cornerLabel: '氵', bodyRows: [['贝 o']], tone: 'regular' },
+    { keyName: 'R', bodyRows: [['eng']], tone: 'regular' },
+    { keyName: 'S', bodyRows: [['a', 'ia']], tone: 'regular' },
+    { keyName: 'T', bodyRows: [['uan']], tone: 'regular' },
+    { keyName: 'G', bodyRows: [['ing', 'uai']], tone: 'regular' },
+    { keyName: 'M', bodyRows: [['ian', 'uang']], tone: 'regular' },
+    { keyName: 'N', bodyRows: [['en']], tone: 'regular' },
+    { keyName: 'E', phonetic: 'sh', bodyRows: [['e']], tone: 'regular' },
+    { keyName: 'I', rootKey: '丨', cornerLabel: '亻', bodyRows: [['艹i'], ['钅o', '扌u']], tone: 'regular' },
+    { keyName: 'O', rootKey: '丶', cornerLabel: '口', bodyRows: [['日 i']], tone: 'regular' },
+  ],
+  [
+    { keyName: 'Z', bodyRows: [['ao']], tone: 'regular' },
+    { keyName: 'X', rootKey: '~', bodyRows: [['iang', 'uang']], tone: 'regular' },
+    { keyName: 'C', bodyRows: [['iao']], tone: 'regular' },
+    { keyName: 'D', bodyRows: [['ie', 'ou']], tone: 'regular' },
+    { keyName: 'V', rootKey: '一', cornerLabel: '木', bodyRows: [['土 o']], tone: 'regular' },
+    { keyName: 'K', bodyRows: [['i']], tone: 'regular' },
+    { keyName: 'H', bodyRows: [['ai', 'üe']], tone: 'regular' },
+    { keyName: ',', tone: 'regular' },
+    { keyName: '.', tone: 'regular' },
+    { keyName: '/', bodyRows: [['重复'], ['键道·我流']], tone: 'regular' },
   ],
 ]
 
@@ -575,7 +625,7 @@ function KeyBadge({ children, tone }: { children: string; tone: 'key' | 'initial
   return <span className={`inline-flex h-6 min-w-6 items-center justify-center rounded-[5px] px-1.5 font-mono text-[12px] font-semibold leading-none ${colorClass}`}>{children}</span>
 }
 
-function KeyTaoGraph({ visible }: { visible: boolean }) {
+function StandardKeyTaoGraph({ visible }: { visible: boolean }) {
   if (!visible) return null
 
   return (
@@ -623,6 +673,72 @@ function KeyTaoGraph({ visible }: { visible: boolean }) {
       </table>
     </div>
   )
+}
+
+function KeydoGraph({ visible }: { visible: boolean }) {
+  if (!visible) return null
+
+  return (
+    <div className="overflow-hidden rounded-small border border-default-200 bg-content1 shadow-sm">
+      <table className="w-full table-fixed border-collapse text-center">
+        <tbody>
+          {KEYDO_GRAPH_ROWS.map((row, rowIndex) => (
+            <Fragment key={`keydo-row-${rowIndex}`}>
+              <tr className="h-9 border-b border-default-200 bg-content1">
+                {row.map((item) => {
+                  const hasActiveRootInfo = Boolean((item.rootKey && item.rootKey !== '~') || item.cornerLabel)
+                  return (
+                    <td
+                      key={`${item.keyName}-head`}
+                      className="border-r border-default-200 px-1 py-1 align-middle last:border-r-0"
+                    >
+                      <div className="flex flex-wrap items-center justify-center gap-1">
+                        <KeyBadge tone="key">{item.keyName}</KeyBadge>
+                        {item.phonetic && <KeyBadge tone="initial">{item.phonetic}</KeyBadge>}
+                        {item.rootKey && <KeyBadge tone={item.rootKey === '~' ? 'muted' : 'root'}>{item.rootKey}</KeyBadge>}
+                        {item.cornerLabel && <KeyBadge tone={hasActiveRootInfo ? 'root' : 'muted'}>{item.cornerLabel}</KeyBadge>}
+                      </div>
+                    </td>
+                  )
+                })}
+              </tr>
+              <tr className={`h-10 border-b border-default-200 last:border-b-0 ${rowIndex === 1 ? 'bg-default-50' : 'bg-content1'}`}>
+                {row.map((item) => {
+                  const hasActiveRootInfo = Boolean((item.rootKey && item.rootKey !== '~') || item.cornerLabel)
+                  return (
+                    <td
+                      key={`${item.keyName}-body`}
+                      className="border-r border-default-200 px-1 py-1 align-middle last:border-r-0"
+                    >
+                      <div className="grid min-h-7 place-items-center gap-0.5">
+                        {item.bodyRows?.length ? item.bodyRows.map((bodyRow, bodyRowIndex) => (
+                          <div key={`${item.keyName}-body-row-${bodyRowIndex}`} className="flex flex-wrap items-center justify-center gap-0.5">
+                            {bodyRow.map((token, tokenIndex) => (
+                              <KeyToken
+                                key={`${item.keyName}-${token}-${tokenIndex}`}
+                                value={token}
+                                active={hasActiveRootInfo}
+                              />
+                            ))}
+                          </div>
+                        )) : <div className="text-default-300">&nbsp;</div>}
+                      </div>
+                    </td>
+                  )
+                })}
+              </tr>
+            </Fragment>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function KeyTaoGraph({ visible, schemeKey }: { visible: boolean; schemeKey: PracticeSchemeKey }) {
+  return schemeKey === 'keydo'
+    ? <KeydoGraph visible={visible} />
+    : <StandardKeyTaoGraph visible={visible} />
 }
 
 export default function KeyTaoPracticePage() {
@@ -747,7 +863,13 @@ export default function KeyTaoPracticePage() {
     () => currentItem?.codes?.slice(0, 6) ?? currentInsight?.codes ?? [],
     [currentInsight?.codes, currentItem?.codes]
   )
-  const displayedInput = `${currentCommittedText}${rimeComposition?.preedit ?? ''}`
+  const followRenderedSegments = useMemo(
+    () => splitFollowRemainingTexts(practiceItems.slice(currentIndex).map((item) => item.text), currentCommittedText),
+    [currentCommittedText, currentIndex, practiceItems]
+  )
+  const displayedInput = isStudyMode
+    ? `${currentCommittedText}${rimeComposition?.preedit ?? ''}`
+    : (rimeComposition?.preedit ?? '')
   const displayedCandidates = rimeComposition?.candidates ?? EMPTY_RIME_CANDIDATES
   const hasInputError = feedback?.startsWith('当前输入')
     || feedback?.startsWith('已选')
@@ -1016,15 +1138,15 @@ export default function KeyTaoPracticePage() {
     const downloadId = ++activeSchemeDownloadIdRef.current
     setSelectedSchemeKey(schemeKey)
     setSchemeStatus('loading')
-    setSchemeMessage(`正在获取 latest ${scheme.label} 方案`)
+    setSchemeMessage(schemeKey === 'keydo' ? `正在获取 ${scheme.label} pre-release 方案` : `正在获取 latest ${scheme.label} 方案`)
     setSchemeDownloadProgress(null)
     setFeedback(null)
 
     try {
       const releaseResponse = await fetch(`/api/practice/scheme-release?scheme=${schemeKey}`)
-      if (!releaseResponse.ok) throw new Error(`无法获取 ${scheme.label} latest release`)
+      if (!releaseResponse.ok) throw new Error(`无法获取 ${scheme.label} 方案版本信息`)
       const release = await releaseResponse.json() as PracticeSchemeReleaseInfo
-      if (!release.downloadUrl) throw new Error(`latest release 中没有 ${scheme.asset}`)
+      if (!release.downloadUrl) throw new Error(`${scheme.label} 版本中没有 ${scheme.asset}`)
       if (activeSchemeDownloadIdRef.current !== downloadId) return
 
       const cachedZip = await getCachedPracticeSchemeZip(schemeKey, release.version)
@@ -1145,6 +1267,76 @@ export default function KeyTaoPracticePage() {
     }
   }, [bumpPracticeTurn, currentIndex, currentItem, itemHadMistake, practiceItems.length, resetRimeSession])
 
+  const applyFollowCommittedText = useCallback((committedText: string, composition?: RimeComposition | null) => {
+    const resolution = resolveFollowPracticeCommit({
+      currentCommittedText: currentCommittedTextRef.current,
+      committedText,
+      remainingTexts: practiceItems.slice(currentIndex).map((item) => item.text),
+      composition,
+    })
+
+    if (resolution.type === 'noop') return
+
+    if (resolution.type === 'mismatch') {
+      setWrongKeys((value) => value + 1)
+      setItemHadMistake(true)
+      currentCommittedTextRef.current = resolution.attemptedText
+      setCurrentCommittedText(resolution.attemptedText)
+      setFeedback(`当前输入「${resolution.attemptedText}」，目标是「${resolution.targetText}」`)
+      return
+    }
+
+    const nextComposition = currentIndex + resolution.advanceCount < practiceItems.length
+      ? resolution.carryOverComposition
+      : null
+
+    if (resolution.advanceCount > 0) {
+      bumpPracticeTurn()
+      setCompletedText((value) => value + resolution.completedTexts.join(''))
+      setLastCompletedTarget(resolution.lastCompletedText)
+      setPerfectItems((value) => value + Math.max(0, resolution.advanceCount - (itemHadMistake ? 1 : 0)))
+      setCurrentIndex((value) => value + resolution.advanceCount)
+      currentCommittedTextRef.current = resolution.currentText
+      setCurrentCommittedText(resolution.currentText)
+      setRimeComposition(nextComposition)
+      setItemHadMistake(false)
+      setFeedback(null)
+      if (rimeStatusRef.current === 'ready' && !nextComposition) {
+        void resetRimeSession().catch(() => undefined)
+      }
+      return
+    }
+
+    currentCommittedTextRef.current = resolution.currentText
+    setCurrentCommittedText(resolution.currentText)
+    setRimeComposition(nextComposition)
+    setFeedback(null)
+  }, [bumpPracticeTurn, currentIndex, itemHadMistake, practiceItems, resetRimeSession])
+
+  const applyFollowBackspace = useCallback(() => {
+    const nextCommittedText = Array.from(currentCommittedTextRef.current).slice(0, -1).join('')
+    currentCommittedTextRef.current = nextCommittedText
+    setCurrentCommittedText(nextCommittedText)
+
+    if (!nextCommittedText) {
+      setFeedback(null)
+      return
+    }
+
+    const resolution = resolveFollowPracticeCommit({
+      currentCommittedText: '',
+      committedText: nextCommittedText,
+      remainingTexts: practiceItems.slice(currentIndex).map((item) => item.text),
+    })
+
+    if (resolution.type === 'mismatch') {
+      setFeedback(`当前输入「${resolution.attemptedText}」，目标是「${resolution.targetText}」`)
+      return
+    }
+
+    setFeedback(null)
+  }, [currentIndex, practiceItems])
+
   const skipCurrentItem = useCallback(() => {
     if (!currentItem) return
     bumpPracticeTurn()
@@ -1183,6 +1375,11 @@ export default function KeyTaoPracticePage() {
   }, [bumpPracticeTurn, currentIndex, focusPracticeSurface, practiceItems, resetRimeSession])
 
   const applyCommittedText = useCallback((committedText: string, composition?: RimeComposition | null) => {
+    if (!isStudyMode) {
+      applyFollowCommittedText(committedText, composition)
+      return
+    }
+
     const resolution = resolvePracticeCommit({
       currentCommittedText: currentCommittedTextRef.current,
       committedText,
@@ -1207,7 +1404,7 @@ export default function KeyTaoPracticePage() {
     setWrongKeys((value) => value + 1)
     setItemHadMistake(true)
     setFeedback(`当前输入「${resolution.attemptedText}」，目标是「${resolution.targetText}」`)
-  }, [completeCurrentItem])
+  }, [applyFollowCommittedText, completeCurrentItem, isStudyMode])
 
   const applyRimeResult = useCallback((result: RimeProcessResult) => {
     setRimeComposition(result.composition ?? null)
@@ -1262,6 +1459,13 @@ export default function KeyTaoPracticePage() {
   const submitRimeKey = useCallback((key: string) => {
     if (!currentItem || isFinished) return false
 
+    if (!isStudyMode && key === '{BackSpace}' && !rimeComposition?.preedit && currentCommittedTextRef.current) {
+      if (!startTime) setStartTime(Date.now())
+      setTotalKeys((value) => value + 1)
+      applyFollowBackspace()
+      return true
+    }
+
     if (!isRimeReady) {
       setFeedback('真实 Rime 运行时未就绪，不能开始输入练习')
       return true
@@ -1271,7 +1475,7 @@ export default function KeyTaoPracticePage() {
     setTotalKeys((value) => value + 1)
     void processRimeKey(key)
     return true
-  }, [currentItem, isFinished, isRimeReady, processRimeKey, startTime])
+  }, [applyFollowBackspace, currentItem, isFinished, isRimeReady, isStudyMode, processRimeKey, rimeComposition?.preedit, startTime])
 
   const submitPracticeKeys = useCallback((keys: string[]) => {
     for (const key of keys) submitRimeKey(key)
@@ -1670,7 +1874,7 @@ export default function KeyTaoPracticePage() {
                       ))}
                     </Select>
                   </div>
-                  <Tooltip content={`下载 latest ${selectedScheme.label} 方案`}>
+                  <Tooltip content={selectedSchemeKey === 'keydo' ? `下载 ${selectedScheme.label} pre-release 方案` : `下载 latest ${selectedScheme.label} 方案`}>
                     <Button
                       size="sm"
                       color="primary"
@@ -1971,17 +2175,36 @@ export default function KeyTaoPracticePage() {
                     <div className="font-mono text-3xl leading-relaxed tracking-normal whitespace-pre-wrap wrap-break-word sm:text-4xl">
                       {hasPracticeItems ? practiceItems.map((item, index) => {
                         const state = index < currentIndex ? 'done' : index === currentIndex && !isFinished ? 'current' : 'pending'
+                        const overlaySegments = index >= currentIndex ? followRenderedSegments[index - currentIndex] : null
+                        const usesOverlaySegments = state !== 'done' && Boolean(overlaySegments && overlaySegments.length > 0)
                         return (
                           <span
                             key={`${item.text}-${index}`}
                             ref={state === 'current' ? (node) => { currentTargetAnchorRef.current = node } : undefined}
-                            className={`mx-0.5 inline-block border-b-2 pb-1 ${state === 'done'
+                            className={`mx-0.5 inline-block pb-1 ${usesOverlaySegments ? 'border-b-2 border-transparent' : 'border-b-2'} ${state === 'done'
                               ? 'border-success-400 text-success-500/80'
                               : state === 'current'
-                                ? 'border-primary text-foreground'
+                                ? hasInputError ? 'border-danger text-danger' : 'border-primary text-foreground'
                                 : 'border-default-200 text-default-300'}`}
                           >
-                            {item.text}
+                            {usesOverlaySegments && overlaySegments
+                              ? overlaySegments.map((segment, segmentIndex) => (
+                                <span
+                                  key={`${item.text}-${index}-segment-${segmentIndex}`}
+                                  className={`inline-block border-b-2 ${segment.tone === 'done'
+                                    ? 'border-success-400 text-success-500/80'
+                                    : segment.tone === 'wrong'
+                                      ? 'border-danger text-danger'
+                                      : state === 'current' && hasInputError
+                                        ? 'border-danger/40 text-danger/55'
+                                        : state === 'current'
+                                          ? 'border-primary text-foreground'
+                                          : 'border-default-200 text-default-300'}`}
+                                >
+                                  {segment.text}
+                                </span>
+                              ))
+                              : item.text}
                           </span>
                         )
                       }) : isPracticeLoading ? (
@@ -2030,9 +2253,22 @@ export default function KeyTaoPracticePage() {
                     </div>
                     <div className="flex min-h-16 items-center gap-2 overflow-x-auto overscroll-x-contain px-3 py-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                       {displayedCandidates.length > 0 ? displayedCandidates.map((candidate, index) => {
-                        const nextCommittedText = `${currentCommittedText}${candidate.text}`
-                        const isValidTarget = currentItem ? currentItem.text.startsWith(nextCommittedText) : false
-                        const isExactTarget = currentItem ? nextCommittedText === currentItem.text : false
+                        const studyResolution = resolvePracticeCommit({
+                          currentCommittedText,
+                          committedText: candidate.text,
+                          currentTargetText: currentItem?.text,
+                        })
+                        const followResolution = resolveFollowPracticeCommit({
+                          currentCommittedText,
+                          committedText: candidate.text,
+                          remainingTexts: practiceItems.slice(currentIndex).map((item) => item.text),
+                        })
+                        const isValidTarget = isStudyMode
+                          ? studyResolution.type === 'partial' || studyResolution.type === 'complete'
+                          : followResolution.type === 'match'
+                        const isExactTarget = isStudyMode
+                          ? studyResolution.type === 'complete'
+                          : followResolution.type === 'match' && followResolution.advanceCount > 0
                         const candidateHint = candidate.comment
                         return (
                           <button
@@ -2081,7 +2317,7 @@ export default function KeyTaoPracticePage() {
                     {isKeyMapVisible ? '隐藏' : '查看'}
                   </Button>
                 </div>
-                <KeyTaoGraph visible={isKeyMapVisible} />
+                <KeyTaoGraph visible={isKeyMapVisible} schemeKey={selectedSchemeKey} />
               </CardBody>
             </Card>
           </div>
