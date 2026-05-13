@@ -15,7 +15,7 @@
         devShells.default = pkgs.mkShell {
           buildInputs = with pkgs; [
             nodejs_20
-            nodePackages.pnpm
+            pnpm
             prisma-engines
             openssl
             postgresql

@@ -110,12 +110,12 @@ export function splitFollowCurrentItemText(targetText: string, committedText: st
     const nextSegment = committedChar
       ? {
         text: committedChar,
-        tone: committedChar === targetChar ? 'done' : 'wrong',
+        tone: committedChar === targetChar ? 'done' as const : 'wrong' as const,
       }
       : targetChar
         ? {
           text: targetChar,
-          tone: 'pending',
+          tone: 'pending' as const,
         }
         : null
 
