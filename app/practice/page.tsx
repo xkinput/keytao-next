@@ -1,6 +1,7 @@
 'use client'
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type Key } from 'react'
+import Link from 'next/link'
 import JSZip from 'jszip'
 import { pinyin } from 'pinyin-pro'
 import {
@@ -19,6 +20,7 @@ import {
 } from '@heroui/react'
 import {
   AlertTriangle,
+  Coffee,
   Download,
   Eye,
   EyeOff,
@@ -250,7 +252,7 @@ function shufflePracticeItems<T>(items: T[]): T[] {
 
   for (let index = nextItems.length - 1; index > 0; index -= 1) {
     const swapIndex = Math.floor(Math.random() * (index + 1))
-    ;[nextItems[index], nextItems[swapIndex]] = [nextItems[swapIndex], nextItems[index]]
+      ;[nextItems[index], nextItems[swapIndex]] = [nextItems[swapIndex], nextItems[index]]
   }
 
   return nextItems
@@ -627,6 +629,7 @@ export default function KeyTaoPracticePage() {
   const cardBodyRef = useRef<HTMLDivElement>(null)
   const inputSurfaceRef = useRef<HTMLDivElement>(null)
   const keyboardBridgeRef = useRef<HTMLInputElement>(null)
+  const candidatePanelRef = useRef<HTMLDivElement>(null)
   const textUploadRef = useRef<HTMLInputElement>(null)
   const schemeUploadRef = useRef<HTMLInputElement>(null)
   const rimeEngineRef = useRef<LibrimeWasmEngine | null>(null)
@@ -684,6 +687,7 @@ export default function KeyTaoPracticePage() {
   const [pendingRimeDeployRequest, setPendingRimeDeployRequest] = useState<{ id: number; sourceName: string } | null>(null)
   const [isTouchLayout, setIsTouchLayout] = useState(false)
   const [candidateOverlayStyle, setCandidateOverlayStyle] = useState<{ top: number; left: number; width: number } | null>(null)
+  const [mobileCandidateOverlayTop, setMobileCandidateOverlayTop] = useState<number | null>(null)
   const rimeStatusRef = useRef(rimeStatus)
   const selectedSchemaIdRef = useRef(selectedSchemaId)
   const pendingStudyAutoCommitTimerRef = useRef<number | null>(null)
@@ -811,6 +815,22 @@ export default function KeyTaoPracticePage() {
     setCandidateOverlayStyle({ top, left, width: overlayWidth })
   }, [isTouchLayout])
 
+  const updateMobileCandidateOverlayPosition = useCallback(() => {
+    if (!isTouchLayout || !candidatePanelRef.current) {
+      setMobileCandidateOverlayTop(null)
+      return
+    }
+
+    const viewport = window.visualViewport
+    const viewportTop = viewport?.offsetTop ?? 0
+    const viewportHeight = viewport?.height ?? window.innerHeight
+    const panelHeight = candidatePanelRef.current.getBoundingClientRect().height
+    const gap = 12
+    const nextTop = Math.max(viewportTop + gap, viewportTop + viewportHeight - panelHeight - gap)
+
+    setMobileCandidateOverlayTop(Math.round(nextTop))
+  }, [isTouchLayout])
+
   const clearPendingStudyAutoCommit = useCallback(() => {
     if (pendingStudyAutoCommitTimerRef.current === null) return
     window.clearTimeout(pendingStudyAutoCommitTimerRef.current)
@@ -867,18 +887,31 @@ export default function KeyTaoPracticePage() {
   }, [])
 
   useEffect(() => {
-    updateCandidateOverlayPosition()
+    const frame = window.requestAnimationFrame(() => {
+      updateCandidateOverlayPosition()
+      updateMobileCandidateOverlayPosition()
+    })
 
     const surface = inputSurfaceRef.current
-    if (!surface) return
+    const viewport = window.visualViewport
+    if (!surface) {
+      return () => window.cancelAnimationFrame(frame)
+    }
 
     surface.addEventListener('scroll', updateCandidateOverlayPosition, { passive: true })
     window.addEventListener('resize', updateCandidateOverlayPosition)
+    window.addEventListener('resize', updateMobileCandidateOverlayPosition)
+    viewport?.addEventListener('resize', updateMobileCandidateOverlayPosition)
+    viewport?.addEventListener('scroll', updateMobileCandidateOverlayPosition)
     return () => {
+      window.cancelAnimationFrame(frame)
       surface.removeEventListener('scroll', updateCandidateOverlayPosition)
       window.removeEventListener('resize', updateCandidateOverlayPosition)
+      window.removeEventListener('resize', updateMobileCandidateOverlayPosition)
+      viewport?.removeEventListener('resize', updateMobileCandidateOverlayPosition)
+      viewport?.removeEventListener('scroll', updateMobileCandidateOverlayPosition)
     }
-  }, [currentIndex, displayedCandidates.length, displayedInput, isPracticeFocused, isStudyMode, updateCandidateOverlayPosition])
+  }, [currentIndex, displayedCandidates.length, displayedInput, hasInputError, isPracticeFocused, isStudyMode, updateCandidateOverlayPosition, updateMobileCandidateOverlayPosition])
 
   const deployRimeFiles = useCallback(async (files: RimeDeployFile[], sourceName: string) => {
     const engine = rimeEngineRef.current
@@ -1547,7 +1580,7 @@ export default function KeyTaoPracticePage() {
 
   return (
     <div className="min-h-screen bg-default-50/60">
-      <main className="mx-auto flex max-w-375 flex-col gap-4 px-4 py-6 sm:px-6 lg:px-8">
+      <main className="mx-auto flex max-w-375 flex-col gap-4 px-4 pt-3 pb-6 sm:px-6 lg:px-8">
         <div className="flex flex-col gap-1.5">
           <div className="rounded-small border border-default-200 bg-content1 px-4 py-3 shadow-sm">
             <div className="flex flex-col gap-3 lg:grid lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center lg:gap-4">
@@ -1556,14 +1589,26 @@ export default function KeyTaoPracticePage() {
                   <Keyboard className="h-5 w-5" />
                 </div>
                 <div className="min-w-0">
-                  <div className="flex min-w-0 items-center gap-3">
+                  <div className="flex min-w-0 flex-wrap items-end gap-x-3 gap-y-1">
                     <h1 className="shrink-0 text-2xl font-bold leading-none tracking-normal sm:text-[2rem]">键道练习</h1>
+                    <span className="text-sm font-medium text-default-500 sm:text-base">天地立心，以键为道！</span>
+                    <Button
+                      size="sm"
+                      variant="flat"
+                      startContent={<Coffee className="h-4 w-4" />}
+                      aria-label="赞助键道开发"
+                      as={Link}
+                      href="/sponsor"
+                      className="text-pink-600 dark:text-pink-400"
+                    >
+                      赞助
+                    </Button>
                   </div>
                 </div>
               </div>
               <div className="flex flex-col gap-2 lg:items-end">
                 <div className="flex flex-wrap items-center gap-2 md:justify-end lg:flex-nowrap">
-                  <div className="w-[10.5rem] min-w-[10.5rem]">
+                  <div className="w-42 min-w-42">
                     <Select
                       aria-label="载入文章"
                       placeholder="载入文章"
@@ -1576,7 +1621,7 @@ export default function KeyTaoPracticePage() {
                         setPracticeSource(nextSource as PracticeSource)
                       }}
                       classNames={{
-                        trigger: 'h-9 min-h-9 bg-content1',
+                        trigger: 'h-9 min-h-9',
                         value: 'text-small font-medium',
                       }}
                     >
@@ -1586,7 +1631,7 @@ export default function KeyTaoPracticePage() {
                     </Select>
                   </div>
                   {practiceSource === 'article' && (
-                    <div className="w-[10.5rem] min-w-[10.5rem]">
+                    <div className="w-42 min-w-42">
                       <Select
                         aria-label="文章内容"
                         placeholder="选择文章"
@@ -1599,7 +1644,7 @@ export default function KeyTaoPracticePage() {
                           setSelectedArticleId(nextArticleId)
                         }}
                         classNames={{
-                          trigger: 'h-9 min-h-9 bg-content1',
+                          trigger: 'h-9 min-h-9',
                           value: 'text-small font-medium',
                         }}
                       >
@@ -1607,10 +1652,7 @@ export default function KeyTaoPracticePage() {
                       </Select>
                     </div>
                   )}
-                  <Button size="sm" variant="flat" startContent={<FileText className="h-4 w-4" />} onPress={() => textUploadRef.current?.click()}>
-                    上传文本
-                  </Button>
-                  <div className="w-[9.5rem] min-w-[9.5rem]">
+                  <div className="w-38 min-w-38">
                     <Select
                       aria-label="方案"
                       placeholder="选择方案"
@@ -1619,7 +1661,7 @@ export default function KeyTaoPracticePage() {
                       selectedKeys={[selectedSchemeKey]}
                       onSelectionChange={handlePracticeSchemeChange}
                       classNames={{
-                        trigger: 'h-9 min-h-9 bg-content1',
+                        trigger: 'h-9 min-h-9',
                         value: 'text-small font-medium',
                       }}
                     >
@@ -1647,8 +1689,13 @@ export default function KeyTaoPracticePage() {
                     <RotateCcw className="h-4 w-4" />
                   </Button>
                 </div>
+                {schemeStatus === 'loading' && (
+                  <div className="text-right text-tiny text-default-500 lg:max-w-120">
+                    加载需要等待，如有梯子请打开可加速。
+                  </div>
+                )}
                 {practiceSource === 'custom' && (
-                  <div className="w-full rounded-small border border-default-200 bg-default-50/70 p-2.5 lg:max-w-[30rem]">
+                  <div className="w-full rounded-small border border-default-200 bg-default-50/70 p-2.5 lg:max-w-120">
                     <div className="flex flex-col gap-3">
                       <Textarea
                         minRows={2}
@@ -1660,7 +1707,14 @@ export default function KeyTaoPracticePage() {
                       <div className="text-tiny text-default-500">
                         自定义文本上限 {formatBytes(MAX_CUSTOM_TEXT_BYTES)}，超出后请拆分成多个 .txt。
                       </div>
-                      <div className="flex justify-end">
+                      <div className="flex flex-wrap justify-end gap-2">
+                        <Button
+                          variant="flat"
+                          startContent={<FileText className="h-4 w-4" />}
+                          onPress={() => textUploadRef.current?.click()}
+                        >
+                          上传文本
+                        </Button>
                         <Button
                           color="primary"
                           variant="flat"
@@ -1761,10 +1815,12 @@ export default function KeyTaoPracticePage() {
                       <span className="hidden min-w-0 truncate text-[11px] text-default-500 sm:inline">{rimeDetailLabel}</span>
                     </div>
                     {isRimeReady && rimeSchemas.length > 0 && (
-                      <div className="w-[9.5rem] min-w-[9.5rem] shrink-0 sm:w-[10rem] sm:min-w-[10rem]">
+                      <div className="w-38 min-w-38 shrink-0 sm:w-40 sm:min-w-40">
                         <Select
                           aria-label="Rime 方案列表"
                           placeholder="选择方案"
+                          labelPlacement="outside-left"
+                          label="方案切换"
                           size="sm"
                           disallowEmptySelection
                           selectedKeys={selectedSchemaId ? [selectedSchemaId] : []}
@@ -1944,17 +2000,22 @@ export default function KeyTaoPracticePage() {
 
                 {isPracticeFocused && currentItem && !isFinished && (
                   <div
+                    ref={candidatePanelRef}
                     className={`${isTouchLayout
-                      ? 'fixed bottom-[calc(env(safe-area-inset-bottom)+0.75rem)] left-3 right-3 z-[60] overflow-hidden rounded-large border bg-content1/95 shadow-2xl backdrop-blur sm:left-4 sm:right-4'
+                      ? 'fixed left-3 right-3 z-60 overflow-hidden rounded-large border bg-content1/95 shadow-2xl backdrop-blur sm:left-4 sm:right-4'
                       : 'absolute z-20 overflow-hidden rounded-large border bg-content1/95 shadow-2xl backdrop-blur'} ${hasInputError ? 'border-danger' : 'border-primary/40'}`}
-                    style={isTouchLayout || !candidateOverlayStyle
-                      ? undefined
-                      : {
-                        top: `${candidateOverlayStyle.top}px`,
-                        left: `${candidateOverlayStyle.left}px`,
-                        width: `${candidateOverlayStyle.width}px`,
-                        transform: 'translateX(-50%)',
-                      }}
+                    style={isTouchLayout
+                      ? mobileCandidateOverlayTop === null
+                        ? { bottom: 'calc(env(safe-area-inset-bottom) + 0.75rem)' }
+                        : { top: `${mobileCandidateOverlayTop}px` }
+                      : !candidateOverlayStyle
+                        ? undefined
+                        : {
+                          top: `${candidateOverlayStyle.top}px`,
+                          left: `${candidateOverlayStyle.left}px`,
+                          width: `${candidateOverlayStyle.width}px`,
+                          transform: 'translateX(-50%)',
+                        }}
                   >
                     <div className={`flex items-center gap-3 border-b px-4 py-3 ${hasInputError ? 'border-danger/30 bg-danger-50 dark:bg-danger-50/10' : 'border-divider bg-default-100/80'}`}>
                       <span className={`min-h-7 break-all font-mono text-xl ${hasInputError ? 'text-danger' : 'text-primary'}`}>
@@ -2055,9 +2116,6 @@ export default function KeyTaoPracticePage() {
               <CardBody className="gap-4">
                 <div className="flex items-center justify-between">
                   <h2 className="text-lg font-semibold">统计</h2>
-                  <Chip size="sm" variant="flat" color={isStudyMode ? 'primary' : isRimeReady ? 'success' : 'warning'}>
-                    {isStudyMode ? '学习模式' : isRimeReady ? 'Rime 就绪' : '等待 Rime'}
-                  </Chip>
                 </div>
                 <Progress aria-label="练习进度" value={progressValue} color="primary" size="sm" />
                 <div className="grid grid-cols-2 gap-3 text-small">
