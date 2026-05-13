@@ -1,9 +1,10 @@
 'use client'
 
 import { Button } from '@heroui/react'
-import { Github, ExternalLink, BookOpen, Bot, Users, Database, Edit3, GitPullRequest, MessageSquare } from 'lucide-react'
+import { Github, ExternalLink, BookOpen, Bot, Users, Database, Edit3, GitPullRequest, MessageSquare, Sparkles } from 'lucide-react'
 import Image from 'next/image'
 import Link from 'next/link'
+import { useKeytaoIntroStore } from '@/lib/store/keytaoIntro'
 
 const links = [
   {
@@ -72,6 +73,8 @@ const features = [
 ]
 
 export default function AboutPage() {
+  const openIntroModal = useKeytaoIntroStore((state) => state.openIntroModal)
+
   return (
     <main className="min-h-screen bg-background">
       <div className="max-w-2xl mx-auto px-4 py-10 flex flex-col gap-10">
@@ -95,6 +98,26 @@ export default function AboutPage() {
             本网站让任何人都可以在线浏览词库、提交新词、参与讨论、或提出修改，
             所有变更经过人工审核后自动同步至官方词库仓库。
           </p>
+          <div className="flex flex-wrap justify-center gap-3 pt-1">
+            <Button
+              variant="flat"
+              color="secondary"
+              startContent={<Sparkles className="w-4 h-4" />}
+              onPress={openIntroModal}
+            >
+              查看键道介绍弹窗
+            </Button>
+            <Button
+              as={Link}
+              href="https://keytao-docs.vercel.app/"
+              target="_blank"
+              rel="noopener noreferrer"
+              variant="light"
+              startContent={<BookOpen className="w-4 h-4" />}
+            >
+              直接打开文档
+            </Button>
+          </div>
         </div>
 
         {/* What is KeyTao */}

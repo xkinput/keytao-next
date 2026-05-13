@@ -5,6 +5,7 @@ import './globals.css'
 import { Providers } from './providers'
 import Navbar from '@/app/components/Navbar'
 import ChatWidget from '@/app/components/ChatWidget'
+import KeytaoIntroModal from '@/app/components/KeytaoIntroModal'
 
 const APP_NAME = 'KeyTao'
 const APP_TITLE = 'KeyTao 星空键道6词库管理系统'
@@ -81,6 +82,7 @@ export default function RootLayout({
         <Providers>
           <Navbar />
           {children}
+          <KeytaoIntroModal />
           <ChatWidget />
         </Providers>
       </body>
