@@ -1,31 +1,66 @@
-import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
-import Script from "next/script";
-import "./globals.css";
-import { Providers } from "./providers";
-import Navbar from "@/app/components/Navbar";
-import ChatWidget from "@/app/components/ChatWidget";
+import type { Metadata, Viewport } from 'next'
+import { Geist, Geist_Mono } from 'next/font/google'
+import Script from 'next/script'
+import './globals.css'
+import { Providers } from './providers'
+import Navbar from '@/app/components/Navbar'
+import ChatWidget from '@/app/components/ChatWidget'
+
+const APP_NAME = 'KeyTao'
+const APP_TITLE = 'KeyTao 星空键道6词库管理系统'
+const APP_DESCRIPTION = '键道输入法, 星空键道, 键道6词库管理系统'
 
 const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
+  variable: '--font-geist-sans',
+  subsets: ['latin'],
+})
 
 const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
+  variable: '--font-geist-mono',
+  subsets: ['latin'],
+})
 
 export const metadata: Metadata = {
-  title: "KeyTao 星空键道6词库管理系统",
-  description: "键道输入法,星空键道,键道6词库管理系统",
-  keywords: ["键道", "键道6", "星空键道", "输入法", "词库管理", "开源", "免费"],
-};
+  applicationName: APP_NAME,
+  title: {
+    default: APP_TITLE,
+    template: '%s | KeyTao',
+  },
+  description: APP_DESCRIPTION,
+  keywords: ['键道', '键道6', '星空键道', '输入法', '词库管理', '开源', '免费'],
+  manifest: '/manifest.webmanifest',
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'default',
+    title: APP_TITLE,
+  },
+  formatDetection: {
+    telephone: false,
+  },
+  icons: {
+    apple: '/icon.png',
+  },
+  openGraph: {
+    type: 'website',
+    siteName: APP_NAME,
+    title: APP_TITLE,
+    description: APP_DESCRIPTION,
+  },
+  twitter: {
+    card: 'summary',
+    title: APP_TITLE,
+    description: APP_DESCRIPTION,
+  },
+}
+
+export const viewport: Viewport = {
+  themeColor: '#111318',
+}
 
 export default function RootLayout({
   children,
 }: Readonly<{
-  children: React.ReactNode;
+  children: React.ReactNode
 }>) {
   return (
     <html lang="zh-CN" suppressHydrationWarning>
@@ -44,5 +79,5 @@ export default function RootLayout({
         </Providers>
       </body>
     </html>
-  );
+  )
 }

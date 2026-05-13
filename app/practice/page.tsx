@@ -1,6 +1,6 @@
 'use client'
 
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type Key } from 'react'
 import JSZip from 'jszip'
 import { pinyin } from 'pinyin-pro'
 import {
@@ -10,8 +10,8 @@ import {
   CardBody,
   Chip,
   Progress,
-  Tab,
-  Tabs,
+  Select,
+  SelectItem,
   Textarea,
   Tooltip,
 } from '@heroui/react'
@@ -25,6 +25,7 @@ import {
   Keyboard,
   Layers,
   RotateCcw,
+  Shuffle,
   SkipForward,
   Sparkles,
   Trash2,
@@ -56,6 +57,7 @@ import {
 import { usePracticeStore, type PracticeSchemeKey } from '@/lib/store/practice'
 
 const DEFAULT_PRACTICE_TEXT = '我们可以通过键道练习输入文字词组编码方案系统开源词库用户学习效率中文输入法'
+const MAX_CUSTOM_TEXT_BYTES = 256 * 1024
 const EMPTY_RIME_CANDIDATES: RimeComposition['candidates'] = []
 const COMMON_SINGLE_CHARACTER_ORDER = '的一是在不了有和人这中大为上个国我以要他时来用们生到作地于出就分对成会可主发年动同工也能下过子说产种面而方后多定行学法所民得经十三之进着等部度家电力里如水化高自二理起小物现实加量都两体制机当使点从业本去把性好应开它合还因由其些然前外天政四日那社义事平形相全表间样与关各重新线内数正心反你明看原又么利比或但质气第向道命此变条只没结解问意建月公无系军很情者最立代想已通并提直题党程展五果料象员革位入常文总次品式活设及管特件长求老头基资边流路级少图山统接知较将组见计别她手角期根论运农指几九区强放决西被干做必战先回则任取据处队南给色光门即保治北造百规热领七海口东导器压志世金增争济阶油思术极交受联什认六共权收证改清己美再采转更单风切打白教速花带安场身车例真务具万每目至达走积示议声报斗完类八离华名确才科张信马节话米整空元况今集温传土许步群广石记需段研界拉林律叫且究观越织装影算低持音众书布复容儿须际商非验连断深难近矿千周委素技备半办青省列习响约支般史感劳便团往酸历市克何除消构府称太准精值号率族维划选标写存候毛亲快效斯院查江型眼王按格养易置派层片始却专状育厂京识适属圆包火住调满县局照参红细引听该铁价严龙飞'
 const COMMON_CHARACTER_RANK = new Map(Array.from(COMMON_SINGLE_CHARACTER_ORDER).map((char, index) => [char, index]))
@@ -109,6 +111,13 @@ const PRACTICE_SCHEME_OPTIONS: Array<{ key: PracticeSchemeKey; label: string; as
 
 function isPracticeSchemeKey(value: string | null): value is PracticeSchemeKey {
   return value === 'keytao' || value === 'xmjd' || value === 'txjx' || value === 'keydo'
+}
+
+function getSingleSelectionValue(keys: 'all' | Set<Key>) {
+  const [firstKey] = Array.from(keys)
+  if (typeof firstKey === 'string') return firstKey
+  if (typeof firstKey === 'number') return String(firstKey)
+  return null
 }
 
 const ARTICLE_OPTIONS = [
@@ -219,6 +228,21 @@ function getCandidateLabel(index: number): string {
 
 function getTextLength(text: string): number {
   return Array.from(text).length
+}
+
+function getTextByteSize(text: string): number {
+  return new Blob([text]).size
+}
+
+function shufflePracticeItems<T>(items: T[]): T[] {
+  const nextItems = [...items]
+
+  for (let index = nextItems.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1))
+    ;[nextItems[index], nextItems[swapIndex]] = [nextItems[swapIndex], nextItems[index]]
+  }
+
+  return nextItems
 }
 
 function normalizePinyin(value: string): string {
@@ -572,6 +596,7 @@ function KeyTaoGraph({ visible }: { visible: boolean }) {
 
 export default function KeyTaoPracticePage() {
   const inputSurfaceRef = useRef<HTMLDivElement>(null)
+  const keyboardBridgeRef = useRef<HTMLInputElement>(null)
   const textUploadRef = useRef<HTMLInputElement>(null)
   const schemeUploadRef = useRef<HTMLInputElement>(null)
   const rimeEngineRef = useRef<LibrimeWasmEngine | null>(null)
@@ -598,6 +623,9 @@ export default function KeyTaoPracticePage() {
   const [draftText, setDraftText] = useState(DEFAULT_PRACTICE_TEXT)
   const [keytaoConfig, setKeytaoConfig] = useState<KeyTaoConfigData | null>(null)
   const [isKeyMapVisible, setIsKeyMapVisible] = useState(true)
+  const [isInsightPanelVisible, setIsInsightPanelVisible] = useState(true)
+  const [isFlyRulePanelVisible, setIsFlyRulePanelVisible] = useState(true)
+  const [practiceShuffleSeed, setPracticeShuffleSeed] = useState(0)
   const [lastCompletedTarget, setLastCompletedTarget] = useState<string | null>(null)
   const [currentIndex, setCurrentIndex] = useState(0)
   const [completedText, setCompletedText] = useState('')
@@ -628,9 +656,13 @@ export default function KeyTaoPracticePage() {
     () => PRACTICE_SCHEME_OPTIONS.find((scheme) => scheme.key === selectedSchemeKey) ?? PRACTICE_SCHEME_OPTIONS[0],
     [selectedSchemeKey]
   )
+  const selectedRimeSchema = useMemo(
+    () => rimeSchemas.find((schema) => schema.id === selectedSchemaId) ?? null,
+    [rimeSchemas, selectedSchemaId]
+  )
   const selectedSchemeCachedVersions = cachedSchemeVersions[selectedSchemeKey] ?? []
 
-  const practiceItems = useMemo(() => {
+  const practiceItemsBase = useMemo(() => {
     if (!dictionary) return []
     if (practiceSource === 'common500') return createSingleCharacterItems(dictionary, 500)
     if (practiceSource === 'common1000') return createSingleCharacterItems(dictionary, 1000)
@@ -644,6 +676,11 @@ export default function KeyTaoPracticePage() {
     const content = practiceSource === 'article' ? selectedArticle.text : sourceText
     return createPracticeItemsFromText(content, dictionary, Number.MAX_SAFE_INTEGER)
   }, [dictionary, practiceSource, selectedArticle.text, sourceText])
+
+  const practiceItems = useMemo(() => {
+    if (practiceShuffleSeed === 0) return practiceItemsBase
+    return shufflePracticeItems(practiceItemsBase)
+  }, [practiceItemsBase, practiceShuffleSeed])
 
   const currentItem = practiceItems[currentIndex]
   const currentInsight = useMemo(
@@ -676,9 +713,31 @@ export default function KeyTaoPracticePage() {
   const accuracy = totalKeys > 0 ? Math.max(0, Math.round(((totalKeys - wrongKeys) / totalKeys) * 100)) : 100
   const speed = elapsedMs > 0 ? Math.round((completedText.length / (elapsedMs / 60000))) : 0
   const isFinished = practiceItems.length > 0 && currentIndex >= practiceItems.length
+  const schemeStatusLabel = schemeStatus === 'loading'
+    ? '下载中'
+    : schemeStatus === 'ready'
+      ? '已就绪'
+      : schemeStatus === 'error'
+        ? '加载失败'
+        : '待加载'
+  const schemeDetailLabel = schemeStatus === 'ready'
+    ? `${selectedScheme.label}${dictionary?.version ? ` · ${dictionary.version}` : ''}`
+    : schemeMessage
+  const rimeStatusLabel = rimeStatus === 'ready'
+    ? '已就绪'
+    : rimeStatus === 'checking'
+      ? '启动中'
+      : rimeStatus === 'error'
+        ? '错误'
+        : '不可用'
+  const rimeDetailLabel = rimeStatus === 'ready'
+    ? `${selectedRimeSchema?.name ?? '已部署方案'}${rimeSchemas.length > 0 ? ` · ${rimeSchemas.length} 个方案` : ''}`
+    : rimeDetail || rimeMessage
 
   const focusPracticeSurface = useCallback(() => {
-    inputSurfaceRef.current?.focus()
+    const shouldUseKeyboardBridge = window.matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0
+    const target = shouldUseKeyboardBridge ? keyboardBridgeRef.current : inputSurfaceRef.current
+    target?.focus({ preventScroll: true })
   }, [])
 
   useEffect(() => {
@@ -760,6 +819,33 @@ export default function KeyTaoPracticePage() {
     setSchemeMessage(`已加载 ${entries.length.toLocaleString()} 条词典记录，来自 ${sourceFiles.length} 个 Rime 词典文件`)
   }, [])
 
+  const loadLatestCachedSchemeFallback = useCallback(async (schemeKey: PracticeSchemeKey) => {
+    const cachedVersions = cachedSchemeVersions[schemeKey] ?? []
+
+    for (const version of cachedVersions) {
+      const cachedZip = await getCachedPracticeSchemeZip(version.schemeKey, version.version)
+      if (!cachedZip) {
+        removeCachedSchemeVersion(version.schemeKey, version.version)
+        continue
+      }
+
+      setSelectedSchemeKey(version.schemeKey)
+      setSchemeStatus('loading')
+      setSchemeDownloadProgress(null)
+      setSchemeMessage(`离线使用本地 ${version.label} ${version.version}`)
+
+      try {
+        await loadDictionaryFromZip(cachedZip.blob, `${version.label} ${version.version}`, version.version)
+        setFeedback(`当前离线，已回退到本地 ${version.label} ${version.version}`)
+        return true
+      } catch {
+        continue
+      }
+    }
+
+    return false
+  }, [cachedSchemeVersions, loadDictionaryFromZip, removeCachedSchemeVersion, setSelectedSchemeKey])
+
   const loadPracticeScheme = useCallback(async (schemeKey: PracticeSchemeKey) => {
     const scheme = PRACTICE_SCHEME_OPTIONS.find((item) => item.key === schemeKey) ?? PRACTICE_SCHEME_OPTIONS[0]
     const downloadId = ++activeSchemeDownloadIdRef.current
@@ -786,7 +872,7 @@ export default function KeyTaoPracticePage() {
       }
 
       setSchemeMessage(`正在下载 ${release.label} ${release.version} 的 ${release.assetName}`)
-    setSchemeDownloadProgress(null)
+      setSchemeDownloadProgress(null)
       const downloadResponse = await fetch(`/api/install/download?url=${encodeURIComponent(release.downloadUrl)}`)
       if (!downloadResponse.ok) throw new Error(`${scheme.label} 方案包下载失败`)
       if (activeSchemeDownloadIdRef.current !== downloadId) return
@@ -797,7 +883,7 @@ export default function KeyTaoPracticePage() {
       if (activeSchemeDownloadIdRef.current !== downloadId) return
 
       setSchemeMessage(`正在解析 ${release.label} ${release.version} 方案包`)
-    setSchemeDownloadProgress(null)
+      setSchemeDownloadProgress(null)
       const cachedVersion: CachedPracticeSchemeVersion = {
         schemeKey,
         label: release.label,
@@ -819,11 +905,13 @@ export default function KeyTaoPracticePage() {
       setSchemeDownloadProgress(null)
     } catch (error) {
       if (activeSchemeDownloadIdRef.current !== downloadId) return
+      const loadedFallback = await loadLatestCachedSchemeFallback(schemeKey)
+      if (loadedFallback) return
       setSchemeStatus('error')
       setSchemeDownloadProgress(null)
       setSchemeMessage(error instanceof Error ? error.message : '键道方案加载失败')
     }
-  }, [loadDictionaryFromZip, setSelectedSchemeKey, upsertCachedSchemeVersion])
+  }, [loadDictionaryFromZip, loadLatestCachedSchemeFallback, setSelectedSchemeKey, upsertCachedSchemeVersion])
 
   const loadCachedPracticeScheme = useCallback(async (version: CachedPracticeSchemeVersion) => {
     const cachedZip = await getCachedPracticeSchemeZip(version.schemeKey, version.version)
@@ -928,6 +1016,20 @@ export default function KeyTaoPracticePage() {
     }
   }, [applyRimeResult])
 
+  const submitRimeKey = useCallback((key: string) => {
+    if (!currentItem || isFinished) return false
+
+    if (!isRimeReady) {
+      setFeedback('真实 Rime 运行时未就绪，不能开始输入练习')
+      return true
+    }
+
+    if (!startTime) setStartTime(Date.now())
+    setTotalKeys((value) => value + 1)
+    void processRimeKey(key)
+    return true
+  }, [currentItem, isFinished, isRimeReady, processRimeKey, startTime])
+
   const selectRimeCandidate = useCallback(async (index: number) => {
     const engine = rimeEngineRef.current
     if (!engine) return
@@ -967,8 +1069,12 @@ export default function KeyTaoPracticePage() {
     }
   }, [applyRimeResult, focusPracticeSurface])
 
-  const handleKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+  const handleKeyDown = useCallback((event: React.KeyboardEvent<HTMLElement>) => {
     if (event.nativeEvent.isComposing || !currentItem || isFinished) return
+
+    const isKeyboardBridge = event.currentTarget === keyboardBridgeRef.current
+    const isPlainTextKey = event.key.length === 1 && !event.ctrlKey && !event.altKey && !event.metaKey
+    if (isKeyboardBridge && isPlainTextKey) return
 
     if (!isRimeReady) {
       event.preventDefault()
@@ -986,28 +1092,71 @@ export default function KeyTaoPracticePage() {
     if (!rimeKey) return
 
     event.preventDefault()
-    if (!startTime) setStartTime(Date.now())
-    setTotalKeys((value) => value + 1)
-    void processRimeKey(rimeKey)
-  }, [changeRimePage, currentItem, isFinished, isRimeReady, processRimeKey, startTime])
+    submitRimeKey(rimeKey)
+  }, [changeRimePage, currentItem, isFinished, isRimeReady, submitRimeKey])
+
+  const handleKeyboardBridgeBeforeInput = useCallback((event: React.FormEvent<HTMLInputElement>) => {
+    const nativeEvent = event.nativeEvent as InputEvent
+    if (nativeEvent.isComposing) return
+
+    const keys = nativeEvent.inputType === 'deleteContentBackward'
+      ? ['{BackSpace}']
+      : nativeEvent.inputType === 'deleteContentForward'
+        ? ['{Delete}']
+        : nativeEvent.inputType === 'insertLineBreak'
+          ? ['{Return}']
+          : nativeEvent.data
+            ? Array.from(nativeEvent.data)
+            : []
+
+    if (keys.length === 0) return
+
+    event.preventDefault()
+    for (const key of keys) submitRimeKey(key)
+    event.currentTarget.value = ''
+  }, [submitRimeKey])
+
+  const handleKeyboardBridgeInput = useCallback((event: React.FormEvent<HTMLInputElement>) => {
+    const value = event.currentTarget.value
+    event.currentTarget.value = ''
+    if (!value) return
+
+    for (const key of Array.from(value)) submitRimeKey(key)
+  }, [submitRimeKey])
+
+  const applyCustomTextContent = useCallback((rawContent: string, successMessage: string) => {
+    const cleanedContent = rawContent.replace(/\r\n/g, '\n').trim()
+    if (!cleanedContent) {
+      setFeedback('文本内容为空')
+      return false
+    }
+
+    const contentBytes = getTextByteSize(cleanedContent)
+    if (contentBytes > MAX_CUSTOM_TEXT_BYTES) {
+      setFeedback(`文本超过 ${formatBytes(MAX_CUSTOM_TEXT_BYTES)}，为避免浏览器解析卡顿，请拆分后再载入`)
+      return false
+    }
+
+    setPracticeSource('custom')
+    setDraftText(cleanedContent)
+    setSourceText(cleanedContent)
+    setFeedback(successMessage)
+    return true
+  }, [])
 
   const handleTextUpload = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
     event.target.value = ''
     if (!file) return
 
-    const content = await file.text()
-    const cleanedContent = content.replace(/\r\n/g, '\n').trim()
-    if (!cleanedContent) {
-      setFeedback('上传的文本是空的')
+    if (file.size > MAX_CUSTOM_TEXT_BYTES) {
+      setFeedback(`.txt 文件超过 ${formatBytes(MAX_CUSTOM_TEXT_BYTES)}，为避免浏览器解析卡顿，请拆分后再上传`)
       return
     }
 
-    setPracticeSource('custom')
-    setDraftText(cleanedContent)
-    setSourceText(cleanedContent)
-    setFeedback(`已载入 ${file.name}`)
-  }, [])
+    const content = await file.text()
+    applyCustomTextContent(content, `已载入 ${file.name}`)
+  }, [applyCustomTextContent])
 
   const handleSchemeUpload = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
@@ -1024,8 +1173,8 @@ export default function KeyTaoPracticePage() {
     }
   }, [loadDictionaryFromZip])
 
-  const handlePracticeSchemeChange = useCallback((event: React.ChangeEvent<HTMLSelectElement>) => {
-    const schemeKey = event.target.value
+  const handlePracticeSchemeChange = useCallback((keys: 'all' | Set<Key>) => {
+    const schemeKey = getSingleSelectionValue(keys)
     if (!isPracticeSchemeKey(schemeKey)) return
 
     void loadPracticeScheme(schemeKey)
@@ -1164,154 +1313,283 @@ export default function KeyTaoPracticePage() {
 
   return (
     <div className="min-h-screen bg-default-50/60">
-      <main className="mx-auto flex max-w-375 flex-col gap-5 px-4 py-6 sm:px-6 lg:px-8">
-        <div className="rounded-small border border-default-200 bg-content1 px-5 py-5 shadow-sm">
-          <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-            <div className="flex items-start gap-4">
-              <div className="hidden rounded-small border border-primary-200 bg-primary-50 p-3 text-primary sm:block dark:bg-primary-50/10">
-                <Keyboard className="h-6 w-6" />
+      <main className="mx-auto flex max-w-375 flex-col gap-4 px-4 py-6 sm:px-6 lg:px-8">
+        <div className="flex flex-col gap-1.5">
+          <div className="rounded-small border border-default-200 bg-content1 px-4 py-3 shadow-sm">
+            <div className="flex flex-col gap-3 lg:grid lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center lg:gap-4">
+              <div className="flex min-w-0 items-center gap-3">
+                <div className="hidden rounded-small border border-primary-200 bg-primary-50 p-2.5 text-primary sm:block dark:bg-primary-50/10">
+                  <Keyboard className="h-5 w-5" />
+                </div>
+                <div className="min-w-0">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <h1 className="shrink-0 text-2xl font-bold leading-none tracking-normal sm:text-[2rem]">键道练习</h1>
+                  </div>
+                </div>
               </div>
-              <div>
-                <h1 className="text-3xl font-bold tracking-normal">键道练习</h1>
-                <p className="mt-2 max-w-3xl text-small leading-6 text-default-500">
-                  目标字词由词典和专项规则生成，输入、候选和提交仍由浏览器里的真实 Rime 驱动。
-                </p>
+              <div className="flex flex-col gap-2 lg:items-end">
+                <div className="flex flex-wrap items-center gap-2 md:justify-end lg:flex-nowrap">
+                  <div className="w-[10.5rem] min-w-[10.5rem]">
+                    <Select
+                      aria-label="载入文章"
+                      placeholder="载入文章"
+                      size="sm"
+                      disallowEmptySelection
+                      selectedKeys={[practiceSource]}
+                      onSelectionChange={(keys) => {
+                        const nextSource = getSingleSelectionValue(keys)
+                        if (!nextSource) return
+                        setPracticeSource(nextSource as PracticeSource)
+                      }}
+                      classNames={{
+                        trigger: 'h-9 min-h-9 bg-content1',
+                        value: 'text-small font-medium',
+                      }}
+                    >
+                      {PRACTICE_SOURCE_OPTIONS.map((option) => (
+                        <SelectItem key={option.key} textValue={option.label}>{option.label}</SelectItem>
+                      ))}
+                    </Select>
+                  </div>
+                  {practiceSource === 'article' && (
+                    <div className="w-[10.5rem] min-w-[10.5rem]">
+                      <Select
+                        aria-label="文章内容"
+                        placeholder="选择文章"
+                        size="sm"
+                        disallowEmptySelection
+                        selectedKeys={[selectedArticleId]}
+                        onSelectionChange={(keys) => {
+                          const nextArticleId = getSingleSelectionValue(keys)
+                          if (!nextArticleId) return
+                          setSelectedArticleId(nextArticleId)
+                        }}
+                        classNames={{
+                          trigger: 'h-9 min-h-9 bg-content1',
+                          value: 'text-small font-medium',
+                        }}
+                      >
+                        {ARTICLE_OPTIONS.map((article) => <SelectItem key={article.id} textValue={article.title}>{article.title}</SelectItem>)}
+                      </Select>
+                    </div>
+                  )}
+                  <Button size="sm" variant="flat" startContent={<FileText className="h-4 w-4" />} onPress={() => textUploadRef.current?.click()}>
+                    上传文本
+                  </Button>
+                  <div className="w-[9.5rem] min-w-[9.5rem]">
+                    <Select
+                      aria-label="方案"
+                      placeholder="选择方案"
+                      size="sm"
+                      disallowEmptySelection
+                      selectedKeys={[selectedSchemeKey]}
+                      onSelectionChange={handlePracticeSchemeChange}
+                      classNames={{
+                        trigger: 'h-9 min-h-9 bg-content1',
+                        value: 'text-small font-medium',
+                      }}
+                    >
+                      {PRACTICE_SCHEME_OPTIONS.map((scheme) => (
+                        <SelectItem key={scheme.key} textValue={scheme.label}>{scheme.label}</SelectItem>
+                      ))}
+                    </Select>
+                  </div>
+                  <Tooltip content={`下载 latest ${selectedScheme.label} 方案`}>
+                    <Button
+                      size="sm"
+                      color="primary"
+                      variant="flat"
+                      startContent={<Download className="h-4 w-4" />}
+                      isLoading={schemeStatus === 'loading'}
+                      onPress={() => loadPracticeScheme(selectedSchemeKey)}
+                    >
+                      下载方案
+                    </Button>
+                  </Tooltip>
+                  <Button size="sm" variant="flat" startContent={<Upload className="h-4 w-4" />} onPress={() => schemeUploadRef.current?.click()}>
+                    上传方案
+                  </Button>
+                  <Button size="sm" variant="flat" isIconOnly aria-label="重置练习" onPress={resetSession}>
+                    <RotateCcw className="h-4 w-4" />
+                  </Button>
+                </div>
+                {practiceSource === 'custom' && (
+                  <div className="w-full rounded-small border border-default-200 bg-default-50/70 p-2.5 lg:max-w-[30rem]">
+                    <div className="flex flex-col gap-3">
+                      <Textarea
+                        minRows={2}
+                        value={draftText}
+                        onValueChange={setDraftText}
+                        placeholder="粘贴或上传 .txt 练习内容"
+                        classNames={{ input: 'text-small leading-6' }}
+                      />
+                      <div className="text-tiny text-default-500">
+                        自定义文本上限 {formatBytes(MAX_CUSTOM_TEXT_BYTES)}，超出后请拆分成多个 .txt。
+                      </div>
+                      <div className="flex justify-end">
+                        <Button
+                          color="primary"
+                          variant="flat"
+                          onPress={() => {
+                            applyCustomTextContent(draftText, '已应用自定义文本')
+                          }}
+                        >
+                          应用文本
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <label className="flex h-10 items-center gap-2 rounded-small border border-default-200 bg-content1 px-3 text-small">
-                <span className="text-default-500">方案</span>
-                <select
-                  value={selectedSchemeKey}
-                  onChange={handlePracticeSchemeChange}
-                  className="bg-transparent text-small font-medium outline-none"
-                >
-                  {PRACTICE_SCHEME_OPTIONS.map((scheme) => (
-                    <option key={scheme.key} value={scheme.key}>{scheme.label}</option>
-                  ))}
-                </select>
-              </label>
-              <Tooltip content={`下载 latest ${selectedScheme.label} 方案`}>
-                <Button
-                  color="primary"
-                  variant="flat"
-                  startContent={<Download className="h-4 w-4" />}
-                  isLoading={schemeStatus === 'loading'}
-                  onPress={() => loadPracticeScheme(selectedSchemeKey)}
-                >
-                  下载{selectedScheme.label}
-                </Button>
-              </Tooltip>
-              <Button variant="flat" startContent={<Upload className="h-4 w-4" />} onPress={() => schemeUploadRef.current?.click()}>
-                上传方案
-              </Button>
-              <Button variant="flat" startContent={<FileText className="h-4 w-4" />} onPress={() => textUploadRef.current?.click()}>
-                上传文本
-              </Button>
-              <Button variant="flat" isIconOnly aria-label="重置练习" onPress={resetSession}>
-                <RotateCcw className="h-4 w-4" />
-              </Button>
-            </div>
+          </div>
+
+          <input ref={textUploadRef} type="file" accept=".txt,text/plain" className="hidden" onChange={handleTextUpload} />
+          <input ref={schemeUploadRef} type="file" accept=".zip,application/zip" className="hidden" onChange={handleSchemeUpload} />
+
+          <div className="grid min-w-0 gap-1.5 md:grid-cols-2">
+            <Alert
+              hideIcon
+              color={schemeStatus === 'error' ? 'danger' : schemeStatus === 'ready' ? 'success' : 'primary'}
+              variant="flat"
+              className="min-w-0 w-full overflow-hidden"
+              classNames={{
+                base: 'min-h-0 px-3 py-2',
+                mainWrapper: 'gap-1',
+              }}
+            >
+              <div className="flex w-full flex-col gap-1.5">
+                <div className="flex min-w-0 w-full items-center gap-2 overflow-x-auto whitespace-nowrap text-[12px] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                  <span className="shrink-0 font-medium text-default-500">方案：</span>
+                  <span className="shrink-0 font-semibold">{schemeStatusLabel}</span>
+                  {schemeStatus === 'loading' && schemeDownloadProgress !== null && (
+                    <Progress
+                      aria-label="方案下载进度"
+                      value={schemeDownloadProgress}
+                      color="primary"
+                      size="sm"
+                      className="w-28 shrink-0"
+                    />
+                  )}
+                  <span className="shrink-0 text-default-500">{schemeDetailLabel}</span>
+                </div>
+                {selectedSchemeCachedVersions.length > 0 && (
+                  <div className="flex flex-col gap-1.5 text-[12px] sm:flex-row sm:flex-wrap sm:items-center">
+                    <span className="shrink-0 text-default-500">本地方案</span>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {selectedSchemeCachedVersions.map((version) => (
+                        <div key={`${version.schemeKey}-${version.version}`} className="inline-flex h-7 min-w-0 items-center gap-1 rounded-small border border-default-200 bg-content1 px-1.5 text-[11px]">
+                          <Button
+                            size="sm"
+                            variant="light"
+                            className="h-5 min-h-5 min-w-0 px-1 text-[11px] font-medium text-primary"
+                            onPress={() => void loadCachedPracticeScheme(version)}
+                          >
+                            {version.version}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="light"
+                            isIconOnly
+                            aria-label={`删除 ${version.label} ${version.version}`}
+                            className="h-5 min-h-5 min-w-5"
+                            onPress={() => void deleteCachedPracticeScheme(version)}
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </Alert>
+
+            {showRimeStatus && (
+              <Alert
+                hideIcon
+                color={rimeStatus === 'ready' ? 'success' : rimeStatus === 'checking' ? 'primary' : 'warning'}
+                variant="flat"
+                className="min-w-0 w-full overflow-hidden"
+                classNames={{
+                  base: 'min-h-0 px-3 py-2',
+                  mainWrapper: 'gap-1',
+                }}
+              >
+                <div className="flex min-w-0 w-full flex-col gap-1">
+                  <div className="flex min-w-0 w-full items-start justify-between gap-2 sm:items-center">
+                    <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto whitespace-nowrap text-[12px] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:overflow-hidden">
+                      <span className="shrink-0 font-medium text-default-500">Rime引擎：</span>
+                      <span className="shrink-0 font-semibold">{rimeStatusLabel}</span>
+                      {rimeStatus === 'checking' && (
+                        <Progress aria-label="Rime 启动进度" value={rimeProgress} color="primary" size="sm" className="w-24 shrink-0" />
+                      )}
+                      <span className="hidden min-w-0 truncate text-[11px] text-default-500 sm:inline">{rimeDetailLabel}</span>
+                    </div>
+                    {isRimeReady && rimeSchemas.length > 0 && (
+                      <div className="w-[9.5rem] min-w-[9.5rem] shrink-0 sm:w-[10rem] sm:min-w-[10rem]">
+                        <Select
+                          aria-label="Rime 方案列表"
+                          placeholder="选择方案"
+                          size="sm"
+                          disallowEmptySelection
+                          selectedKeys={selectedSchemaId ? [selectedSchemaId] : []}
+                          onSelectionChange={(keys) => {
+                            const nextSchemaId = getSingleSelectionValue(keys)
+                            if (!nextSchemaId) return
+                            void selectRimeSchema(nextSchemaId)
+                          }}
+                          classNames={{
+                            base: 'w-full',
+                            trigger: 'h-8 min-h-8 bg-content1',
+                            value: 'text-[12px] font-medium',
+                          }}
+                        >
+                          {rimeSchemas.map((schema) => (
+                            <SelectItem key={schema.id} textValue={schema.name}>{schema.name}</SelectItem>
+                          ))}
+                        </Select>
+                      </div>
+                    )}
+                  </div>
+                  <div className="min-w-0 text-[11px] leading-tight text-default-500 sm:hidden">{rimeDetailLabel}</div>
+                </div>
+              </Alert>
+            )}
           </div>
         </div>
 
-        <input ref={textUploadRef} type="file" accept=".txt,text/plain" className="hidden" onChange={handleTextUpload} />
-        <input ref={schemeUploadRef} type="file" accept=".zip,application/zip" className="hidden" onChange={handleSchemeUpload} />
-
-        <Alert color={schemeStatus === 'error' ? 'danger' : schemeStatus === 'ready' ? 'success' : 'primary'} variant="flat" className="w-full">
-          <div className="flex w-full flex-col gap-2">
-            <div className="flex w-full flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-              <span>{schemeMessage}</span>
-              {dictionary && (
-                <span className="text-tiny text-default-500">
-                  {dictionary.sourceName}{dictionary.version ? ` · ${dictionary.version}` : ''} · {dictionary.entries.length.toLocaleString()} 条去重记录
-                </span>
-              )}
-            </div>
-            {schemeDownloadProgress !== null && schemeStatus === 'loading' && (
-              <Progress
-                aria-label="方案下载进度"
-                value={schemeDownloadProgress}
-                color="primary"
-                size="sm"
-              />
-            )}
-            {selectedSchemeCachedVersions.length > 0 && (
-              <div className="flex flex-wrap items-center gap-2 pt-1">
-                <span className="text-tiny text-default-500">本地版本</span>
-                {selectedSchemeCachedVersions.map((version) => (
-                  <div key={`${version.schemeKey}-${version.version}`} className="inline-flex h-8 items-center gap-1 rounded-small border border-default-200 bg-content1 px-2 text-tiny">
-                    <button
-                      type="button"
-                      className="font-medium text-primary hover:underline"
-                      onClick={() => void loadCachedPracticeScheme(version)}
-                    >
-                      {version.version}
-                    </button>
-                    <span className="text-default-400">{formatBytes(version.size)}</span>
-                    <Button
-                      size="sm"
-                      variant="light"
-                      isIconOnly
-                      aria-label={`删除 ${version.label} ${version.version}`}
-                      className="h-6 min-w-6"
-                      onPress={() => void deleteCachedPracticeScheme(version)}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </Alert>
-
-        {showRimeStatus && (
-          <Alert color={rimeStatus === 'ready' ? 'success' : rimeStatus === 'checking' ? 'primary' : 'warning'} variant="flat" className="w-full">
-            <div className="flex w-full flex-col gap-3">
-              <div className="flex w-full flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
-                <div className="flex min-w-0 flex-1 flex-col gap-1">
-                  <span className="text-lg font-semibold">{rimeMessage}</span>
-                  <span className="text-small text-default-500">{rimeDetail}</span>
-                </div>
-                <span className="shrink-0 text-small font-medium text-default-500">
-                  {rimeStatus === 'ready' ? 'Rime 引擎就绪' : rimeStatus === 'checking' ? '启动中' : '等待 Rime 运行时'}
-                </span>
-              </div>
-              <Progress aria-label="Rime 启动进度" value={rimeProgress} color={rimeStatus === 'ready' ? 'success' : rimeStatus === 'checking' ? 'primary' : 'warning'} size="sm" />
-              {isRimeReady && rimeSchemas.length > 0 && (
-                <div className="flex flex-wrap gap-2">
-                  {rimeSchemas.map((schema) => (
-                    <Button
-                      key={schema.id}
-                      size="sm"
-                      variant={selectedSchemaId === schema.id ? 'flat' : 'light'}
-                      color={selectedSchemaId === schema.id ? 'primary' : 'default'}
-                      onPress={() => void selectRimeSchema(schema.id)}
-                    >
-                      {schema.name}
-                    </Button>
-                  ))}
-                </div>
-              )}
-            </div>
-          </Alert>
-        )}
-
-        <section className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
+        <section className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
           <div className="flex flex-col gap-4">
             <Card
               radius="sm"
               shadow="sm"
-              onMouseDown={(event) => {
+              onPointerDown={(event) => {
                 const target = event.target as HTMLElement
-                if (target.closest('button,[role="tab"],select,textarea')) return
+                if (target.closest('button,[role="tab"],select,textarea,input')) return
                 focusPracticeSurface()
               }}
               className={`border transition-colors ${isPracticeFocused ? 'border-primary bg-content1' : 'border-default-200 bg-content1'}`}
               style={{ height: 'min(42rem, calc(100vh - 16rem))' }}
             >
               <CardBody className="relative flex h-full flex-col overflow-hidden p-0">
+                <input
+                  ref={keyboardBridgeRef}
+                  type="text"
+                  inputMode="text"
+                  autoCapitalize="none"
+                  autoComplete="off"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  aria-label="键道移动端输入桥"
+                  tabIndex={-1}
+                  className="pointer-events-none absolute left-4 top-4 h-11 w-11 opacity-0"
+                  onFocus={() => setIsPracticeFocused(true)}
+                  onBlur={() => setIsPracticeFocused(false)}
+                  onKeyDown={handleKeyDown}
+                  onBeforeInput={handleKeyboardBridgeBeforeInput}
+                  onInput={handleKeyboardBridgeInput}
+                />
                 <div className="shrink-0 flex flex-col gap-3 border-b border-divider px-5 py-4 md:flex-row md:items-center md:justify-between">
                   <div className="flex items-center gap-2 text-small text-default-500">
                     <Sparkles className="h-4 w-4 text-primary" />
@@ -1320,6 +1598,15 @@ export default function KeyTaoPracticePage() {
                     <span>{practiceItems.length.toLocaleString()} 项</span>
                   </div>
                   <div className="flex items-center gap-2">
+                    <Button
+                      size="sm"
+                      variant="light"
+                      startContent={<Shuffle className="h-4 w-4" />}
+                      onPress={() => setPracticeShuffleSeed((value) => value + 1)}
+                      isDisabled={practiceItems.length < 2 || isFinished}
+                    >
+                      乱序
+                    </Button>
                     <Button size="sm" variant="light" startContent={<SkipForward className="h-4 w-4" />} onPress={skipCurrentItem} isDisabled={!currentItem || isFinished}>
                       跳过
                     </Button>
@@ -1337,6 +1624,7 @@ export default function KeyTaoPracticePage() {
                   onFocus={() => setIsPracticeFocused(true)}
                   onBlur={() => setIsPracticeFocused(false)}
                   onKeyDown={handleKeyDown}
+                  onPointerDown={focusPracticeSurface}
                   onClick={focusPracticeSurface}
                   className={`min-h-0 flex-1 cursor-text overflow-y-auto px-5 pb-36 pt-8 outline-none transition-colors sm:px-8 ${isPracticeFocused ? 'focus-visible:ring-2 focus-visible:ring-primary/60' : 'opacity-85'}`}
                 >
@@ -1428,54 +1716,26 @@ export default function KeyTaoPracticePage() {
 
           <div className="flex flex-col gap-4">
             <Card radius="sm" shadow="sm" className="border border-divider">
-              <CardBody className="gap-4">
-                <div>
-                  <h2 className="text-lg font-semibold">练习来源</h2>
-                  <p className="mt-1 text-small text-default-500">已移除文字数量限制，按来源完整生成目标。</p>
-                </div>
-                <Tabs
-                  selectedKey={practiceSource}
-                  onSelectionChange={(key) => setPracticeSource(key as PracticeSource)}
-                  color="primary"
-                  variant="underlined"
-                  classNames={{ tabList: 'flex-wrap' }}
-                >
-                  {PRACTICE_SOURCE_OPTIONS.map((option) => (
-                    <Tab key={option.key} title={option.label} />
-                  ))}
-                </Tabs>
-                {practiceSource === 'article' && (
-                  <label className="flex flex-col gap-2 text-small">
-                    <span className="text-default-500">文章</span>
-                    <select
-                      value={selectedArticleId}
-                      onChange={(event) => setSelectedArticleId(event.target.value)}
-                      className="h-10 rounded-small border border-default-200 bg-content1 px-3 text-small outline-none focus:border-primary"
-                    >
-                      {ARTICLE_OPTIONS.map((article) => <option key={article.id} value={article.id}>{article.title}</option>)}
-                    </select>
-                  </label>
-                )}
-                {practiceSource === 'custom' && (
-                  <div className="flex flex-col gap-3">
-                    <Textarea
-                      minRows={6}
-                      value={draftText}
-                      onValueChange={setDraftText}
-                      placeholder="粘贴或上传 .txt 练习内容"
-                      classNames={{ input: 'text-small leading-6' }}
-                    />
-                    <Button
-                      color="primary"
-                      variant="flat"
-                      onPress={() => {
-                        setPracticeSource('custom')
-                        setSourceText(draftText)
-                      }}
-                    >
-                      应用文本
-                    </Button>
+              <CardBody className="gap-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <Info className="h-4 w-4 text-primary" />
+                    <h2 className="text-lg font-semibold">提示</h2>
                   </div>
+                  <Button
+                    size="sm"
+                    variant="flat"
+                    startContent={isInsightPanelVisible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    onPress={() => setIsInsightPanelVisible((value) => !value)}
+                  >
+                    {isInsightPanelVisible ? '隐藏' : '查看'}
+                  </Button>
+                </div>
+                {isInsightPanelVisible && (
+                  <>
+                    <InsightPanel title="当前目标" insight={currentInsight} />
+                    <InsightPanel title="刚完成" insight={lastCompletedInsight} />
+                  </>
                 )}
               </CardBody>
             </Card>
@@ -1483,7 +1743,7 @@ export default function KeyTaoPracticePage() {
             <Card radius="sm" shadow="sm" className="border border-divider">
               <CardBody className="gap-4">
                 <div className="flex items-center justify-between">
-                  <h2 className="text-lg font-semibold">状态</h2>
+                  <h2 className="text-lg font-semibold">统计</h2>
                   <Chip size="sm" variant="flat" color={isRimeReady ? 'success' : 'warning'}>{isRimeReady ? 'Rime 就绪' : '等待 Rime'}</Chip>
                 </div>
                 <Progress aria-label="练习进度" value={progressValue} color="primary" size="sm" />
@@ -1511,30 +1771,31 @@ export default function KeyTaoPracticePage() {
 
             <Card radius="sm" shadow="sm" className="border border-divider">
               <CardBody className="gap-3">
-                <div className="flex items-center gap-2">
-                  <Info className="h-4 w-4 text-primary" />
-                  <h2 className="text-lg font-semibold">拆分与编码</h2>
+                <div className="flex items-center justify-between gap-3">
+                  <h2 className="text-lg font-semibold">飞键规则</h2>
+                  <Button
+                    size="sm"
+                    variant="flat"
+                    startContent={isFlyRulePanelVisible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    onPress={() => setIsFlyRulePanelVisible((value) => !value)}
+                  >
+                    {isFlyRulePanelVisible ? '隐藏' : '查看'}
+                  </Button>
                 </div>
-                <InsightPanel title="当前目标" insight={currentInsight} />
-                <InsightPanel title="刚完成" insight={lastCompletedInsight} />
-              </CardBody>
-            </Card>
-
-            <Card radius="sm" shadow="sm" className="border border-divider">
-              <CardBody className="gap-3">
-                <h2 className="text-lg font-semibold">飞键规则</h2>
-                <div className="grid gap-2">
-                  {FLY_RULE_SUMMARY.map((rule) => (
-                    <div key={rule.id} className="rounded-small border border-default-200 bg-default-50/70 px-3 py-2">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="font-semibold">{rule.head}</span>
-                        <span className="font-mono text-primary">{rule.keyName}</span>
+                {isFlyRulePanelVisible && (
+                  <div className="grid gap-2">
+                    {FLY_RULE_SUMMARY.map((rule) => (
+                      <div key={rule.id} className="rounded-small border border-default-200 bg-default-50/70 px-3 py-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-semibold">{rule.head}</span>
+                          <span className="font-mono text-primary">{rule.keyName}</span>
+                        </div>
+                        <div className="mt-1 text-tiny leading-5 text-default-500">{rule.finals}</div>
+                        {rule.fly && <div className="text-tiny text-warning-600">{rule.fly}</div>}
                       </div>
-                      <div className="mt-1 text-tiny leading-5 text-default-500">{rule.finals}</div>
-                      {rule.fly && <div className="text-tiny text-warning-600">{rule.fly}</div>}
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                )}
               </CardBody>
             </Card>
 

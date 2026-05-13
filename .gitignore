@@ -21,6 +21,10 @@
 /lib/librime-wasm/runtime/rime.js
 /lib/librime-wasm/runtime/rime.wasm
 /lib/librime-wasm/runtime/rime.data
+/public/sw.js
+/public/sw.js.map
+/public/swe-worker-*.js
+/public/swe-worker-*.js.map
 
 # production
 /build
