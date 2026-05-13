@@ -12,6 +12,8 @@ import {
   Progress,
   Select,
   SelectItem,
+  Spinner,
+  Switch,
   Textarea,
   Tooltip,
 } from '@heroui/react'
@@ -64,6 +66,7 @@ const COMMON_CHARACTER_RANK = new Map(Array.from(COMMON_SINGLE_CHARACTER_ORDER).
 
 type SchemeStatus = 'idle' | 'loading' | 'ready' | 'error'
 type PracticeSource = 'common500' | 'common1000' | 'article' | 'custom' | 'flyKey'
+type PracticeMode = 'follow' | 'study'
 type FlyKeyRuleId = 'zh-outer' | 'zh-inner' | 'ch-outer' | 'ch-inner' | 'uang-m' | 'uang-x'
 
 interface KeyTaoConfigData {
@@ -243,6 +246,16 @@ function shufflePracticeItems<T>(items: T[]): T[] {
   }
 
   return nextItems
+}
+
+function findAutoCommitCandidateIndex(
+  composition: RimeComposition | null | undefined,
+  currentCommittedText: string,
+  currentTargetText: string | undefined
+): number {
+  if (!composition || !currentTargetText) return -1
+
+  return composition.candidates.findIndex((candidate) => `${currentCommittedText}${candidate.text}` === currentTargetText)
 }
 
 function normalizePinyin(value: string): string {
@@ -625,8 +638,10 @@ export default function KeyTaoPracticePage() {
   const [isKeyMapVisible, setIsKeyMapVisible] = useState(true)
   const [isInsightPanelVisible, setIsInsightPanelVisible] = useState(true)
   const [isFlyRulePanelVisible, setIsFlyRulePanelVisible] = useState(true)
+  const [practiceMode, setPracticeMode] = useState<PracticeMode>('follow')
   const [practiceShuffleSeed, setPracticeShuffleSeed] = useState(0)
   const [lastCompletedTarget, setLastCompletedTarget] = useState<string | null>(null)
+  const [currentCommittedText, setCurrentCommittedText] = useState('')
   const [currentIndex, setCurrentIndex] = useState(0)
   const [completedText, setCompletedText] = useState('')
   const [totalKeys, setTotalKeys] = useState(0)
@@ -692,8 +707,9 @@ export default function KeyTaoPracticePage() {
     () => buildPracticeInsight(lastCompletedTarget ?? undefined, dictionary, keytaoConfig),
     [dictionary, keytaoConfig, lastCompletedTarget]
   )
+  const isStudyMode = practiceMode === 'study'
   const isRimeReady = rimeStatus === 'ready' && Boolean(rimeEngineRef.current)
-  const displayedInput = rimeComposition?.preedit ?? ''
+  const displayedInput = `${currentCommittedText}${rimeComposition?.preedit ?? ''}`
   const displayedCandidates = rimeComposition?.candidates ?? EMPTY_RIME_CANDIDATES
   const hasInputError = feedback?.startsWith('当前输入')
     || feedback?.startsWith('已选')
@@ -701,6 +717,9 @@ export default function KeyTaoPracticePage() {
     || feedback?.startsWith('真实 Rime')
     || false
   const showRimeStatus = true
+  const isPracticeLoading = schemeStatus === 'loading' || !dictionary
+  const hasPracticeItems = practiceItems.length > 0
+  const isPracticeEmpty = !isPracticeLoading && !hasPracticeItems
 
   const practiceKey = useMemo(
     () => practiceItems.map((item) => item.text).join('|'),
@@ -945,6 +964,7 @@ export default function KeyTaoPracticePage() {
     setCurrentIndex(0)
     setCompletedText('')
     setLastCompletedTarget(null)
+    setCurrentCommittedText('')
     setTotalKeys(0)
     setWrongKeys(0)
     setPerfectItems(0)
@@ -970,6 +990,7 @@ export default function KeyTaoPracticePage() {
     setLastCompletedTarget(currentItem.text)
     setPerfectItems((value) => value + (itemHadMistake ? 0 : 1))
     setCurrentIndex((value) => value + 1)
+    setCurrentCommittedText('')
     setRimeComposition(null)
     setItemHadMistake(false)
     setFeedback(null)
@@ -978,11 +999,32 @@ export default function KeyTaoPracticePage() {
   const skipCurrentItem = useCallback(() => {
     if (!currentItem) return
     setCurrentIndex((value) => value + 1)
+    setCurrentCommittedText('')
     setRimeComposition(null)
     setItemHadMistake(false)
     setFeedback(`已跳过「${currentItem.text}」`)
     focusPracticeSurface()
   }, [currentItem, focusPracticeSurface])
+
+  const applyCommittedText = useCallback((committedText: string) => {
+    if (!currentItem) return
+
+    const nextCommittedText = `${currentCommittedText}${committedText}`
+    if (nextCommittedText === currentItem.text) {
+      completeCurrentItem()
+      return
+    }
+
+    if (currentItem.text.startsWith(nextCommittedText)) {
+      setCurrentCommittedText(nextCommittedText)
+      setFeedback(null)
+      return
+    }
+
+    setWrongKeys((value) => value + 1)
+    setItemHadMistake(true)
+    setFeedback(`当前输入「${nextCommittedText}」，目标是「${currentItem.text}」`)
+  }, [completeCurrentItem, currentCommittedText, currentItem])
 
   const applyRimeResult = useCallback((result: RimeProcessResult) => {
     setRimeComposition(result.composition ?? null)
@@ -992,29 +1034,30 @@ export default function KeyTaoPracticePage() {
       return
     }
 
-    if (currentItem && result.committedText === currentItem.text) {
-      completeCurrentItem()
-      return
-    }
-
-    setWrongKeys((value) => value + 1)
-    setItemHadMistake(true)
-    setFeedback(currentItem
-      ? `输入法提交「${result.committedText}」，目标是「${currentItem.text}」`
-      : `输入法提交「${result.committedText}」`)
-  }, [completeCurrentItem, currentItem])
+    applyCommittedText(result.committedText)
+  }, [applyCommittedText])
 
   const processRimeKey = useCallback(async (key: string) => {
     const engine = rimeEngineRef.current
     if (!engine) return
 
     try {
-      applyRimeResult(await engine.processKey(key))
+      const result = await engine.processKey(key)
+      const autoCommitCandidateIndex = isStudyMode
+        ? findAutoCommitCandidateIndex(result.composition, currentCommittedText, currentItem?.text)
+        : -1
+
+      if (autoCommitCandidateIndex >= 0) {
+        applyRimeResult(await engine.selectCandidate(autoCommitCandidateIndex))
+        return
+      }
+
+      applyRimeResult(result)
     } catch (error) {
       setRimeStatus('error')
       setRimeMessage(error instanceof Error ? error.message : 'librime wasm 输入失败')
     }
-  }, [applyRimeResult])
+  }, [applyRimeResult, currentCommittedText, currentItem?.text, isStudyMode])
 
   const submitRimeKey = useCallback((key: string) => {
     if (!currentItem || isFinished) return false
@@ -1029,6 +1072,11 @@ export default function KeyTaoPracticePage() {
     void processRimeKey(key)
     return true
   }, [currentItem, isFinished, isRimeReady, processRimeKey, startTime])
+
+  const submitPracticeKeys = useCallback((keys: string[]) => {
+    for (const key of keys) submitRimeKey(key)
+    return true
+  }, [submitRimeKey])
 
   const selectRimeCandidate = useCallback(async (index: number) => {
     const engine = rimeEngineRef.current
@@ -1112,17 +1160,23 @@ export default function KeyTaoPracticePage() {
     if (keys.length === 0) return
 
     event.preventDefault()
-    for (const key of keys) submitRimeKey(key)
+    submitPracticeKeys(keys)
     event.currentTarget.value = ''
-  }, [submitRimeKey])
+  }, [submitPracticeKeys])
 
   const handleKeyboardBridgeInput = useCallback((event: React.FormEvent<HTMLInputElement>) => {
     const value = event.currentTarget.value
     event.currentTarget.value = ''
     if (!value) return
 
-    for (const key of Array.from(value)) submitRimeKey(key)
-  }, [submitRimeKey])
+    submitPracticeKeys(Array.from(value))
+  }, [submitPracticeKeys])
+
+  const handlePracticeModeChange = useCallback((enabled: boolean) => {
+    setPracticeMode(enabled ? 'study' : 'follow')
+    setFeedback(null)
+    focusPracticeSurface()
+  }, [focusPracticeSurface])
 
   const applyCustomTextContent = useCallback((rawContent: string, successMessage: string) => {
     const cleanedContent = rawContent.replace(/\r\n/g, '\n').trim()
@@ -1597,7 +1651,14 @@ export default function KeyTaoPracticePage() {
                     <span>·</span>
                     <span>{practiceItems.length.toLocaleString()} 项</span>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center justify-end gap-2">
+                    <Switch
+                      size="sm"
+                      isSelected={isStudyMode}
+                      onValueChange={handlePracticeModeChange}
+                    >
+                      学习模式
+                    </Switch>
                     <Button
                       size="sm"
                       variant="light"
@@ -1628,25 +1689,52 @@ export default function KeyTaoPracticePage() {
                   onClick={focusPracticeSurface}
                   className={`min-h-0 flex-1 cursor-text overflow-y-auto px-5 pb-36 pt-8 outline-none transition-colors sm:px-8 ${isPracticeFocused ? 'focus-visible:ring-2 focus-visible:ring-primary/60' : 'opacity-85'}`}
                 >
-                  <div className="font-mono text-3xl leading-relaxed tracking-normal whitespace-pre-wrap wrap-break-word sm:text-4xl">
-                    {practiceItems.length > 0 ? practiceItems.map((item, index) => {
-                      const state = index < currentIndex ? 'done' : index === currentIndex && !isFinished ? 'current' : 'pending'
-                      return (
-                        <span
-                          key={`${item.text}-${index}`}
-                          className={`mx-0.5 inline-block border-b-2 pb-1 ${state === 'done'
-                            ? 'border-success-400 text-success-500/80'
-                            : state === 'current'
-                              ? 'border-primary text-foreground'
-                              : 'border-default-200 text-default-300'}`}
-                        >
-                          {item.text}
-                        </span>
-                      )
-                    }) : (
-                      <span className="font-semibold text-success">完成</span>
-                    )}
-                  </div>
+                  {isStudyMode ? (
+                    <div className="flex min-h-full flex-col items-center justify-center gap-4 text-center font-mono">
+                      {currentItem && !isFinished ? (
+                        <>
+                          <div className="text-[clamp(3.5rem,9vw,7rem)] font-semibold leading-none tracking-normal text-foreground">{currentItem.text}</div>
+                          <div className="text-small text-default-500">{currentIndex + 1} / {practiceItems.length}</div>
+                        </>
+                      ) : isPracticeLoading ? (
+                        <div className="flex flex-col items-center gap-3">
+                          <Spinner size="lg" color="primary" />
+                          <div className="text-small text-default-500">加载练习内容中</div>
+                        </div>
+                      ) : isPracticeEmpty ? (
+                        <div className="text-small text-default-500">暂无可练习内容</div>
+                      ) : (
+                        <span className="font-semibold text-success">完成</span>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="font-mono text-3xl leading-relaxed tracking-normal whitespace-pre-wrap wrap-break-word sm:text-4xl">
+                      {hasPracticeItems ? practiceItems.map((item, index) => {
+                        const state = index < currentIndex ? 'done' : index === currentIndex && !isFinished ? 'current' : 'pending'
+                        return (
+                          <span
+                            key={`${item.text}-${index}`}
+                            className={`mx-0.5 inline-block border-b-2 pb-1 ${state === 'done'
+                              ? 'border-success-400 text-success-500/80'
+                              : state === 'current'
+                                ? 'border-primary text-foreground'
+                                : 'border-default-200 text-default-300'}`}
+                          >
+                            {item.text}
+                          </span>
+                        )
+                      }) : isPracticeLoading ? (
+                        <div className="flex min-h-full flex-col items-center justify-center gap-3 py-12 text-base text-default-500">
+                          <Spinner size="lg" color="primary" />
+                          <span>加载练习内容中</span>
+                        </div>
+                      ) : isPracticeEmpty ? (
+                        <div className="py-12 text-center text-base text-default-500">暂无可练习内容</div>
+                      ) : (
+                        <span className="font-semibold text-success">完成</span>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 {isPracticeFocused && currentItem && !isFinished && (
@@ -1664,7 +1752,9 @@ export default function KeyTaoPracticePage() {
                     </div>
                     <div className="flex min-h-16 items-center gap-2 overflow-x-auto overscroll-x-contain px-3 py-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                       {displayedCandidates.length > 0 ? displayedCandidates.map((candidate, index) => {
-                        const isTarget = candidate.text === currentItem?.text
+                        const nextCommittedText = `${currentCommittedText}${candidate.text}`
+                        const isValidTarget = currentItem ? currentItem.text.startsWith(nextCommittedText) : false
+                        const isExactTarget = currentItem ? nextCommittedText === currentItem.text : false
                         const candidateHint = candidate.comment
                         return (
                           <button
@@ -1675,7 +1765,11 @@ export default function KeyTaoPracticePage() {
                               void selectRimeCandidate(index)
                               focusPracticeSurface()
                             }}
-                            className={`inline-flex shrink-0 items-center gap-2 rounded-small border px-3 py-2 text-small transition-colors ${isTarget ? 'border-primary bg-primary text-primary-foreground' : 'border-divider bg-content1 text-foreground hover:bg-default-100'}`}
+                            className={`inline-flex shrink-0 items-center gap-2 rounded-small border px-3 py-2 text-small transition-colors ${isExactTarget
+                              ? 'border-success bg-success text-success-foreground'
+                              : isValidTarget
+                                ? 'border-primary bg-primary text-primary-foreground'
+                                : 'border-divider bg-content1 text-foreground hover:bg-default-100'}`}
                           >
                             <span className="font-mono text-tiny opacity-70">{getCandidateLabel(index)}</span>
                             <span className="text-base leading-none">{candidate.text}</span>
@@ -1744,7 +1838,9 @@ export default function KeyTaoPracticePage() {
               <CardBody className="gap-4">
                 <div className="flex items-center justify-between">
                   <h2 className="text-lg font-semibold">统计</h2>
-                  <Chip size="sm" variant="flat" color={isRimeReady ? 'success' : 'warning'}>{isRimeReady ? 'Rime 就绪' : '等待 Rime'}</Chip>
+                  <Chip size="sm" variant="flat" color={isStudyMode ? 'primary' : isRimeReady ? 'success' : 'warning'}>
+                    {isStudyMode ? '学习模式' : isRimeReady ? 'Rime 就绪' : '等待 Rime'}
+                  </Chip>
                 </div>
                 <Progress aria-label="练习进度" value={progressValue} color="primary" size="sm" />
                 <div className="grid grid-cols-2 gap-3 text-small">
