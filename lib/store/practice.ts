@@ -3,12 +3,20 @@ import { persist } from 'zustand/middleware'
 import type { CachedPracticeSchemeVersion, PracticeSchemeKey } from '@/lib/services/practiceSchemeCache'
 
 type CachedSchemeVersions = Record<PracticeSchemeKey, CachedPracticeSchemeVersion[]>
+type PracticeSourcePreference = 'common500' | 'common1000' | 'article' | 'custom' | 'flyKey' | 'keytao630'
+type PracticeModePreference = 'follow' | 'study'
 
 interface PracticeStore {
   selectedSchemeKey: PracticeSchemeKey
   cachedSchemeVersions: CachedSchemeVersions
+  practiceSource: PracticeSourcePreference
+  selectedArticleId: string
+  practiceMode: PracticeModePreference
   hasHydrated: boolean
   setSelectedSchemeKey: (schemeKey: PracticeSchemeKey) => void
+  setPracticeSource: (source: PracticeSourcePreference) => void
+  setSelectedArticleId: (articleId: string) => void
+  setPracticeMode: (mode: PracticeModePreference) => void
   upsertCachedSchemeVersion: (version: CachedPracticeSchemeVersion) => void
   removeCachedSchemeVersion: (schemeKey: PracticeSchemeKey, version: string) => void
   setHasHydrated: (state: boolean) => void
@@ -30,8 +38,14 @@ export const usePracticeStore = create<PracticeStore>()(
     (set) => ({
       selectedSchemeKey: 'keytao',
       cachedSchemeVersions: EMPTY_CACHED_SCHEMES,
+      practiceSource: 'common500',
+      selectedArticleId: 'builtin:default-longform',
+      practiceMode: 'follow',
       hasHydrated: false,
       setSelectedSchemeKey: (schemeKey) => set({ selectedSchemeKey: schemeKey }),
+      setPracticeSource: (practiceSource) => set({ practiceSource }),
+      setSelectedArticleId: (selectedArticleId) => set({ selectedArticleId }),
+      setPracticeMode: (practiceMode) => set({ practiceMode }),
       upsertCachedSchemeVersion: (version) => set((state) => {
         const currentVersions = state.cachedSchemeVersions[version.schemeKey] ?? []
         const nextVersions = sortCachedVersions([
@@ -59,6 +73,9 @@ export const usePracticeStore = create<PracticeStore>()(
       partialize: (state) => ({
         selectedSchemeKey: state.selectedSchemeKey,
         cachedSchemeVersions: state.cachedSchemeVersions,
+        practiceSource: state.practiceSource,
+        selectedArticleId: state.selectedArticleId,
+        practiceMode: state.practiceMode,
       }),
       onRehydrateStorage: () => (state) => {
         state?.setHasHydrated(true)

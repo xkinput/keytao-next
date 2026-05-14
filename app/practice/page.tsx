@@ -59,6 +59,7 @@ import {
   putCachedPracticeSchemeZip,
   type CachedPracticeSchemeVersion,
 } from '@/lib/services/practiceSchemeCache'
+import { DEFAULT_PRACTICE_ARTICLE_OPTIONS, type PracticeArticleOption } from '@/lib/services/practiceArticles'
 import { usePracticeStore, type PracticeSchemeKey } from '@/lib/store/practice'
 
 const DEFAULT_PRACTICE_TEXT = '我们可以通过键道练习输入文字词组编码方案系统开源词库用户学习效率中文输入法'
@@ -131,24 +132,6 @@ const KEYTAO_630_TEXT = `不能 班级 不了 宝贝 不好 不敢 不但 不见
 到了 大约 肚子 都能 打架 当即 多少 当中 大人 短信 动作 地上 但是 的话 都是 大家 弟弟 地方 当然 多么 独自 大爷 等待 打算 东西 得到 底下 大哥 对面 对于
 生活 视线 身子 深深 身边 手臂 时候 世界 是从 时光 双手 身上 时间 说话 瞬间 事情 说着 声音 什么 舒服 似的 十分 身后 少年 上面 甚至 剩下 上来 手机 属于
 只能 纷纷 房子 否则 只好 发展 这个 这里 这种 这样 方向 分钟 发现 这个 这里 这种 这样`
-
-const ARTICLE_OPTIONS = [
-  {
-    id: 'morning-note',
-    title: '清晨短文',
-    text: '清晨的风从窗外经过，桌上的字帖安静展开。我们把每一次按键都放慢一点，先看准声韵，再确认拆分。练习不是追赶速度，而是让手指记住正确的路。',
-  },
-  {
-    id: 'winter-sea',
-    title: '海边冬夜',
-    text: '冬夜的海很安静，远处的灯像细小的星。人坐在窗前读书，偶尔听见潮声，便知道时间还在慢慢向前。字与词也一样，熟悉以后自然会连成句子。',
-  },
-  {
-    id: 'typing-essay',
-    title: '常用打字文章',
-    text: '中文输入练习需要稳定、清楚、连续的材料。短句可以训练节奏，长句可以训练耐心，常用字则帮助我们减少犹豫。每天完成一小段，编码就会逐渐变成直觉。',
-  },
-]
 
 const PRACTICE_SOURCE_OPTIONS: Array<{ key: PracticeSource; label: string; detail: string }> = [
   { key: 'common500', label: '单字常用字前500', detail: '高频单字' },
@@ -762,8 +745,14 @@ export default function KeyTaoPracticePage() {
 
   const selectedSchemeKey = usePracticeStore((state) => state.selectedSchemeKey)
   const cachedSchemeVersions = usePracticeStore((state) => state.cachedSchemeVersions)
+  const practiceSource = usePracticeStore((state) => state.practiceSource) as PracticeSource
+  const selectedArticleId = usePracticeStore((state) => state.selectedArticleId)
+  const practiceMode = usePracticeStore((state) => state.practiceMode) as PracticeMode
   const hasHydratedPracticeStore = usePracticeStore((state) => state.hasHydrated)
   const setSelectedSchemeKey = usePracticeStore((state) => state.setSelectedSchemeKey)
+  const setPracticeSource = usePracticeStore((state) => state.setPracticeSource)
+  const setSelectedArticleId = usePracticeStore((state) => state.setSelectedArticleId)
+  const setStoredPracticeMode = usePracticeStore((state) => state.setPracticeMode)
   const upsertCachedSchemeVersion = usePracticeStore((state) => state.upsertCachedSchemeVersion)
   const removeCachedSchemeVersion = usePracticeStore((state) => state.removeCachedSchemeVersion)
 
@@ -771,15 +760,15 @@ export default function KeyTaoPracticePage() {
   const [schemeStatus, setSchemeStatus] = useState<SchemeStatus>('idle')
   const [schemeMessage, setSchemeMessage] = useState('等待加载键道方案')
   const [schemeDownloadProgress, setSchemeDownloadProgress] = useState<number | null>(null)
-  const [practiceSource, setPracticeSource] = useState<PracticeSource>('common500')
-  const [selectedArticleId, setSelectedArticleId] = useState(ARTICLE_OPTIONS[0].id)
+  const [articleOptions, setArticleOptions] = useState<PracticeArticleOption[]>(DEFAULT_PRACTICE_ARTICLE_OPTIONS)
+  const [articleListMessage, setArticleListMessage] = useState('默认提供一篇内置长文，联网后会补充中文维基文库随机长文')
+  const [isRefreshingArticles, setIsRefreshingArticles] = useState(false)
   const [sourceText, setSourceText] = useState(DEFAULT_PRACTICE_TEXT)
   const [draftText, setDraftText] = useState(DEFAULT_PRACTICE_TEXT)
   const [keytaoConfig, setKeytaoConfig] = useState<KeyTaoConfigData | null>(null)
   const [isKeyMapVisible, setIsKeyMapVisible] = useState(true)
   const [isInsightPanelVisible, setIsInsightPanelVisible] = useState(true)
   const [isFlyRulePanelVisible, setIsFlyRulePanelVisible] = useState(true)
-  const [practiceMode, setPracticeMode] = useState<PracticeMode>('follow')
   const [practiceShuffleSeed, setPracticeShuffleSeed] = useState(0)
   const [lastCompletedTarget, setLastCompletedTarget] = useState<string | null>(null)
   const [currentCommittedText, setCurrentCommittedText] = useState('')
@@ -809,8 +798,8 @@ export default function KeyTaoPracticePage() {
   const pendingStudyAutoCommitTimerRef = useRef<number | null>(null)
 
   const selectedArticle = useMemo(
-    () => ARTICLE_OPTIONS.find((article) => article.id === selectedArticleId) ?? ARTICLE_OPTIONS[0],
-    [selectedArticleId]
+    () => articleOptions.find((article) => article.id === selectedArticleId) ?? articleOptions[0] ?? DEFAULT_PRACTICE_ARTICLE_OPTIONS[0],
+    [articleOptions, selectedArticleId]
   )
   const selectedScheme = useMemo(
     () => PRACTICE_SCHEME_OPTIONS.find((scheme) => scheme.key === selectedSchemeKey) ?? PRACTICE_SCHEME_OPTIONS[0],
@@ -953,6 +942,27 @@ export default function KeyTaoPracticePage() {
     setMobileCandidateOverlayTop(Math.round(nextTop))
   }, [isTouchLayout])
 
+  const scrollCurrentTargetIntoView = useCallback((behavior: ScrollBehavior = 'smooth') => {
+    const surface = inputSurfaceRef.current
+    const anchor = currentTargetAnchorRef.current
+    if (!surface || !anchor || isStudyMode) return
+
+    const surfaceRect = surface.getBoundingClientRect()
+    const anchorRect = anchor.getBoundingClientRect()
+    const candidateHeight = candidatePanelRef.current?.getBoundingClientRect().height ?? 0
+    const topGuard = surfaceRect.top + 36
+    const bottomGuard = surfaceRect.bottom - Math.min(candidateHeight + 28, surfaceRect.height * 0.38)
+
+    if (anchorRect.top < topGuard) {
+      surface.scrollBy({ top: anchorRect.top - topGuard, behavior })
+      return
+    }
+
+    if (anchorRect.bottom > bottomGuard) {
+      surface.scrollBy({ top: anchorRect.bottom - bottomGuard, behavior })
+    }
+  }, [isStudyMode])
+
   const clearPendingStudyAutoCommit = useCallback(() => {
     if (pendingStudyAutoCommitTimerRef.current === null) return
     window.clearTimeout(pendingStudyAutoCommitTimerRef.current)
@@ -1034,6 +1044,18 @@ export default function KeyTaoPracticePage() {
       viewport?.removeEventListener('scroll', updateMobileCandidateOverlayPosition)
     }
   }, [currentIndex, displayedCandidates.length, displayedInput, hasInputError, isPracticeFocused, isStudyMode, updateCandidateOverlayPosition, updateMobileCandidateOverlayPosition])
+
+  useEffect(() => {
+    if (isStudyMode) return
+
+    const frame = window.requestAnimationFrame(() => {
+      scrollCurrentTargetIntoView(currentIndex > 1 ? 'smooth' : 'auto')
+    })
+
+    return () => {
+      window.cancelAnimationFrame(frame)
+    }
+  }, [currentCommittedText, currentIndex, isStudyMode, scrollCurrentTargetIntoView])
 
   const deployRimeFiles = useCallback(async (files: RimeDeployFile[], sourceName: string) => {
     const engine = rimeEngineRef.current
@@ -1584,10 +1606,44 @@ export default function KeyTaoPracticePage() {
 
   const handlePracticeModeChange = useCallback((enabled: boolean) => {
     clearPendingStudyAutoCommit()
-    setPracticeMode(enabled ? 'study' : 'follow')
+    setStoredPracticeMode(enabled ? 'study' : 'follow')
     setFeedback(null)
     focusPracticeSurface()
-  }, [clearPendingStudyAutoCommit, focusPracticeSurface])
+  }, [clearPendingStudyAutoCommit, focusPracticeSurface, setStoredPracticeMode])
+
+  const loadPracticeArticles = useCallback(async (forceRefresh = false) => {
+    setIsRefreshingArticles(true)
+    setArticleListMessage('正在拉取内置长文和中文维基文库随机长文')
+
+    try {
+      const response = await fetch(`/api/practice/articles${forceRefresh ? `?refresh=${Date.now()}` : ''}`, { cache: 'no-store' })
+      const data = await response.json() as {
+        articles?: PracticeArticleOption[]
+        remoteSource?: string | null
+        stale?: boolean
+        error?: string
+      }
+
+      if (!response.ok) {
+        throw new Error(data.error ?? 'practice articles request failed')
+      }
+
+      const nextArticles = data.articles && data.articles.length > 0
+        ? data.articles
+        : DEFAULT_PRACTICE_ARTICLE_OPTIONS
+      setArticleOptions(nextArticles)
+      setArticleListMessage(data.remoteSource
+        ? data.stale
+          ? `维基文库当前限流，已回退到最近一次联网获取的 ${nextArticles.length} 篇长文`
+          : `已载入 ${nextArticles.length} 篇文章，包含中文维基文库随机长文`
+        : '联网文章暂时不可用，当前回退到内置长文')
+    } catch (error) {
+      setArticleOptions(DEFAULT_PRACTICE_ARTICLE_OPTIONS)
+      setArticleListMessage(error instanceof Error ? `联网文章加载失败：${error.message}` : '联网文章加载失败，当前回退到内置长文')
+    } finally {
+      setIsRefreshingArticles(false)
+    }
+  }, [])
 
   const applyCustomTextContent = useCallback((rawContent: string, successMessage: string) => {
     const cleanedContent = rawContent.replace(/\r\n/g, '\n').trim()
@@ -1607,7 +1663,7 @@ export default function KeyTaoPracticePage() {
     setSourceText(cleanedContent)
     setFeedback(successMessage)
     return true
-  }, [])
+  }, [setPracticeSource])
 
   const handleTextUpload = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
@@ -1652,6 +1708,16 @@ export default function KeyTaoPracticePage() {
     didAutoLoadSchemeRef.current = true
     void loadPracticeScheme(selectedSchemeKey)
   }, [hasHydratedPracticeStore, loadPracticeScheme, selectedSchemeKey])
+
+  useEffect(() => {
+    void loadPracticeArticles()
+  }, [loadPracticeArticles])
+
+  useEffect(() => {
+    if (articleOptions.some((article) => article.id === selectedArticleId)) return
+    if (!articleOptions[0]) return
+    setSelectedArticleId(articleOptions[0].id)
+  }, [articleOptions, selectedArticleId, setSelectedArticleId])
 
   useEffect(() => {
     let disposed = false
@@ -1852,7 +1918,11 @@ export default function KeyTaoPracticePage() {
                           value: 'text-small font-medium',
                         }}
                       >
-                        {ARTICLE_OPTIONS.map((article) => <SelectItem key={article.id} textValue={article.title}>{article.title}</SelectItem>)}
+                        {articleOptions.map((article) => (
+                          <SelectItem key={article.id} textValue={article.title}>
+                            {article.detail ? `${article.title} · ${article.detail}` : article.title}
+                          </SelectItem>
+                        ))}
                       </Select>
                     </div>
                   )}
@@ -2088,6 +2158,7 @@ export default function KeyTaoPracticePage() {
                   <div className="flex items-center gap-2 text-small text-default-500">
                     <Sparkles className="h-4 w-4 text-primary" />
                     <span>{PRACTICE_SOURCE_OPTIONS.find((item) => item.key === practiceSource)?.label}</span>
+                    {practiceSource === 'article' && selectedArticle ? <span className="truncate text-default-400">· {selectedArticle.title}</span> : null}
                     <span>·</span>
                     <span>{practiceItems.length.toLocaleString()} 项</span>
                   </div>
@@ -2117,6 +2188,23 @@ export default function KeyTaoPracticePage() {
                   </div>
                 </div>
 
+                {practiceSource === 'article' && (
+                  <div className="flex items-center justify-between gap-3 border-b border-divider px-5 py-2 text-[12px] text-default-500">
+                    <span className="min-w-0 flex-1">{articleListMessage}</span>
+                    <Button
+                      size="sm"
+                      variant="light"
+                      startContent={<RotateCcw className="h-3.5 w-3.5" />}
+                      isLoading={isRefreshingArticles}
+                      onPress={() => {
+                        void loadPracticeArticles(true)
+                      }}
+                    >
+                      刷新文章
+                    </Button>
+                  </div>
+                )}
+
                 <div
                   ref={inputSurfaceRef}
                   tabIndex={0}
@@ -2144,9 +2232,9 @@ export default function KeyTaoPracticePage() {
                         )
                       })}
                       {currentItem && !isFinished ? (
-                        <div className="flex flex-col items-center gap-4">
-                          <div ref={(node) => { currentTargetAnchorRef.current = node }} className="text-[clamp(3.5rem,9vw,7rem)] font-semibold leading-none tracking-normal text-foreground">{currentItem.text}</div>
+                        <div className="flex flex-col items-center gap-3">
                           <div className="text-small text-default-500">{currentIndex + 1} / {practiceItems.length}</div>
+                          <div ref={(node) => { currentTargetAnchorRef.current = node }} className="text-[clamp(3.5rem,9vw,7rem)] font-semibold leading-none tracking-normal text-foreground">{currentItem.text}</div>
                         </div>
                       ) : isPracticeLoading ? (
                         <div className="flex flex-col items-center gap-3">
@@ -2181,7 +2269,7 @@ export default function KeyTaoPracticePage() {
                           <span
                             key={`${item.text}-${index}`}
                             ref={state === 'current' ? (node) => { currentTargetAnchorRef.current = node } : undefined}
-                            className={`mx-0.5 inline-block pb-1 ${usesOverlaySegments ? 'border-b-2 border-transparent' : 'border-b-2'} ${state === 'done'
+                            className={`mx-0.5 inline-flex items-end leading-none ${usesOverlaySegments ? '' : 'border-b-2 pb-1'} ${state === 'done'
                               ? 'border-success-400 text-success-500/80'
                               : state === 'current'
                                 ? hasInputError ? 'border-danger text-danger' : 'border-primary text-foreground'
@@ -2191,7 +2279,7 @@ export default function KeyTaoPracticePage() {
                               ? overlaySegments.map((segment, segmentIndex) => (
                                 <span
                                   key={`${item.text}-${index}-segment-${segmentIndex}`}
-                                  className={`inline-block border-b-2 ${segment.tone === 'done'
+                                  className={`inline-flex items-end border-b-2 pb-1 leading-none ${segment.tone === 'done'
                                     ? 'border-success-400 text-success-500/80'
                                     : segment.tone === 'wrong'
                                       ? 'border-danger text-danger'
