@@ -1,0 +1,1 @@
+export const KEYTAO_QQ_GROUP_URL = 'https://qm.qq.com/q/uNFITZVL4A'

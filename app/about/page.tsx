@@ -5,6 +5,7 @@ import { Github, ExternalLink, BookOpen, Bot, Users, Database, Edit3, GitPullReq
 import Image from 'next/image'
 import Link from 'next/link'
 import { useKeytaoIntroStore } from '@/lib/store/keytaoIntro'
+import { KEYTAO_QQ_GROUP_URL } from '@/lib/constants/community'
 
 const links = [
   {
@@ -46,6 +47,14 @@ const links = [
     href: 'https://keytao-docs.vercel.app/',
     color: 'text-green-600 dark:text-green-400',
     bg: 'bg-green-50 dark:bg-green-900/20',
+  },
+  {
+    icon: MessageSquare,
+    label: '加入键道 QQ 群',
+    sub: 'qm.qq.com/q/uNFITZVL4A',
+    href: KEYTAO_QQ_GROUP_URL,
+    color: 'text-cyan-600 dark:text-cyan-400',
+    bg: 'bg-cyan-50 dark:bg-cyan-900/20',
   },
 ]
 

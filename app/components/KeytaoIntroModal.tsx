@@ -3,9 +3,11 @@
 import { useEffect, useMemo } from 'react'
 import Image from 'next/image'
 import Link from 'next/link'
+import { usePathname } from 'next/navigation'
 import { Button, Modal, ModalBody, ModalContent, ModalFooter } from '@heroui/react'
 import { BookOpen, Download, Edit3, ExternalLink, Keyboard, Sparkles, X } from 'lucide-react'
 import { useKeytaoIntroStore } from '@/lib/store/keytaoIntro'
+import { KEYTAO_QQ_GROUP_URL } from '@/lib/constants/community'
 
 const introCards = [
   {
@@ -13,6 +15,8 @@ const introCards = [
     title: '键道是什么',
     description: '把形码、音码和顶功输入揉成一套更顺手的中文输入方案，目标不是背更多，而是更快进入流畅状态。',
     accent: 'from-sky-500/20 via-cyan-400/10 to-transparent',
+    hrefLabel: '查看键道文档',
+    useDocsUrl: true,
   },
   {
     icon: Download,
@@ -33,6 +37,7 @@ const introCards = [
 ]
 
 export default function KeytaoIntroModal() {
+  const pathname = usePathname()
   const isOpen = useKeytaoIntroStore((state) => state.isOpen)
   const hasSeenIntro = useKeytaoIntroStore((state) => state.hasSeenIntro)
   const hasHydrated = useKeytaoIntroStore((state) => state.hasHydrated)
@@ -51,10 +56,10 @@ export default function KeytaoIntroModal() {
   }, [])
 
   useEffect(() => {
-    if (!hasHydrated || hasSeenIntro || hasAutoOpened) return
+    if (pathname !== '/' || !hasHydrated || hasSeenIntro || hasAutoOpened) return
     markAutoOpened()
     openIntroModal()
-  }, [hasAutoOpened, hasHydrated, hasSeenIntro, markAutoOpened, openIntroModal])
+  }, [hasAutoOpened, hasHydrated, hasSeenIntro, markAutoOpened, openIntroModal, pathname])
 
   return (
     <Modal
@@ -95,7 +100,7 @@ export default function KeytaoIntroModal() {
             radius="full"
             className="relative z-10 ml-auto h-9 w-9 min-w-9 border border-white/10 bg-white/8 text-white/75 backdrop-blur hover:bg-white/14 hover:text-white"
             aria-label="关闭键道介绍弹窗"
-            onPress={closeIntroModal}
+            onPress={acknowledgeIntroModal}
           >
             <X className="h-4 w-4" />
           </Button>
@@ -120,7 +125,7 @@ export default function KeytaoIntroModal() {
               radius="full"
               className="absolute right-3 top-3 z-10 hidden h-9 w-9 min-w-9 border border-white/10 bg-white/8 text-white/75 backdrop-blur hover:bg-white/14 hover:text-white sm:flex sm:right-4 sm:top-4"
               aria-label="关闭键道介绍弹窗"
-              onPress={closeIntroModal}
+              onPress={acknowledgeIntroModal}
             >
               <X className="h-4 w-4" />
             </Button>
@@ -162,6 +167,7 @@ export default function KeytaoIntroModal() {
           <div className="grid gap-3 px-4 py-4 sm:px-8 sm:py-7 lg:grid-cols-3 lg:gap-4">
             {introCards.map((item) => {
               const Icon = item.icon
+              const href = item.useDocsUrl ? docsUrl : item.href
               return (
                 <div
                   key={item.title}
@@ -176,16 +182,19 @@ export default function KeytaoIntroModal() {
                       <h3 className="text-[15px] font-semibold text-white sm:text-base">{item.title}</h3>
                       <p className="mt-2 text-sm leading-6 text-white/65">{item.description}</p>
                     </div>
-                    {item.href && item.hrefLabel && (
+                    {href && item.hrefLabel && (
                       <Button
                         as={Link}
-                        href={item.href}
+                        href={href}
                         size="sm"
                         variant="light"
                         className="-ml-1 w-fit px-1 text-sm text-cyan-200"
+                        target={item.useDocsUrl ? '_blank' : undefined}
+                        rel={item.useDocsUrl ? 'noopener noreferrer' : undefined}
                         onPress={closeIntroModal}
                       >
                         {item.hrefLabel}
+                        {item.useDocsUrl ? <ExternalLink className="h-3.5 w-3.5" /> : null}
                       </Button>
                     )}
                   </div>
@@ -201,6 +210,17 @@ export default function KeytaoIntroModal() {
           <div className="flex flex-col gap-2 sm:flex-row">
             <Button
               as={Link}
+              href={KEYTAO_QQ_GROUP_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              variant="bordered"
+              className="w-full border-cyan-300/25 bg-cyan-400/8 text-cyan-50 sm:w-auto"
+              endContent={<ExternalLink className="h-3.5 w-3.5" />}
+            >
+              加入 QQ 群
+            </Button>
+            <Button
+              as={Link}
               href="/practice"
               color="secondary"
               variant="flat"
@@ -208,26 +228,14 @@ export default function KeytaoIntroModal() {
               startContent={<Keyboard className="h-4 w-4" />}
               onPress={acknowledgeIntroModal}
             >
-              在线试用
-            </Button>
-            <Button
-              as={Link}
-              href={docsUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              variant="bordered"
-              className="w-full border-white/15 bg-white/5 text-white sm:w-auto"
-              startContent={<BookOpen className="h-4 w-4" />}
-              endContent={<ExternalLink className="h-3.5 w-3.5" />}
-            >
-              键道教程
+              在线练习
             </Button>
             <Button
               color="primary"
-              className="w-full bg-gradient-to-r from-sky-500 to-fuchsia-500 text-white shadow-lg shadow-fuchsia-500/20 sm:w-auto"
+              className="w-full border border-cyan-500/30 bg-cyan-100 text-slate-950 shadow-lg shadow-cyan-950/20 transition-colors hover:bg-white sm:w-auto"
               onPress={acknowledgeIntroModal}
             >
-              开始加词
+              开始探索
             </Button>
           </div>
         </ModalFooter>
