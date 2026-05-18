@@ -180,9 +180,6 @@ export function getPhrasePinyins(word: string): string[] {
   return result.map(item => item.trim()).filter(Boolean)
 }
 
-// Tone-mark regex: matches one pinyin syllable with at least one toned vowel
-const TONED_PINYIN_RE = /((?:zh|ch|sh|[bpmfdtnlgkhjqxrzcswy])?[āáǎàēéěèīíǐìōóǒòūúǔùǖǘǚǜ][a-züāáǎàēéěèīíǐìōóǒòūúǔùǖǘǚǜ]*)/
-
 // ── Zdic fetching ─────────────────────────────────────────────────────────────
 
 // In-memory cache: char → all pinyin readings (deduped, pinyin-only, no bopomofo)
@@ -207,11 +204,15 @@ export async function getPinyinFromZdic(char: string): Promise<string[]> {
       .filter(s => PINYIN_ONLY_RE.test(s))
     const deduped = [...new Set(all)]
     if (deduped.length > 0) { pinyinCache.set(char, deduped); return deduped }
-    // Fallback: first toned pinyin anywhere on the page
-    const any = html.match(TONED_PINYIN_RE)
-    const result = any ? [any[1]] : []
-    pinyinCache.set(char, result)
-    return result
+    // Fallback: parse pinyin from page title (format: "{char} pȳ1、pȳ2 - 汉典")
+    // TONED_PINYIN_RE fails on syllables like guì/jué where the tone mark isn't first after the initial
+    const titleMatch = html.match(/<title>[^\s<]+\s+([^<]+?)\s*-\s*汉典<\/title>/)
+    if (titleMatch) {
+      const titlePinyins = titleMatch[1].split(/[、，,\s]+/).filter(s => PINYIN_ONLY_RE.test(s) && s.length >= 2)
+      if (titlePinyins.length > 0) { pinyinCache.set(char, titlePinyins); return titlePinyins }
+    }
+    pinyinCache.set(char, [])
+    return []
   } catch {
     return []
   }
@@ -262,7 +263,25 @@ export interface RequestedCodeAnalysis {
 
 export async function encodeChar(char: string, preferredPinyin?: string): Promise<CharEncoding> {
   const zdicPinyins = await getPinyinFromZdic(char)
-  const pinyins = [...new Set([preferredPinyin, ...zdicPinyins].filter((item): item is string => Boolean(item)))]
+  // Trust pinyin-pro's contextual reading (preferredPinyin) only when its standalone reading
+  // matches zdic's primary reading — meaning pinyin-pro knows this char correctly and its
+  // contextual disambiguation is reliable (e.g. 重: zhòng/chóng). When they diverge (e.g.
+  // 鳜: pinyin-pro defaults to jué but zdic primary is guì), pinyin-pro doesn't know the char
+  // and we ignore its reading entirely in favor of zdic.
+  let pinyins: string[]
+  if (zdicPinyins.length > 0) {
+    const normZdic = new Set(zdicPinyins.map(normalizePinyin))
+    const [standalone] = getPhrasePinyins(char)
+    const pinyinProReliable = standalone && normalizePinyin(standalone) === normalizePinyin(zdicPinyins[0])
+    if (pinyinProReliable) {
+      const preferred = preferredPinyin && normZdic.has(normalizePinyin(preferredPinyin)) ? [preferredPinyin] : []
+      pinyins = [...new Set([...preferred, ...zdicPinyins])]
+    } else {
+      pinyins = zdicPinyins
+    }
+  } else {
+    pinyins = preferredPinyin ? [preferredPinyin] : []
+  }
   const pinyinStr = pinyins[0] ?? ''
   const { initial, final } = parsePinyin(pinyinStr)
   const phoneticCode = encodePhonetic(initial, final)
