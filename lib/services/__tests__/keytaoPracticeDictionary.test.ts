@@ -51,4 +51,16 @@ name: keytao.test
       { text: '练习', codes: ['lmxi'] },
     ])
   })
+
+  it('keeps an existing phrase target instead of splitting it into cheaper singles', () => {
+    const dictionary = buildPracticeDictionary([
+      { text: '夜色', code: 'yese', source: 'a' },
+      { text: '夜', code: 'ye', source: 'a' },
+      { text: '色', code: 'se', source: 'a' },
+    ])
+
+    expect(createPracticeItemsFromText('夜色', dictionary, 5)).toEqual([
+      { text: '夜色', codes: ['yese'] },
+    ])
+  })
 })

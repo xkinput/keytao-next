@@ -1,3 +1,5 @@
+import { getKeyEquivalenceTable, computeCodeEquivalent } from '../data/keyEquivalence'
+
 export interface PracticeEntry {
   text: string
   code: string
@@ -197,37 +199,65 @@ export function createPracticeItemsFromText(
   dictionary: PracticeDictionary,
   limit = 30
 ): PracticeItem[] {
-  const items: PracticeItem[] = []
-  let cursor = 0
+  const equivTable = getKeyEquivalenceTable()
 
-  while (cursor < content.length && items.length < limit) {
-    const currentChar = content[cursor]
-    if (/\s/.test(currentChar)) {
-      cursor += 1
-      continue
-    }
+  const chars = Array.from(content).filter((ch) => !/\s/.test(ch))
+  const n = chars.length
+  if (n === 0) return []
 
-    let matchedText = ''
-    const maxLength = Math.min(dictionary.maxTextLength, MAX_TEXT_MATCH_LENGTH, content.length - cursor)
-    for (let length = maxLength; length > 0; length -= 1) {
-      const candidate = content.slice(cursor, cursor + length)
-      if (dictionary.textSet.has(candidate)) {
-        matchedText = candidate
-        break
+  type DpNode = { segmentCount: number; cost: number; prevIdx: number; text: string; codes: string[] }
+  const dp: (DpNode | null)[] = Array.from({ length: n + 1 }, () => null)
+  dp[0] = { segmentCount: 0, cost: 0, prevIdx: -1, text: '', codes: [] }
+
+  for (let i = 0; i < n; i += 1) {
+    if (dp[i] === null) continue
+    const prevNode = dp[i]!
+
+    const maxLen = Math.min(dictionary.maxTextLength, MAX_TEXT_MATCH_LENGTH, n - i)
+
+    for (let len = 1; len <= maxLen; len += 1) {
+      const candidateText = chars.slice(i, i + len).join('')
+
+      if (len > 1 && !dictionary.textSet.has(candidateText)) continue
+
+      const codes = getCodesForText(dictionary, candidateText)
+      if (codes.length === 0 && len > 1) continue
+
+      const bestEquiv = codes.length > 0
+        ? Math.min(...codes.map((code) => computeCodeEquivalent(code, equivTable)))
+        : 0
+
+      const newSegmentCount = prevNode.segmentCount + 1
+      const newCost = prevNode.cost + bestEquiv
+      const j = i + len
+      const currentBest = dp[j]
+      const shouldReplace = currentBest === null
+        || newSegmentCount < currentBest.segmentCount
+        || (
+          newSegmentCount === currentBest.segmentCount
+          && (
+            newCost < currentBest.cost
+            || (newCost === currentBest.cost && candidateText.length > currentBest.text.length)
+          )
+        )
+
+      if (shouldReplace) {
+        dp[j] = { segmentCount: newSegmentCount, cost: newCost, prevIdx: i, text: candidateText, codes }
       }
     }
-
-    if (!matchedText) {
-      matchedText = Array.from(content.slice(cursor))[0] ?? ''
-    }
-
-    const codes = getCodesForText(dictionary, matchedText)
-    if (codes.length > 0) {
-      items.push({ text: matchedText, codes })
-    }
-
-    cursor += matchedText.length || 1
   }
 
-  return items
+  const path: { text: string; codes: string[] }[] = []
+  let cur = n
+  while (cur > 0 && dp[cur] !== null) {
+    const node = dp[cur]!
+    path.push({ text: node.text, codes: node.codes })
+    cur = node.prevIdx
+  }
+
+  return path
+    .reverse()
+    .slice(0, limit)
+    .filter((item) => item.codes.length > 0)
+    .map((item) => ({ text: item.text, codes: item.codes }))
 }

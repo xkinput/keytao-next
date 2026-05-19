@@ -2193,12 +2193,13 @@ export default function KeyTaoPracticePage() {
                     </Switch>
                     <Button
                       size="sm"
-                      variant="light"
+                      variant={practiceShuffleSeed > 0 ? 'flat' : 'light'}
+                      color={practiceShuffleSeed > 0 ? 'primary' : 'default'}
                       startContent={<Shuffle className="h-4 w-4" />}
-                      onPress={() => setPracticeShuffleSeed((value) => value + 1)}
+                      onPress={() => setPracticeShuffleSeed((value) => (value > 0 ? 0 : 1))}
                       isDisabled={practiceItems.length < 2 || isFinished}
                     >
-                      乱序
+                      {practiceShuffleSeed > 0 ? '已乱序' : '乱序'}
                     </Button>
                     <Button size="sm" variant="light" startContent={<SkipForward className="h-4 w-4" />} onPress={skipCurrentItem} isDisabled={!currentItem || isFinished}>
                       跳过
