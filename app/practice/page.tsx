@@ -776,7 +776,6 @@ export default function KeyTaoPracticePage() {
   const [completedText, setCompletedText] = useState('')
   const [totalKeys, setTotalKeys] = useState(0)
   const [wrongKeys, setWrongKeys] = useState(0)
-  const [perfectItems, setPerfectItems] = useState(0)
   const [itemHadMistake, setItemHadMistake] = useState(false)
   const [startTime, setStartTime] = useState<number | null>(null)
   const [elapsedMs, setElapsedMs] = useState(0)
@@ -878,8 +877,30 @@ export default function KeyTaoPracticePage() {
   const progressValue = practiceItems.length > 0
     ? Math.round((currentIndex / practiceItems.length) * 100)
     : 0
-  const accuracy = totalKeys > 0 ? Math.max(0, Math.round(((totalKeys - wrongKeys) / totalKeys) * 100)) : 100
-  const speed = elapsedMs > 0 ? Math.round((completedText.length / (elapsedMs / 60000))) : 0
+  const speedDecimal = elapsedMs > 0 ? (completedText.length / (elapsedMs / 60000)).toFixed(2) : '0.00'
+  const keystrokesPerChar = completedText.length > 0 ? (totalKeys / completedText.length).toFixed(2) : '0.00'
+  const avgCodeLength = useMemo(() => {
+    if (currentIndex === 0 || completedText.length === 0) return '0.00'
+    const totalCodeLen = practiceItems
+      .slice(0, currentIndex)
+      .reduce((sum, item) => sum + (item.codes[0]?.length ?? 0), 0)
+    return (totalCodeLen / completedText.length).toFixed(2)
+  }, [currentIndex, completedText.length, practiceItems])
+  const wrongItems = useMemo(() => {
+    if (!currentCommittedText) return 0
+    const committedChars = Array.from(currentCommittedText)
+    const targetChars = Array.from(
+      practiceItems.slice(currentIndex).map((item) => item.text).join('')
+    )
+    let wrong = 0
+    for (let i = 0; i < committedChars.length; i += 1) {
+      if (i >= targetChars.length || committedChars[i] !== targetChars[i]) {
+        wrong += 1
+      }
+    }
+    return wrong
+  }, [currentCommittedText, currentIndex, practiceItems])
+  const keyAccuracy = totalKeys > 0 ? Math.max(0, ((totalKeys - wrongKeys) / totalKeys) * 100).toFixed(2) : '100.00'
   const isFinished = practiceItems.length > 0 && currentIndex >= practiceItems.length
   const schemeStatusLabel = schemeStatus === 'loading'
     ? '下载中'
@@ -1259,7 +1280,6 @@ export default function KeyTaoPracticePage() {
     setCurrentCommittedText('')
     setTotalKeys(0)
     setWrongKeys(0)
-    setPerfectItems(0)
     setItemHadMistake(false)
     setRimeComposition(null)
     if (rimeStatusRef.current === 'ready') {
@@ -1277,7 +1297,6 @@ export default function KeyTaoPracticePage() {
     bumpPracticeTurn()
     setCompletedText((value) => value + currentItem.text)
     setLastCompletedTarget(currentItem.text)
-    setPerfectItems((value) => value + (itemHadMistake ? 0 : 1))
     setCurrentIndex((value) => value + 1)
     currentCommittedTextRef.current = ''
     setCurrentCommittedText('')
@@ -1304,7 +1323,8 @@ export default function KeyTaoPracticePage() {
       setItemHadMistake(true)
       currentCommittedTextRef.current = resolution.attemptedText
       setCurrentCommittedText(resolution.attemptedText)
-      setFeedback(`当前输入「${resolution.attemptedText}」，目标是「${resolution.targetText}」`)
+      const currentTargetText = practiceItems[currentIndex]?.text ?? ''
+      setFeedback(`当前输入「${committedText}」，目标是「${currentTargetText}」`)
       return
     }
 
@@ -1316,7 +1336,6 @@ export default function KeyTaoPracticePage() {
       bumpPracticeTurn()
       setCompletedText((value) => value + resolution.completedTexts.join(''))
       setLastCompletedTarget(resolution.lastCompletedText)
-      setPerfectItems((value) => value + Math.max(0, resolution.advanceCount - (itemHadMistake ? 1 : 0)))
       setCurrentIndex((value) => value + resolution.advanceCount)
       currentCommittedTextRef.current = resolution.currentText
       setCurrentCommittedText(resolution.currentText)
@@ -1333,10 +1352,12 @@ export default function KeyTaoPracticePage() {
     setCurrentCommittedText(resolution.currentText)
     setRimeComposition(nextComposition)
     setFeedback(null)
-  }, [bumpPracticeTurn, currentIndex, itemHadMistake, practiceItems, resetRimeSession])
+  }, [bumpPracticeTurn, currentIndex, practiceItems, resetRimeSession])
 
   const applyFollowBackspace = useCallback(() => {
-    const nextCommittedText = Array.from(currentCommittedTextRef.current).slice(0, -1).join('')
+    const prevCommittedText = currentCommittedTextRef.current
+    const nextCommittedText = Array.from(prevCommittedText).slice(0, -1).join('')
+
     currentCommittedTextRef.current = nextCommittedText
     setCurrentCommittedText(nextCommittedText)
 
@@ -2444,23 +2465,34 @@ export default function KeyTaoPracticePage() {
                 <Progress aria-label="练习进度" value={progressValue} color="primary" size="sm" />
                 <div className="grid grid-cols-2 gap-3 text-small">
                   <div className="rounded-small bg-default-100 px-3 py-2">
-                    <div className="text-default-500">进度</div>
-                    <div className="text-lg font-semibold">{Math.min(currentIndex, practiceItems.length)} / {practiceItems.length}</div>
+                    <div className="text-default-500">速度</div>
+                    <div className="font-mono text-lg font-semibold">{speedDecimal}</div>
                   </div>
                   <div className="rounded-small bg-default-100 px-3 py-2">
-                    <div className="text-default-500">时间</div>
+                    <div className="text-default-500">击键</div>
+                    <div className="font-mono text-lg font-semibold">{keystrokesPerChar}</div>
+                  </div>
+                  <div className="rounded-small bg-default-100 px-3 py-2">
+                    <div className="text-default-500">码长</div>
+                    <div className="font-mono text-lg font-semibold">{avgCodeLength}</div>
+                  </div>
+                  <div className="rounded-small bg-default-100 px-3 py-2">
+                    <div className="text-default-500">字数</div>
+                    <div className="font-mono text-lg font-semibold">{completedText.length}</div>
+                  </div>
+                  <div className="rounded-small bg-default-100 px-3 py-2">
+                    <div className="text-default-500">错字</div>
+                    <div className="font-mono text-lg font-semibold">{wrongItems}</div>
+                  </div>
+                  <div className="rounded-small bg-default-100 px-3 py-2">
+                    <div className="text-default-500">用时</div>
                     <div className="font-mono text-lg font-semibold">{formatElapsed(elapsedMs)}</div>
                   </div>
-                  <div className="rounded-small bg-default-100 px-3 py-2">
-                    <div className="text-default-500">准确率</div>
-                    <div className="text-lg font-semibold">{accuracy}%</div>
-                  </div>
-                  <div className="rounded-small bg-default-100 px-3 py-2">
-                    <div className="text-default-500">速度</div>
-                    <div className="text-lg font-semibold">{speed} 字/分</div>
+                  <div className="col-span-2 rounded-small bg-default-100 px-3 py-2">
+                    <div className="text-default-500">键准</div>
+                    <div className="font-mono text-lg font-semibold">{keyAccuracy}%</div>
                   </div>
                 </div>
-                <div className="text-small text-default-500">无错通过 {perfectItems} 项，错误按键 {wrongKeys} 次。</div>
               </CardBody>
             </Card>
 
