@@ -27,9 +27,9 @@ const projects = [
     href: 'https://github.com/xkinput/keytao-next',
   },
   {
-    name: 'keytao-installer',
-    desc: '键道安装器 · 跨平台桌面客户端',
-    href: 'https://github.com/xkinput/keytao-installer',
+    name: 'keytao-app',
+    desc: 'KeyTao键道App · 跨平台桌面客户端输入法/安装工具',
+    href: 'https://github.com/xkinput/keytao-app',
   },
   {
     name: 'keytao-bot',
@@ -63,7 +63,7 @@ export default function SponsorPage() {
           <ul className="grid grid-cols-2 gap-2 text-sm text-default-700">
             <li className="flex items-start gap-2"><Heart className="w-4 h-4 mt-0.5 text-pink-400 shrink-0" />喵喵 AI · QQ / TG 机器人运营</li>
             <li className="flex items-start gap-2"><Heart className="w-4 h-4 mt-0.5 text-pink-400 shrink-0" />键道加词词库管理系统（本网站）</li>
-            <li className="flex items-start gap-2"><Heart className="w-4 h-4 mt-0.5 text-pink-400 shrink-0" />键道安装器更新维护</li>
+            <li className="flex items-start gap-2"><Heart className="w-4 h-4 mt-0.5 text-pink-400 shrink-0" />KeyTao键道App · 跨平台桌面客户端输入法/安装工具 更新维护</li>
             <li className="flex items-start gap-2"><Heart className="w-4 h-4 mt-0.5 text-pink-400 shrink-0" />以及未来发布在 xkinput 组织下的所有项目</li>
           </ul>
         </div>
