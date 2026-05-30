@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { verifyBotToken } from '@/lib/botAuth'
 import { prisma } from '@/lib/prisma'
 import { isValidPlatform, resolveUserByPlatform } from '@/lib/botUserResolver'
+import type { PhraseType } from '@/lib/constants/phraseTypes'
 
 /**
  * Bot API: List all PR items in the user's latest draft batch
@@ -82,8 +83,8 @@ export async function GET(request: NextRequest) {
       word: pr.word || '',
       oldWord: pr.oldWord || undefined,
       code: pr.code || '',
-      type: (pr.type || 'Phrase') as any,
-      weight: pr.weight || undefined,
+      type: (pr.type || 'Phrase') as PhraseType,
+      weight: pr.weight ?? undefined,
     }))
     const conflictResults = prItems.length > 0 ? await checkBatchConflictsWithWeight(prItems) : []
 
@@ -118,7 +119,7 @@ export async function GET(request: NextRequest) {
 /**
  * Bot API: Add a phrase to the user's latest draft batch (create if not exists)
  * POST /api/bot/batches/latest-draft/items
- * Body: { platform, platformId, word, code, type?, remark? }
+ * Body: { platform, platformId, word, code, type?, weight?, remark? }
  */
 export async function POST(request: NextRequest) {
   try {
@@ -127,7 +128,10 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json()
-    const { platform, platformId, word, code, type = 'Phrase', remark } = body
+    const { platform, platformId, word, code, type = 'Phrase', weight, remark } = body
+    const parsedWeight = weight === undefined || weight === null || weight === ''
+      ? undefined
+      : Number(weight)
 
     if (!platform || !platformId || !word || !code) {
       return NextResponse.json({ success: false, message: '缺少必需参数: platform, platformId, word, code' }, { status: 400 })
@@ -135,6 +139,10 @@ export async function POST(request: NextRequest) {
 
     if (!isValidPlatform(platform)) {
       return NextResponse.json({ success: false, message: '不支持的平台' }, { status: 400 })
+    }
+
+    if (parsedWeight !== undefined && (!Number.isInteger(parsedWeight) || parsedWeight < 0)) {
+      return NextResponse.json({ success: false, message: '权重必须是非负整数' }, { status: 400 })
     }
 
     const user = await resolveUserByPlatform(platform, platformId)
@@ -166,12 +174,13 @@ export async function POST(request: NextRequest) {
         word,
         code,
         action: 'Create',
-        type,
+        type: type as PhraseType,
+        weight: parsedWeight,
         remark: remark || null,
         batchId: batch.id,
         userId: user.id,
-      } as any,
-      select: { id: true, word: true, code: true, type: true }
+      },
+      select: { id: true, word: true, code: true, type: true, weight: true }
     })
 
     return NextResponse.json({

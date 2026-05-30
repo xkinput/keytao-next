@@ -6,6 +6,7 @@ export interface PhraseChange {
   word: string
   oldWord?: string // For Change action: the old word to be replaced
   code: string
+  type?: string
   phraseId?: number
   weight?: number
 }
@@ -126,7 +127,8 @@ export class ConflictDetector {
       const phraseToDelete = await prisma.phrase.findFirst({
         where: {
           word: change.word,
-          code: change.code
+          code: change.code,
+          type: change.type || undefined
         }
       })
 
@@ -197,6 +199,7 @@ export class ConflictDetector {
       prisma.phrase.findFirst({
         where: {
           code: change.code,
+          type: change.type || undefined,
           NOT: change.phraseId ? { id: change.phraseId } : undefined
         },
         include: {
@@ -209,6 +212,7 @@ export class ConflictDetector {
         where: {
           word: change.word,
           code: { not: change.code },
+          type: change.type || undefined,
           NOT: change.phraseId ? { id: change.phraseId } : undefined
         },
         select: {

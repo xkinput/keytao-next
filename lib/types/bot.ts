@@ -121,6 +121,7 @@ export interface BotBatchDraftItem {
   action?: 'Create' | 'Change' | 'Delete'
   oldWord?: string
   type?: string
+  weight?: number
   remark?: string
 }
 
@@ -144,6 +145,7 @@ export interface BotDraftSnapshotItem {
   word: string
   code: string
   type: string
+  weight?: number | null
   status: string
   hasWarning?: boolean
   warningNote?: string

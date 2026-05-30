@@ -80,7 +80,7 @@ export async function POST(request: NextRequest) {
       oldWord: item.oldWord || undefined,
       code: item.code || '',
       type: (item.type || 'Phrase') as PhraseType,
-      weight: item.weight || undefined
+      weight: item.weight ?? undefined
     }))
 
     // Check for basic validation errors
@@ -194,7 +194,10 @@ export async function POST(request: NextRequest) {
         select: {
           action: true,
           word: true,
-          code: true
+          oldWord: true,
+          code: true,
+          type: true,
+          weight: true
         }
       })
 
@@ -204,7 +207,10 @@ export async function POST(request: NextRequest) {
         const isDuplicate = existingPRs.some(
           pr => pr.action === item.action &&
             pr.word === item.word &&
-            pr.code === item.code
+            pr.oldWord === (item.oldWord ?? null) &&
+            pr.code === item.code &&
+            (pr.type ?? 'Phrase') === (item.type || 'Phrase') &&
+            (pr.weight ?? undefined) === item.weight
         )
 
         if (isDuplicate) {
@@ -270,7 +276,7 @@ export async function POST(request: NextRequest) {
               oldWord: item.oldWord || undefined,
               code: item.code,
               action: item.action as PullRequestType,
-              weight: item.weight || undefined,
+              weight: item.weight ?? undefined,
               remark: item.remark || null,
               type: (item.type || 'Phrase') as PhraseType,
               userId: user.id,
@@ -302,11 +308,13 @@ export async function POST(request: NextRequest) {
     }
     console.log('[Bot API] Returning success response:', JSON.stringify(responseData, null, 2))
     return NextResponse.json<BotCreatePRResponse>(responseData)
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('[Bot API] Error:', error)
+    const errorCode = typeof error === 'object' && error !== null && 'code' in error ? (error as { code?: string }).code : undefined
+    const errorMessage = error instanceof Error ? error.message : '未知错误'
 
     // Handle specific error types
-    if (error.code === 'P2022') {
+    if (errorCode === 'P2022') {
       // Prisma column not found
       return NextResponse.json<BotCreatePRResponse>(
         {
@@ -317,7 +325,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    if (error.code === 'P2025') {
+    if (errorCode === 'P2025') {
       // Record not found
       return NextResponse.json<BotCreatePRResponse>(
         {
@@ -330,10 +338,10 @@ export async function POST(request: NextRequest) {
 
     // Generic error
     return NextResponse.json<BotCreatePRResponse>(
-      {
-        success: false,
-        message: `创建失败：${error.message || '未知错误'}`
-      },
+        {
+          success: false,
+          message: `创建失败：${errorMessage}`
+        },
       { status: 500 }
     )
   }

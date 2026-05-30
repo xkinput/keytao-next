@@ -93,11 +93,11 @@ export async function POST(
 
           case 'Change':
             // Update existing phrase - change word for given code+oldWord
-            if ((pr as any).oldWord && pr.code && pr.word) {
+            if (pr.oldWord && pr.code && pr.word) {
               // Find phrase by oldWord + code
               const oldPhrase = await tx.phrase.findFirst({
                 where: {
-                  word: (pr as any).oldWord,
+                  word: pr.oldWord,
                   code: pr.code
                 }
               })
@@ -144,7 +144,8 @@ export async function POST(
               await tx.phrase.deleteMany({
                 where: {
                   word: pr.word,
-                  code: pr.code
+                  code: pr.code,
+                  type: pr.type || undefined
                 }
               })
             }

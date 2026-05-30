@@ -4,7 +4,7 @@ import { prisma } from '@/lib/prisma'
 import { isValidPlatform, resolveUserByPlatform } from '@/lib/botUserResolver'
 import { checkBatchConflictsWithWeight } from '@/lib/services/batchConflictService'
 import { PullRequestType } from '@prisma/client'
-import { PhraseType } from '@/lib/constants/phraseTypes'
+import { detectPhraseType, isValidPhraseType, PhraseType } from '@/lib/constants/phraseTypes'
 import type {
   BotBatchDraftRequest,
   BotBatchDraftResponse,
@@ -83,18 +83,25 @@ export async function POST(request: NextRequest) {
     // Load existing draft items (for duplicate detection)
     const existingPRs = await prisma.pullRequest.findMany({
       where: { batchId },
-      select: { action: true, word: true, code: true }
+      select: { action: true, word: true, oldWord: true, code: true, type: true, weight: true }
     })
 
-    // Normalize items: infer type if not given
-    const normalizedItems = items.map(item => ({
-      action: (item.action ?? 'Create') as 'Create' | 'Change' | 'Delete',
-      word: item.word.trim(),
-      code: item.code.trim(),
-      oldWord: item.oldWord,
-      type: inferType(item.word.trim(), item.code.trim(), item.type),
-      remark: item.remark,
-    }))
+    // Normalize items: explicit type/weight wins, fallback to local detection/default weight.
+    const normalizedItems = items.map(item => {
+      const word = item.word.trim()
+      const code = item.code.trim()
+      const type = normalizeType(word, code, item.type)
+
+      return {
+        action: (item.action ?? 'Create') as 'Create' | 'Change' | 'Delete',
+        word,
+        code,
+        oldWord: item.oldWord?.trim(),
+        type,
+        weight: normalizeWeight(item.weight),
+        remark: item.remark,
+      }
+    })
 
     // Run conflict detection on all items at once (handles intra-batch resolution)
     const conflictItems = normalizedItems.map((item, idx) => ({
@@ -104,6 +111,7 @@ export async function POST(request: NextRequest) {
       oldWord: item.oldWord,
       code: item.code,
       type: item.type as PhraseType,
+      weight: item.weight,
     }))
     const conflictResults = await checkBatchConflictsWithWeight(conflictItems)
 
@@ -129,7 +137,12 @@ export async function POST(request: NextRequest) {
 
       // Duplicate in existing draft → skip
       const isDuplicate = existingPRs.some(
-        pr => pr.action === item.action && pr.word === item.word && pr.code === item.code
+        pr => pr.action === item.action &&
+          pr.word === item.word &&
+          pr.oldWord === (item.oldWord ?? null) &&
+          pr.code === item.code &&
+          (pr.type ?? 'Phrase') === item.type &&
+          (pr.weight ?? undefined) === item.weight
       )
       if (isDuplicate) {
         skipped.push({
@@ -149,7 +162,7 @@ export async function POST(request: NextRequest) {
       }
       toWrite.push({ item, conflictReason })
       // Mark this as "now in draft" so subsequent items in same request see it
-      existingPRs.push({ action: item.action, word: item.word, code: item.code })
+      existingPRs.push({ action: item.action, word: item.word, oldWord: item.oldWord ?? null, code: item.code, type: item.type, weight: item.weight ?? null })
     }
 
     // Write all accepted items in one transaction
@@ -163,6 +176,7 @@ export async function POST(request: NextRequest) {
               code: item.code,
               action: item.action as PullRequestType,
               type: item.type as PhraseType,
+              weight: item.weight,
               remark: item.remark ?? null,
               userId: user.id,
               batchId: batchId!,
@@ -180,7 +194,7 @@ export async function POST(request: NextRequest) {
       select: {
         pullRequests: {
           orderBy: { createAt: 'asc' },
-          select: { id: true, action: true, word: true, code: true, type: true, status: true, conflictReason: true },
+          select: { id: true, action: true, word: true, code: true, type: true, weight: true, status: true, conflictReason: true },
         },
       },
     })
@@ -191,6 +205,7 @@ export async function POST(request: NextRequest) {
       word: pr.word ?? '',
       code: pr.code ?? '',
       type: pr.type ?? 'Phrase',
+      weight: pr.weight,
       status: pr.status,
       ...(pr.conflictReason && { hasWarning: true, warningNote: pr.conflictReason }),
     }))
@@ -241,13 +256,24 @@ export async function POST(request: NextRequest) {
   }
 }
 
-function inferType(word: string, code: string, explicit?: string): PhraseType {
-  if (explicit && explicit !== 'Phrase') return explicit as PhraseType
-  if (code.startsWith(';')) return 'Symbol'
-  if (/https?:\/\/|www\./i.test(word)) return 'Link'
-  if (/[a-zA-Z]/.test(word)) return 'English'
-  if (word.length === 1 && /[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]/.test(word)) return 'Single'
-  return 'Phrase'
+function normalizeType(word: string, code: string, explicit?: string): PhraseType {
+  if (explicit) {
+    if (!isValidPhraseType(explicit)) {
+      throw new Error(`不支持的词库类型：${explicit}`)
+    }
+    return explicit
+  }
+
+  return detectPhraseType(word, code)
+}
+
+function normalizeWeight(weight: unknown): number | undefined {
+  if (weight === undefined || weight === null || weight === '') return undefined
+  const parsed = typeof weight === 'number' ? weight : Number(weight)
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    throw new Error(`权重必须是非负整数：${String(weight)}`)
+  }
+  return parsed
 }
 
 /**
@@ -342,7 +368,7 @@ export async function DELETE(request: NextRequest) {
         select: {
           pullRequests: {
             orderBy: { createAt: 'asc' },
-            select: { id: true, action: true, word: true, code: true, type: true, status: true },
+            select: { id: true, action: true, word: true, code: true, type: true, weight: true, status: true },
           },
         },
       })
@@ -354,6 +380,7 @@ export async function DELETE(request: NextRequest) {
       word: pr.word ?? '',
       code: pr.code ?? '',
       type: pr.type ?? 'Phrase',
+      weight: pr.weight,
       status: pr.status,
     }))
 

@@ -53,8 +53,12 @@ export async function calculateDynamicWeight(
   allItems: BatchPRItem[],
   currentIndex: number
 ): Promise<number> {
+  if (item.weight !== undefined) {
+    return item.weight
+  }
+
   if (!item.type) {
-    return item.weight || 0
+    return 0
   }
 
   // For Create action, check if this word+code already exists in database
@@ -261,6 +265,7 @@ export async function checkBatchConflictsWithWeight(
       word: item.word,
       oldWord: item.oldWord,
       code: item.code,
+      type: item.type,
       weight: item.weight,
     })
 
