@@ -1,12 +1,12 @@
 import { prisma } from '@/lib/prisma'
-import { PullRequestType } from '@prisma/client'
+import { PullRequestType, PhraseType } from '@prisma/client'
 
 export interface PhraseChange {
   action: PullRequestType
   word: string
   oldWord?: string // For Change action: the old word to be replaced
   code: string
-  type?: string
+  type?: PhraseType
   phraseId?: number
   weight?: number
 }
@@ -20,7 +20,7 @@ export interface ConflictInfo {
     code: string
     weight: number
     userId: number
-    type?: string
+    type?: PhraseType
   }
   impact?: string
   suggestions: CodeSuggestion[]
