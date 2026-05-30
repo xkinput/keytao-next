@@ -1,4 +1,5 @@
 import * as fs from 'fs'
+import * as https from 'https'
 import * as path from 'path'
 import { pinyin } from 'pinyin-pro'
 
@@ -184,20 +185,105 @@ export function getPhrasePinyins(word: string): string[] {
 
 // In-memory cache: char → all pinyin readings (deduped, pinyin-only, no bopomofo)
 const pinyinCache = new Map<string, string[]>()
+const zdicEntryPinyinCache = new Map<string, string[]>()
 
 // Matches ASCII-based pinyin with at least one toned vowel (no bopomofo ㄅㄆ etc.)
 const PINYIN_ONLY_RE = /^[a-züāáǎàēéěèīíǐìōóǒòūúǔùǖǘǚǜ]+$/
 
+function splitPinyinText(text: string): string[] {
+  return text
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .split(/[、，,\s]+/)
+    .map(s => s.trim())
+    .filter(s => PINYIN_ONLY_RE.test(s))
+}
+
+function fetchText(url: string, redirects = 2): Promise<string | null> {
+  return new Promise((resolve) => {
+    let settled = false
+    const done = (value: string | null) => {
+      if (settled) return
+      settled = true
+      resolve(value)
+    }
+
+    const req = https.get(url, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; keytao-encoder/1.0)' },
+    }, (res) => {
+      const status = res.statusCode ?? 0
+      if (status >= 300 && status < 400 && res.headers.location && redirects > 0) {
+        res.resume()
+        const nextUrl = new URL(res.headers.location, url).toString()
+        fetchText(nextUrl, redirects - 1).then(done)
+        return
+      }
+
+      if (status < 200 || status >= 300) {
+        res.resume()
+        done(null)
+        return
+      }
+
+      let body = ''
+      res.setEncoding('utf8')
+      res.on('data', chunk => { body += chunk })
+      res.on('end', () => done(body))
+    })
+    req.setTimeout(8000, () => {
+      req.destroy()
+      done(null)
+    })
+    req.on('error', () => done(null))
+  })
+}
+
+async function fetchZdicHtml(entry: string): Promise<string | null> {
+  return fetchText(`https://zdic.net/hans/${encodeURIComponent(entry)}`)
+}
+
+export async function getPinyinsFromZdicEntry(entry: string): Promise<string[]> {
+  if (zdicEntryPinyinCache.has(entry)) return zdicEntryPinyinCache.get(entry)!
+  const html = await fetchZdicHtml(entry)
+  if (!html) { zdicEntryPinyinCache.set(entry, []); return [] }
+
+  const metaMatch = html.match(/<span class="meta-pinyin">([\s\S]*?)<\/span>/)
+  const pinyins = metaMatch ? splitPinyinText(metaMatch[1]) : []
+  const chars = [...entry]
+  const result = pinyins.length === chars.length ? pinyins : []
+  zdicEntryPinyinCache.set(entry, result)
+  return result
+}
+
+async function getAabbPhrasePinyinsFromZdic(word: string): Promise<string[]> {
+  const chars = [...word]
+  if (chars.length !== 4 || chars[0] !== chars[1] || chars[2] !== chars[3]) return []
+
+  const baseWord = chars[0] + chars[2]
+  const basePinyins = await getPinyinsFromZdicEntry(baseWord)
+  return basePinyins.length === 2
+    ? [basePinyins[0], basePinyins[0], basePinyins[1], basePinyins[1]]
+    : []
+}
+
+export async function resolvePhrasePinyins(word: string): Promise<{ pinyins: string[]; trusted: boolean }> {
+  const chars = [...word]
+  if (chars.length > 1) {
+    const exact = await getPinyinsFromZdicEntry(word)
+    if (exact.length === chars.length) return { pinyins: exact, trusted: true }
+
+    const aabb = await getAabbPhrasePinyinsFromZdic(word)
+    if (aabb.length === chars.length) return { pinyins: aabb, trusted: true }
+  }
+
+  return { pinyins: getPhrasePinyins(word), trusted: false }
+}
+
 export async function getPinyinFromZdic(char: string): Promise<string[]> {
   if (pinyinCache.has(char)) return pinyinCache.get(char)!
-  const url = `https://www.zdic.net/hans/${encodeURIComponent(char)}`
   try {
-    const res = await fetch(url, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; keytao-encoder/1.0)' },
-      signal: AbortSignal.timeout(8000),
-    })
-    if (!res.ok) { pinyinCache.set(char, []); return [] }
-    const html = await res.text()
+    const html = await fetchZdicHtml(char)
+    if (!html) { pinyinCache.set(char, []); return [] }
     // Extract all <span class="z_d song">…</span> values, keep only pinyin (not bopomofo)
     const all = [...html.matchAll(/class="z_d song">([^<\s]+)/g)]
       .map(m => m[1])
@@ -261,23 +347,30 @@ export interface RequestedCodeAnalysis {
   alternatives: string[]
 }
 
-export async function encodeChar(char: string, preferredPinyin?: string): Promise<CharEncoding> {
+interface EncodeCharOptions {
+  trustPreferred?: boolean
+}
+
+export async function encodeChar(char: string, preferredPinyin?: string, options: EncodeCharOptions = {}): Promise<CharEncoding> {
   const zdicPinyins = await getPinyinFromZdic(char)
-  // Trust pinyin-pro's contextual reading (preferredPinyin) only when its standalone reading
-  // matches zdic's primary reading — meaning pinyin-pro knows this char correctly and its
-  // contextual disambiguation is reliable (e.g. 重: zhòng/chóng). When they diverge (e.g.
-  // 鳜: pinyin-pro defaults to jué but zdic primary is guì), pinyin-pro doesn't know the char
-  // and we ignore its reading entirely in favor of zdic.
+  // Word-level zdic readings are trusted when they still exist in the character's reading list.
+  // Otherwise, pinyin-pro context is used only when its standalone reading agrees with zdic's
+  // primary reading; this keeps rare chars like 鳜 from being pulled to pinyin-pro's jué default.
   let pinyins: string[]
   if (zdicPinyins.length > 0) {
     const normZdic = new Set(zdicPinyins.map(normalizePinyin))
-    const [standalone] = getPhrasePinyins(char)
-    const pinyinProReliable = standalone && normalizePinyin(standalone) === normalizePinyin(zdicPinyins[0])
-    if (pinyinProReliable) {
-      const preferred = preferredPinyin && normZdic.has(normalizePinyin(preferredPinyin)) ? [preferredPinyin] : []
-      pinyins = [...new Set([...preferred, ...zdicPinyins])]
+    const trustedPreferred = preferredPinyin && normZdic.has(normalizePinyin(preferredPinyin)) ? [preferredPinyin] : []
+    if (options.trustPreferred && trustedPreferred.length > 0) {
+      pinyins = [...new Set([...trustedPreferred, ...zdicPinyins])]
     } else {
-      pinyins = zdicPinyins
+      const [standalone] = getPhrasePinyins(char)
+      const pinyinProReliable = standalone && normalizePinyin(standalone) === normalizePinyin(zdicPinyins[0])
+      if (pinyinProReliable) {
+        const preferred = preferredPinyin && normZdic.has(normalizePinyin(preferredPinyin)) ? [preferredPinyin] : []
+        pinyins = [...new Set([...preferred, ...zdicPinyins])]
+      } else {
+        pinyins = zdicPinyins
+      }
     }
   } else {
     pinyins = preferredPinyin ? [preferredPinyin] : []
@@ -513,7 +606,7 @@ export function buildPhraseEncodingFromChars(word: string, chars: CharEncoding[]
 }
 
 export async function encodePhrase(word: string): Promise<PhraseEncoding> {
-  const phrasePinyins = getPhrasePinyins(word)
-  const chars = await Promise.all([...word].map((char, index) => encodeChar(char, phrasePinyins[index])))
+  const { pinyins: phrasePinyins, trusted } = await resolvePhrasePinyins(word)
+  const chars = await Promise.all([...word].map((char, index) => encodeChar(char, phrasePinyins[index], { trustPreferred: trusted })))
   return buildPhraseEncodingFromChars(word, chars)
 }

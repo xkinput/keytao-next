@@ -444,6 +444,24 @@ describe('encodePhrase', { timeout: 30000 }, () => {
     expect(r.codes[0]).toBe('fygl')
   })
 
+  it('encodes 咋呼 using the word-level zhā hū reading', async () => {
+    const r = await encodePhrase('咋呼')
+    expect(r.chars.map(c => c.pinyin)).toEqual(['zhā', 'hū'])
+    expect(r.codes[0]).toBe('fshj')
+  })
+
+  it('encodes 咋咋呼呼 from the verified 咋呼 base reading', async () => {
+    const r = await encodePhrase('咋咋呼呼')
+    expect(r.chars.map(c => c.pinyin)).toEqual(['zhā', 'zhā', 'hū', 'hū'])
+    expect(r.codes[0]).toBe('ffhh')
+  })
+
+  it('encodes 尊行 using xíng from the word-level reading', async () => {
+    const r = await encodePhrase('尊行')
+    expect(r.chars.map(c => c.pinyin)).toEqual(['zūn', 'xíng'])
+    expect(r.codes[0]).toBe('zwxg')
+  })
+
   it('encodes 鳜鱼 (rare polyphonic phrase)', async () => {
     const r = await encodePhrase('鳜鱼')
     expect(r.type).toBe('二字词')
