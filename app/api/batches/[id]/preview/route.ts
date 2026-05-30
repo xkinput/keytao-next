@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import type { PhraseType } from '@/lib/constants/phraseTypes'
 
 interface PreviewPhrase {
     word: string
@@ -41,6 +42,14 @@ function sortPhrases(phrases: PreviewPhrase[]): PreviewPhrase[] {
     })
 }
 
+function stateKey(type: string, code: string): string {
+    return `${type}\u0000${code}`
+}
+
+function clonePhrases(phrases: PreviewPhrase[]): PreviewPhrase[] {
+    return phrases.map(p => ({ ...p }))
+}
+
 const CONTEXT_SIZE = 3
 const LARGE_GAP_THRESHOLD = CONTEXT_SIZE * 2
 
@@ -51,7 +60,7 @@ async function clusterAffectedCodes(affectedCodes: string[], type: string): Prom
     const gapCounts = await Promise.all(
         affectedCodes.slice(0, -1).map((codeA, i) =>
             prisma.phrase.count({
-                where: { code: { gt: codeA, lt: affectedCodes[i + 1] }, type: type as any, status: 'Finish' }
+                where: { code: { gt: codeA, lt: affectedCodes[i + 1] }, type: type as PhraseType, status: 'Finish' }
             })
         )
     )
@@ -74,7 +83,7 @@ async function clusterAffectedCodes(affectedCodes: string[], type: string): Prom
 async function fetchStartLine(p: PreviewPhrase): Promise<number> {
     const count = await prisma.phrase.count({
         where: {
-            type: p.type as any,
+            type: p.type as PhraseType,
             status: 'Finish',
             OR: [
                 { code: { lt: p.code } },
@@ -102,7 +111,7 @@ async function fetchTypeContext(
     for (let i = 0; i < affectedCodes.length - 1; i++) {
         const codeA = affectedCodes[i]
         const codeB = affectedCodes[i + 1]
-        const gapWhere = { code: { gt: codeA, lt: codeB }, type: type as any, status: 'Finish' } as const
+        const gapWhere = { code: { gt: codeA, lt: codeB }, type: type as PhraseType, status: 'Finish' } as const
         gapPromises.push(
             prisma.phrase.findMany({ where: gapWhere, orderBy: [{ code: 'asc' }, { weight: 'asc' }], take: CONTEXT_SIZE, select: sel }),
             prisma.phrase.findMany({ where: gapWhere, orderBy: [{ code: 'desc' }, { weight: 'desc' }], take: CONTEXT_SIZE, select: sel })
@@ -111,13 +120,13 @@ async function fetchTypeContext(
 
     const [beforeRows, afterRows, ...gapResults] = await Promise.all([
         prisma.phrase.findMany({
-            where: { code: { lt: minCode }, type: type as any, status: 'Finish' },
+            where: { code: { lt: minCode }, type: type as PhraseType, status: 'Finish' },
             orderBy: [{ code: 'desc' }, { weight: 'desc' }],
             take: CONTEXT_SIZE,
             select: sel
         }),
         prisma.phrase.findMany({
-            where: { code: { gt: maxCode }, type: type as any, status: 'Finish' },
+            where: { code: { gt: maxCode }, type: type as PhraseType, status: 'Finish' },
             orderBy: [{ code: 'asc' }, { weight: 'asc' }],
             take: CONTEXT_SIZE,
             select: sel
@@ -213,29 +222,35 @@ export async function GET(
             })
 
             const afterStateMap = new Map<string, PreviewPhrase[]>()
-            Array.from(codes).forEach(code => {
-                afterStateMap.set(code, sortPhrases(
-                    currentPhrases
-                        .filter(p => p.code === code)
-                        .map(p => ({ word: p.word, code: p.code, type: p.type, weight: p.weight, remark: p.remark || undefined }))
-                ))
+            currentPhrases.forEach(p => {
+                const key = stateKey(p.type, p.code)
+                const list = afterStateMap.get(key) || []
+                list.push({ word: p.word, code: p.code, type: p.type, weight: p.weight, remark: p.remark || undefined })
+                afterStateMap.set(key, list)
+            })
+            afterStateMap.forEach((phrases, key) => afterStateMap.set(key, sortPhrases(phrases)))
+
+            batch.pullRequests.forEach(pr => {
+                if (!pr.code) return
+                const key = stateKey(pr.type || 'Phrase', pr.code)
+                if (!afterStateMap.has(key)) afterStateMap.set(key, [])
             })
 
             // Reconstruct before state by reverse-applying PRs
             const beforeStateMap = new Map<string, PreviewPhrase[]>()
-            Array.from(codes).forEach(code => {
-                beforeStateMap.set(code, [...(afterStateMap.get(code) || [])])
-            })
+            afterStateMap.forEach((phrases, key) => beforeStateMap.set(key, clonePhrases(phrases)))
 
             for (const pr of batch.pullRequests) {
                 if (!pr.code) continue
-                const beforeList = beforeStateMap.get(pr.code) || []
+                const prType = pr.type || 'Phrase'
+                const key = stateKey(prType, pr.code)
+                const beforeList = beforeStateMap.get(key) || []
 
                 switch (pr.action) {
                     case 'Create':
                         // Reverse: remove the created word from before
                         if (pr.word) {
-                            const idx = beforeList.findIndex(p => p.word === pr.word)
+                            const idx = beforeList.findIndex(p => p.word === pr.word && p.code === pr.code && p.type === prType)
                             if (idx !== -1) beforeList.splice(idx, 1)
                         }
                         break
@@ -245,7 +260,7 @@ export async function GET(
                             beforeList.push({
                                 word: pr.word,
                                 code: pr.code,
-                                type: pr.type || 'Phrase',
+                                type: prType,
                                 weight: pr.weight || 0,
                                 remark: pr.remark || undefined
                             })
@@ -254,22 +269,23 @@ export async function GET(
                     case 'Change':
                         // Reverse: swap newWord back to oldWord in before
                         if (pr.word && pr.oldWord) {
-                            const idx = beforeList.findIndex(p => p.word === pr.word)
+                            const idx = beforeList.findIndex(p => p.word === pr.word && p.code === pr.code && p.type === prType)
                             if (idx !== -1) {
                                 beforeList[idx] = { ...beforeList[idx], word: pr.oldWord }
                             }
                         }
                         break
                 }
-                beforeStateMap.set(pr.code, beforeList)
+                beforeStateMap.set(key, beforeList)
             }
 
-            // Group PRs by code for diffs
-            const prsByCode = new Map<string, typeof batch.pullRequests>()
+            // Group PRs by type+code for diffs; identical codes in different dictionaries must stay separate.
+            const prsByTypeCode = new Map<string, typeof batch.pullRequests>()
             batch.pullRequests.forEach(pr => {
                 if (!pr.code) return
-                if (!prsByCode.has(pr.code)) prsByCode.set(pr.code, [])
-                prsByCode.get(pr.code)!.push(pr)
+                const key = stateKey(pr.type || 'Phrase', pr.code)
+                if (!prsByTypeCode.has(key)) prsByTypeCode.set(key, [])
+                prsByTypeCode.get(key)!.push(pr)
             })
 
             // Group affected codes by type
@@ -286,7 +302,7 @@ export async function GET(
                 const diffs: DiffItem[] = []
 
                 for (const code of affectedCodes) {
-                    const prs = prsByCode.get(code) || []
+                    const prs = prsByTypeCode.get(stateKey(phraseType, code)) || []
                     for (const pr of prs) {
                         switch (pr.action) {
                             case 'Create':
@@ -299,7 +315,7 @@ export async function GET(
                             case 'Change':
                                 if (pr.word && pr.oldWord) {
                                     const finalWeight = weightMap.get(pr.id) ?? pr.weight ?? 0
-                                    diffs.push({ type: 'modify', before: { word: pr.oldWord, code, type: 'Phrase', weight: 0 }, after: { word: pr.word, code, type: pr.type || 'Phrase', weight: finalWeight, remark: pr.remark || undefined } })
+                                    diffs.push({ type: 'modify', before: { word: pr.oldWord, code, type: pr.type || 'Phrase', weight: 0 }, after: { word: pr.word, code, type: pr.type || 'Phrase', weight: finalWeight, remark: pr.remark || undefined } })
                                     modifiedCount++
                                 }
                                 break
@@ -329,8 +345,8 @@ export async function GET(
                         const afterArr: PreviewPhrase[] = [...ctxBefore]
                         for (const code of sortedRange) {
                             if (clusterSet.has(code)) {
-                                beforeArr.push(...sortPhrases((beforeStateMap.get(code) || []).filter(p => p.type === phraseType)))
-                                afterArr.push(...sortPhrases((afterStateMap.get(code) || []).filter(p => p.type === phraseType)))
+                                beforeArr.push(...sortPhrases(beforeStateMap.get(stateKey(phraseType, code)) || []))
+                                afterArr.push(...sortPhrases(afterStateMap.get(stateKey(phraseType, code)) || []))
                             } else {
                                 const middle = sortPhrases(middlePhrases.get(code) || [])
                                 beforeArr.push(...middle)
@@ -382,17 +398,24 @@ export async function GET(
             const currentState = new Map<string, PreviewPhrase[]>()
             const originalState = new Map<string, PreviewPhrase[]>()
 
-            Array.from(codes).forEach(code => {
-                const phrases = existingPhrases
-                    .filter(p => p.code === code)
-                    .map(p => ({ word: p.word, code: p.code, type: p.type, weight: p.weight, remark: p.remark || undefined }))
+            existingPhrases.forEach(p => {
+                const key = stateKey(p.type, p.code)
+                const phrase = { word: p.word, code: p.code, type: p.type, weight: p.weight, remark: p.remark || undefined }
+                currentState.set(key, [...(currentState.get(key) || []), phrase])
+                originalState.set(key, [...(originalState.get(key) || []), { ...phrase }])
+            })
 
-                currentState.set(code, JSON.parse(JSON.stringify(phrases)))
-                originalState.set(code, JSON.parse(JSON.stringify(phrases)))
+            batch.pullRequests.forEach(pr => {
+                if (!pr.code) return
+                const key = stateKey(pr.type || 'Phrase', pr.code)
+                if (!currentState.has(key)) currentState.set(key, [])
+                if (!originalState.has(key)) originalState.set(key, [])
             })
 
             for (const pr of batch.pullRequests) {
                 if (!pr.code) continue
+                const prType = pr.type || 'Phrase'
+                const key = stateKey(prType, pr.code)
 
                 if (conflictMap.get(pr.id)) {
                     const conflictInfo = conflictResults.find(r => parseInt(r.id) === pr.id)
@@ -411,35 +434,35 @@ export async function GET(
                     continue
                 }
 
-                const codePhrases = currentState.get(pr.code) || []
+                const codePhrases = currentState.get(key) || []
 
                 switch (pr.action) {
                     case 'Create':
                         if (pr.word) {
-                            const existingIndex = codePhrases.findIndex(p => p.word === pr.word && p.code === pr.code)
+                            const existingIndex = codePhrases.findIndex(p => p.word === pr.word && p.code === pr.code && p.type === prType)
                             if (existingIndex === -1) {
                                 const finalWeight = weightMap.get(pr.id) ?? pr.weight ?? 0
-                                codePhrases.push({ word: pr.word, code: pr.code, type: pr.type || 'Phrase', weight: finalWeight, remark: pr.remark || undefined })
+                                codePhrases.push({ word: pr.word, code: pr.code, type: prType, weight: finalWeight, remark: pr.remark || undefined })
                             }
                         }
                         break
                     case 'Change':
                         if (pr.oldWord && pr.word) {
-                            const index = codePhrases.findIndex(p => p.word === pr.oldWord && p.code === pr.code)
+                            const index = codePhrases.findIndex(p => p.word === pr.oldWord && p.code === pr.code && p.type === prType)
                             if (index !== -1) {
                                 const finalWeight = weightMap.get(pr.id) ?? pr.weight ?? codePhrases[index].weight
-                                codePhrases[index] = { ...codePhrases[index], word: pr.word, type: pr.type || codePhrases[index].type, weight: finalWeight, remark: pr.remark || codePhrases[index].remark }
+                                codePhrases[index] = { ...codePhrases[index], word: pr.word, type: prType, weight: finalWeight, remark: pr.remark || codePhrases[index].remark }
                             }
                         }
                         break
                     case 'Delete':
                         if (pr.word) {
-                            const index = codePhrases.findIndex(p => p.word === pr.word && p.code === pr.code)
+                            const index = codePhrases.findIndex(p => p.word === pr.word && p.code === pr.code && p.type === prType)
                             if (index !== -1) codePhrases.splice(index, 1)
                         }
                         break
                 }
-                currentState.set(pr.code, codePhrases)
+                currentState.set(key, codePhrases)
             }
 
             // Group affected codes by type
@@ -456,8 +479,8 @@ export async function GET(
                 const diffs: DiffItem[] = []
 
                 for (const code of affectedCodes) {
-                    const beforeList = originalState.get(code) || []
-                    const afterList = currentState.get(code) || []
+                    const beforeList = originalState.get(stateKey(phraseType, code)) || []
+                    const afterList = currentState.get(stateKey(phraseType, code)) || []
                     const afterWords = new Set(afterList.map(p => p.word))
                     const beforeWords = new Set(beforeList.map(p => p.word))
 
@@ -498,8 +521,8 @@ export async function GET(
                         const afterArr: PreviewPhrase[] = [...ctxBefore]
                         for (const code of sortedRange) {
                             if (clusterSet.has(code)) {
-                                beforeArr.push(...sortPhrases(originalState.get(code) || []))
-                                afterArr.push(...sortPhrases(currentState.get(code) || []))
+                                beforeArr.push(...sortPhrases(originalState.get(stateKey(phraseType, code)) || []))
+                                afterArr.push(...sortPhrases(currentState.get(stateKey(phraseType, code)) || []))
                             } else {
                                 const middle = sortPhrases(middlePhrases.get(code) || [])
                                 beforeArr.push(...middle)
