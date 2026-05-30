@@ -239,6 +239,20 @@ export default function DeveloperPage() {
 
               <Divider />
 
+              <ApiDoc
+                method="GET"
+                path="/api/v1/infer"
+                description="推断词条编码、推荐可用码并返回冲突信息"
+                params={[
+                  { name: 'word', desc: '词，必填' },
+                  { name: 'code', desc: '待校验编码，可选' },
+                ]}
+                example={`curl -H "X-API-Key: kt_xxx" \\
+  "/api/v1/infer?word=咋咋呼呼"`}
+              />
+
+              <Divider />
+
               <div>
                 <h3 className="font-semibold mb-2">频率限制</h3>
                 <p className="text-sm text-default-500">
