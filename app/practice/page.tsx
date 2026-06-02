@@ -61,6 +61,7 @@ import {
 } from '@/lib/services/practiceSchemeCache'
 import { DEFAULT_PRACTICE_ARTICLE_OPTIONS, type PracticeArticleOption } from '@/lib/services/practiceArticles'
 import { usePracticeStore, type PracticeSchemeKey } from '@/lib/store/practice'
+import { KEYTAO_FLY_KEY_CHARACTERS } from '@/lib/data/keytaoFlyKeyPractice'
 
 const DEFAULT_PRACTICE_TEXT = '我们可以通过键道练习输入文字词组编码方案系统开源词库用户学习效率中文输入法'
 const MAX_CUSTOM_TEXT_BYTES = 256 * 1024
@@ -141,7 +142,7 @@ const PRACTICE_SOURCE_OPTIONS: Array<{ key: PracticeSource; label: string; detai
   { key: 'common1000', label: '单字常用字前1000', detail: '扩展高频' },
   { key: 'keytao630', label: '键道630练习', detail: '高频词组' },
   { key: 'article', label: '文章', detail: '下拉选择' },
-  { key: 'flyKey', label: '键道飞键练习', detail: 'zh/ch/uang' },
+  { key: 'flyKey', label: '键道飞键练习', detail: '常用飞键500' },
   { key: 'custom', label: '自定义文本', detail: '上传或粘贴' },
 ]
 
@@ -401,6 +402,11 @@ function getPinyinForChar(char: string): string {
   return Array.isArray(result) ? result[0] ?? '' : ''
 }
 
+function getPinyinReadingsForChar(char: string): string[] {
+  const result = pinyin(char, { type: 'array', toneType: 'none', multiple: true })
+  return Array.isArray(result) ? Array.from(new Set(result.filter(Boolean))) : []
+}
+
 function getFlyKeyHints(initial: string, final: string): FlyKeyHint[] {
   const hints: FlyKeyHint[] = []
 
@@ -427,6 +433,23 @@ function getFlyKeyHints(initial: string, final: string): FlyKeyHint[] {
     hints.push(isInner
       ? { id: 'uang-x', label: 'uang 特例', key: 'x', reason: 'uang 跟在 zh 内(F) / ch 内(W) 后，韵母键取 X' }
       : { id: 'uang-m', label: 'uang 特例', key: 'm', reason: 'uang 不在 zh 内 / ch 内声母后，韵母键取 M' })
+  }
+
+  return hints
+}
+
+function getFlyKeyHintsForChar(char: string): FlyKeyHint[] {
+  const hints: FlyKeyHint[] = []
+  const seenHints = new Set<string>()
+
+  for (const reading of getPinyinReadingsForChar(char)) {
+    const { initial, final } = parsePinyinSyllable(reading)
+    for (const hint of getFlyKeyHints(initial, final)) {
+      const key = `${hint.id}:${hint.key}:${hint.reason}`
+      if (seenHints.has(key)) continue
+      seenHints.add(key)
+      hints.push(hint)
+    }
   }
 
   return hints
@@ -463,6 +486,20 @@ function createSingleCharacterItems(
     }))
 }
 
+function createFlyKeyPracticeItems(dictionary: PracticeDictionary, limit: number) {
+  return Array.from(KEYTAO_FLY_KEY_CHARACTERS)
+    .slice(0, limit)
+    .flatMap((char) => {
+      const dictionaryCodes = (dictionary.entriesByText.get(char) ?? []).map((entry) => entry.code)
+      if (dictionaryCodes.length === 0) return []
+
+      return [{
+        text: char,
+        codes: Array.from(new Set(dictionaryCodes)).slice(0, 6),
+      }]
+    })
+}
+
 function buildPracticeInsight(
   text: string | undefined,
   dictionary: PracticeDictionary | null,
@@ -473,7 +510,8 @@ function buildPracticeInsight(
   const codes = dictionary.entriesByText.get(text)?.map((entry) => entry.code).slice(0, 6) ?? []
   const characters = Array.from(text).map((char) => {
     const charCodes = dictionary.entriesByText.get(char)?.map((entry) => entry.code).slice(0, 6) ?? []
-    const charPinyin = getPinyinForChar(char)
+    const readings = getPinyinReadingsForChar(char)
+    const charPinyin = readings[0] ?? getPinyinForChar(char)
     const { initial, final } = parsePinyinSyllable(charPinyin)
     const split = config.splitMap[char]
     const shapeCode = split
@@ -482,12 +520,12 @@ function buildPracticeInsight(
 
     return {
       char,
-      pinyin: charPinyin,
+      pinyin: readings.length > 1 ? readings.join(' / ') : charPinyin,
       phoneticCode: encodePhoneticCode(initial, final),
       split,
       shapeCode,
       codes: charCodes,
-      flyHints: getFlyKeyHints(initial, final),
+      flyHints: getFlyKeyHintsForChar(char),
     }
   })
 
@@ -928,11 +966,7 @@ export default function KeyTaoPracticePage() {
       return createPracticeItemsFromText(KEYTAO_630_TEXT, dictionary, Number.MAX_SAFE_INTEGER)
     }
     if (practiceSource === 'flyKey') {
-      return createSingleCharacterItems(dictionary, 1000, (entry) => {
-        const charPinyin = getPinyinForChar(entry.text)
-        const { initial, final } = parsePinyinSyllable(charPinyin)
-        return getFlyKeyHints(initial, final).length > 0
-      })
+      return createFlyKeyPracticeItems(dictionary, 1000)
     }
     const content = practiceSource === 'article' ? selectedArticle.text : sourceText
     return createPracticeItemsFromText(content, dictionary, Number.MAX_SAFE_INTEGER)

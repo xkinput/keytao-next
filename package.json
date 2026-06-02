@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "prepare:librime-wasm": "node scripts/prepare-librime-wasm-assets.mjs",
+    "generate:flykey-practice": "node scripts/generate-keytao-flykey-practice.mjs",
     "dev": "pnpm run prepare:librime-wasm && next dev --webpack",
     "prebuild": "pnpm run prepare:librime-wasm",
     "build": "next build --webpack",
