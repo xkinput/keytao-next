@@ -63,14 +63,14 @@ export function resolveFollowPracticeCommit(params: {
   currentCommittedText: string
   committedText: string
   remainingTexts: string[]
+  remainingTargetText?: string
   composition?: RimeComposition | null
 }): FollowPracticeCommitResolution {
-  const { currentCommittedText, committedText, remainingTexts, composition } = params
+  const { currentCommittedText, committedText, remainingTexts, remainingTargetText = remainingTexts.join(''), composition } = params
 
   if (remainingTexts.length === 0 || !committedText) return { type: 'noop' }
 
   const nextCommittedText = `${currentCommittedText}${committedText}`
-  const remainingTargetText = remainingTexts.join('')
   if (!remainingTargetText.startsWith(nextCommittedText)) {
     return {
       type: 'mismatch',
