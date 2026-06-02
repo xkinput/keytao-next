@@ -919,7 +919,6 @@ export default function KeyTaoPracticePage() {
   const [isInsightPanelVisible, setIsInsightPanelVisible] = useState(true)
   const [isFlyRulePanelVisible, setIsFlyRulePanelVisible] = useState(true)
   const [practiceShuffleSeed, setPracticeShuffleSeed] = useState(0)
-  const [lastCompletedTarget, setLastCompletedTarget] = useState<string | null>(null)
   const [currentCommittedText, setCurrentCommittedText] = useState('')
   const [currentIndex, setCurrentIndex] = useState(0)
   const [completedText, setCompletedText] = useState('')
@@ -985,10 +984,6 @@ export default function KeyTaoPracticePage() {
     [currentItem?.text, dictionary, keytaoConfig]
   )
 
-  const lastCompletedInsight = useMemo(
-    () => buildPracticeInsight(lastCompletedTarget ?? undefined, dictionary, keytaoConfig),
-    [dictionary, keytaoConfig, lastCompletedTarget]
-  )
   const remainingPracticeTexts = useMemo(
     () => practiceItems.slice(currentIndex).map((item) => item.text),
     [currentIndex, practiceItems]
@@ -1472,7 +1467,6 @@ export default function KeyTaoPracticePage() {
     bumpPracticeTurn()
     setCurrentIndex(0)
     setCompletedText('')
-    setLastCompletedTarget(null)
     currentCommittedTextRef.current = ''
     setCurrentCommittedText('')
     setTotalKeys(0)
@@ -1492,7 +1486,6 @@ export default function KeyTaoPracticePage() {
     const nextComposition = currentIndex + 1 < practiceItems.length ? carryOverComposition : null
     bumpPracticeTurn()
     setCompletedText((value) => value + currentItem.text)
-    setLastCompletedTarget(currentItem.text)
     setCurrentIndex((value) => value + 1)
     currentCommittedTextRef.current = ''
     setCurrentCommittedText('')
@@ -1530,7 +1523,6 @@ export default function KeyTaoPracticePage() {
     if (resolution.advanceCount > 0) {
       bumpPracticeTurn()
       setCompletedText((value) => value + resolution.completedTexts.join(''))
-      setLastCompletedTarget(resolution.lastCompletedText)
       setCurrentIndex((value) => value + resolution.advanceCount)
       currentCommittedTextRef.current = resolution.currentText
       setCurrentCommittedText(resolution.currentText)
@@ -1595,7 +1587,6 @@ export default function KeyTaoPracticePage() {
     const previousText = practiceItems[currentIndex - 1]?.text ?? ''
     bumpPracticeTurn()
     setCurrentIndex((value) => Math.max(0, value - 1))
-    setLastCompletedTarget(practiceItems[currentIndex - 2]?.text ?? null)
     if (previousText) {
       setCompletedText((value) => value.endsWith(previousText) ? value.slice(0, -previousText.length) : value)
     }
@@ -2632,10 +2623,7 @@ export default function KeyTaoPracticePage() {
                   </Button>
                 </div>
                 {isInsightPanelVisible && (
-                  <>
-                    <InsightPanel title="当前目标" insight={currentInsight} />
-                    <InsightPanel title="刚完成" insight={lastCompletedInsight} />
-                  </>
+                  <InsightPanel title="当前目标" insight={currentInsight} />
                 )}
               </CardBody>
             </Card>
