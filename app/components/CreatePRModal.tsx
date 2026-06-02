@@ -818,7 +818,7 @@ export default function CreatePRModal({
               word: item.word,
               oldWord: item.action === 'Change' ? item.oldWord : undefined,
               code: item.code,
-              type: item.action !== 'Delete' ? item.type : undefined,
+              type: item.type,
               weight: item.weight ? parseInt(item.weight) : undefined,
               remark: item.remark || null
             }))
@@ -836,7 +836,7 @@ export default function CreatePRModal({
             word: item.word,
             oldWord: item.action === 'Change' ? item.oldWord : undefined,
             code: item.code,
-            type: item.action !== 'Delete' ? item.type : undefined,
+            type: item.type,
             weight: item.weight ? parseInt(item.weight) : (item.action !== 'Delete' ? getDefaultWeight(item.type as PhraseType) : undefined),
             remark: item.remark || null
           },
@@ -852,7 +852,7 @@ export default function CreatePRModal({
               word: item.word,
               oldWord: item.action === 'Change' ? item.oldWord : undefined,
               code: item.code,
-              type: item.action !== 'Delete' ? item.type : undefined,
+              type: item.type,
               weight: item.weight ? parseInt(item.weight) : (item.action !== 'Delete' ? getDefaultWeight(item.type as PhraseType) : undefined),
               remark: item.remark || null
             })),
