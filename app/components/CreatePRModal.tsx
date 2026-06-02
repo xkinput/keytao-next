@@ -1220,19 +1220,30 @@ export default function CreatePRModal({
                                       </>
                                     ) : act === 'Delete' ? (
                                       <div className="flex flex-wrap gap-2">
-                                        <Controller
-                                          name={`items.${index}.word`}
-                                          control={control}
-                                          rules={{ required: '词不能为空' }}
-                                          render={({ field: f, fieldState }) => (
-                                            <Input
-                                              value={f.value} label="词" placeholder="请输入词"
-                                              isRequired isInvalid={!!fieldState.error} errorMessage={fieldState.error?.message}
-                                              size="sm" className="flex-1 min-w-30"
-                                              onValueChange={v => { f.onChange(v); updateMeta(field.id, { hasChecked: false, conflict: null }) }}
-                                            />
-                                          )}
-                                        />
+                                        <div className="flex gap-2 flex-1 min-w-44">
+                                          <Controller
+                                            name={`items.${index}.type`}
+                                            control={control}
+                                            render={({ field: f }) => (
+                                              <Select label="类型" selectedKeys={[f.value]} onSelectionChange={keys => f.onChange(Array.from(keys)[0] as string)} disallowEmptySelection size="sm" className="w-24 shrink-0">
+                                                {getPhraseTypeOptions().map(o => <SelectItem key={o.value}>{o.label}</SelectItem>)}
+                                              </Select>
+                                            )}
+                                          />
+                                          <Controller
+                                            name={`items.${index}.word`}
+                                            control={control}
+                                            rules={{ required: '词不能为空' }}
+                                            render={({ field: f, fieldState }) => (
+                                              <Input
+                                                value={f.value} label="词" placeholder="请输入词"
+                                                isRequired isInvalid={!!fieldState.error} errorMessage={fieldState.error?.message}
+                                                size="sm" className="flex-1"
+                                                onValueChange={v => { f.onChange(v); updateMeta(field.id, { hasChecked: false, conflict: null }) }}
+                                              />
+                                            )}
+                                          />
+                                        </div>
                                         <Controller
                                           name={`items.${index}.code`}
                                           control={control}
@@ -1512,8 +1523,11 @@ export default function CreatePRModal({
                                   {currentCode && (
                                     <><span className="text-default-300 shrink-0">→</span><span className="text-primary shrink-0">{currentCode}</span></>
                                   )}
-                                  {currentAction !== 'Delete' && currentType && (
-                                    <span className="text-default-400 text-xs shrink-0">[{getPhraseTypeOptions().find(o => o.value === currentType)?.label || currentType}] {currentWeight}</span>
+                                  {currentType && (
+                                    <span className="text-default-400 text-xs shrink-0">
+                                      [{getPhraseTypeOptions().find(o => o.value === currentType)?.label || currentType}]
+                                      {currentAction !== 'Delete' && ` ${currentWeight}`}
+                                    </span>
                                   )}
                                 </div>
                               )}
