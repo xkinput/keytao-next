@@ -58,7 +58,8 @@ export class ConflictDetector {
       const oldPhrase = await prisma.phrase.findFirst({
         where: {
           word: change.oldWord,
-          code: change.code
+          code: change.code,
+          type: change.type || undefined
         }
       })
 
@@ -80,7 +81,8 @@ export class ConflictDetector {
         const newWordExists = await prisma.phrase.findFirst({
           where: {
             word: change.word,
-            code: change.code
+            code: change.code,
+            type: change.type || undefined
           }
         })
 
@@ -167,6 +169,7 @@ export class ConflictDetector {
       where: {
         word: change.word,
         code: change.code,
+        type: change.type || undefined,
         NOT: change.phraseId ? { id: change.phraseId } : undefined
       }
     })
@@ -280,14 +283,14 @@ export class ConflictDetector {
    */
   private async generateSuggestions(
     proposed: PhraseChange,
-    existing: { id: number; word: string; code: string; weight: number; userId: number }
+    existing: { id: number; word: string; code: string; weight: number; userId: number; type?: PhraseType }
   ): Promise<CodeSuggestion[]> {
     const suggestions: CodeSuggestion[] = []
 
     // Suggestion 1: Move existing phrase to alternative code
     const alternativeCodes = this.generateAlternativeCodes(existing.code)
     for (const altCode of alternativeCodes) {
-      const isAvailable = await this.isCodeAvailable(altCode)
+      const isAvailable = await this.isCodeAvailable(altCode, existing.type)
       if (isAvailable) {
         suggestions.push({
           action: 'Move',
@@ -303,7 +306,7 @@ export class ConflictDetector {
     // Suggestion 2: Use alternative code for proposed word
     const proposedAlts = this.generateAlternativeCodes(proposed.code)
     for (const altCode of proposedAlts) {
-      const isAvailable = await this.isCodeAvailable(altCode)
+      const isAvailable = await this.isCodeAvailable(altCode, proposed.type)
       if (isAvailable) {
         suggestions.push({
           action: 'Adjust',
@@ -352,9 +355,9 @@ export class ConflictDetector {
   /**
    * Check if a code is available
    */
-  private async isCodeAvailable(code: string): Promise<boolean> {
+  private async isCodeAvailable(code: string, type?: PhraseType): Promise<boolean> {
     const existing = await prisma.phrase.findFirst({
-      where: { code }
+      where: { code, type: type || undefined }
     })
     return !existing
   }

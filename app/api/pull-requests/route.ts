@@ -68,7 +68,8 @@ export async function POST(request: NextRequest) {
       const existingPhrase = await prisma.phrase.findFirst({
         where: {
           word: searchWord,
-          code
+          code,
+          type: type || undefined
         }
       })
       if (existingPhrase) {

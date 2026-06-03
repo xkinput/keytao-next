@@ -98,7 +98,8 @@ export async function POST(
               const oldPhrase = await tx.phrase.findFirst({
                 where: {
                   word: pr.oldWord,
-                  code: pr.code
+                  code: pr.code,
+                  type: pr.type || undefined
                 }
               })
 

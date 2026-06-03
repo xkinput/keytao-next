@@ -26,6 +26,10 @@ export interface BatchConflictResult {
   calculatedWeight?: number
 }
 
+function batchPhraseKey(type: string | undefined, code: string, word: string): string {
+  return `${type || 'Phrase'}:${code}:${word}`
+}
+
 /**
  * Calculate weight for a phrase based on existing count
  * This is the core weight calculation logic used across the codebase
@@ -67,7 +71,8 @@ export async function calculateDynamicWeight(
     const existingPhrase = await prisma.phrase.findFirst({
       where: {
         word: item.word,
-        code: item.code
+        code: item.code,
+        type: item.type
       },
       select: { weight: true }
     })
@@ -79,7 +84,8 @@ export async function calculateDynamicWeight(
         const other = allItems[i]
         if (other.action === 'Change' &&
           other.oldWord === item.word &&
-          other.code === item.code) {
+          other.code === item.code &&
+          (other.type || 'Phrase') === (item.type || 'Phrase')) {
           willBeChanged = true
           break
         }
@@ -118,7 +124,7 @@ export async function calculateDynamicWeight(
 
     const other = allItems[i]
     // Only consider items with same code AND same type
-    if (other.code !== item.code || other.type !== item.type) continue
+    if (other.code !== item.code || (other.type || 'Phrase') !== (item.type || 'Phrase')) continue
 
     if (other.action === 'Create' && i < currentIndex) {
       // Previous Create: if it's a new word, it will occupy baseWeight + currentSize
@@ -172,7 +178,8 @@ export function checkConflictResolution(
   if (
     resolverItem.action === 'Delete' &&
     resolverItem.word === phrase.word &&
-    resolverItem.code === phrase.code
+    resolverItem.code === phrase.code &&
+    (!resolverItem.type || !phrase.type || resolverItem.type === phrase.type)
   ) {
     return {
       resolved: true,
@@ -184,7 +191,8 @@ export function checkConflictResolution(
   if (
     resolverItem.action === 'Change' &&
     resolverItem.oldWord === phrase.word &&
-    resolverItem.code === phrase.code
+    resolverItem.code === phrase.code &&
+    (!resolverItem.type || !phrase.type || resolverItem.type === phrase.type)
   ) {
     return {
       resolved: true,
@@ -209,13 +217,13 @@ export function checkBatchDuplicates(
     return { hasDuplicate: false }
   }
 
-  const currentKey = `${currentItem.code}:${currentItem.word}`
+  const currentKey = batchPhraseKey(currentItem.type, currentItem.code, currentItem.word)
 
   for (let i = 0; i < currentIndex; i++) {
     const item = items[i]
     // Check if previous item creates the same word+code
     if (item.action === 'Create') {
-      const key = `${item.code}:${item.word}`
+      const key = batchPhraseKey(item.type, item.code, item.word)
       if (key === currentKey) {
         return { hasDuplicate: true, duplicateIndex: i }
       }
@@ -299,12 +307,12 @@ export async function checkBatchConflictsWithWeight(
   // Build maps for O(1) lookup (single pass)
   for (let i = 0; i < items.length; i++) {
     const item = items[i]
-    const key = `${item.code}:${item.word}`
+    const key = batchPhraseKey(item.type, item.code, item.word)
 
     if (item.action === 'Delete') {
       deleteMap.set(key, { index: i, item })
     } else if (item.action === 'Change' && item.oldWord) {
-      const changeKey = `${item.code}:${item.oldWord}`
+      const changeKey = batchPhraseKey(item.type, item.code, item.oldWord)
       changeMap.set(changeKey, { index: i, item })
     }
   }
@@ -323,7 +331,7 @@ export async function checkBatchConflictsWithWeight(
     // For 多编码词 case (phrase at a different code):
     // check if a batch operation frees that word from the other code
     if (phrase.code !== result.conflict.code) {
-      const crossKey = `${phrase.code}:${phrase.word}`
+      const crossKey = batchPhraseKey(phrase.type || currentItem.type, phrase.code, phrase.word)
       if (deleteMap.has(crossKey) || changeMap.has(crossKey)) {
         // The word is being removed from that code — no longer a multi-code situation
         result.conflict.impact = undefined
@@ -332,7 +340,7 @@ export async function checkBatchConflictsWithWeight(
       continue
     }
 
-    const phraseKey = `${phrase.code}:${phrase.word}`
+    const phraseKey = batchPhraseKey(phrase.type || currentItem.type, phrase.code, phrase.word)
     let resolved = false
     let resolverIndex = -1
     let reason = ''
@@ -368,7 +376,7 @@ export async function checkBatchConflictsWithWeight(
 
           // Mark as resolved (no conflict, 重码 is allowed)
           result.conflict.hasConflict = false
-          result.conflict.impact = `编码 "${currentItem.code}" 已被词条 "${changeEntry.item.oldWord}" 占用，将创建重码（建议权重: ${result.calculatedWeight || '未计算'}）`
+          result.conflict.impact = `编码 "${currentItem.code}" 已被词条 "${finalWord}" 占用，将创建重码（建议权重: ${result.calculatedWeight || '未计算'}）`
           result.conflict.suggestions = [
             {
               action: 'Resolved',

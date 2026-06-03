@@ -193,6 +193,54 @@ describe('Batch Conflict Detection', () => {
     })
   })
 
+  describe('Type-specific Change operations', () => {
+    it('should not satisfy a CSS Change with an old word from Phrase type', async () => {
+      await seedPhrases(testUserId, [
+        { word: '旧词', code: 'sbb', type: 'Phrase', weight: 100 },
+      ])
+
+      const items: ConflictCheckItem[] = [
+        {
+          id: '1',
+          action: 'Change',
+          oldWord: '旧词',
+          word: '新词',
+          code: 'sbb',
+          type: 'CSS',
+        },
+      ]
+
+      const { results } = await checkBatchConflicts(items)
+
+      expect(results[0].conflict.hasConflict).toBe(true)
+      expect(results[0].conflict.impact).toContain('不存在词')
+    })
+
+    it('should resolve a CSS Change against the CSS phrase, not the Phrase phrase with the same code', async () => {
+      await seedPhrases(testUserId, [
+        { word: '词组旧词', code: 'sbb', type: 'Phrase', weight: 100 },
+        { word: '声笔旧词', code: 'sbb', type: 'CSS', weight: 200 },
+      ])
+
+      const items: ConflictCheckItem[] = [
+        {
+          id: '1',
+          action: 'Change',
+          oldWord: '声笔旧词',
+          word: '声笔新词',
+          code: 'sbb',
+          type: 'CSS',
+        },
+      ]
+
+      const { results } = await checkBatchConflicts(items)
+
+      expect(results[0].conflict.hasConflict).toBe(false)
+      expect(results[0].conflict.currentPhrase?.word).toBe('声笔旧词')
+      expect(results[0].conflict.currentPhrase?.type).toBe('CSS')
+    })
+  })
+
   describe('Scenario 5: Duplicate items in batch', () => {
     it('should detect duplicate additions within batch', async () => {
       // No seed needed

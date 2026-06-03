@@ -143,6 +143,7 @@ export async function PATCH(
       word,
       oldWord,
       code,
+      type,
       phraseId: pr.phraseId || undefined,
       weight
     })

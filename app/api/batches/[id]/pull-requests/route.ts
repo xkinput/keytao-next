@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { conflictDetector } from '@/lib/services/conflictDetector'
-import { PullRequestType } from '@prisma/client'
+import { PullRequestType, PhraseType as PrismaPhraseType } from '@prisma/client'
 import { getDefaultWeight, type PhraseType } from '@/lib/constants/phraseTypes'
 import { calculateWeightForType } from '@/lib/services/batchConflictService'
 import { checkIsAdmin } from '@/lib/adminAuth'
@@ -136,7 +136,7 @@ export async function PUT(
                 if ((item.action === 'Change' || item.action === 'Delete')) {
                     const searchWord = item.action === 'Change' ? item.oldWord : item.word
                     const p = await tx.phrase.findFirst({
-                        where: { word: searchWord, code: item.code }
+                        where: { word: searchWord, code: item.code, type: (item.type as PrismaPhraseType | undefined) || undefined }
                     })
                     if (p) finalPhraseId = p.id
                 }
