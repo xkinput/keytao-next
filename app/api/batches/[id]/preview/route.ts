@@ -449,9 +449,29 @@ export async function GET(
                     case 'Change':
                         if (pr.oldWord && pr.word) {
                             const index = codePhrases.findIndex(p => p.word === pr.oldWord && p.code === pr.code && p.type === prType)
+                            const originalList = originalState.get(key) || []
+                            const originalPhrase = originalList.find(p => p.word === pr.oldWord && p.code === pr.code && p.type === prType)
+                            const finalWeight = weightMap.get(pr.id) ?? pr.weight ?? originalPhrase?.weight ?? codePhrases[index]?.weight ?? 0
                             if (index !== -1) {
-                                const finalWeight = weightMap.get(pr.id) ?? pr.weight ?? codePhrases[index].weight
                                 codePhrases[index] = { ...codePhrases[index], word: pr.word, type: prType, weight: finalWeight, remark: pr.remark || codePhrases[index].remark }
+                            } else {
+                                if (!originalPhrase) {
+                                    originalList.push({
+                                        word: pr.oldWord,
+                                        code: pr.code,
+                                        type: prType,
+                                        weight: finalWeight,
+                                        remark: pr.remark || undefined
+                                    })
+                                    originalState.set(key, originalList)
+                                }
+                                codePhrases.push({
+                                    word: pr.word,
+                                    code: pr.code,
+                                    type: prType,
+                                    weight: finalWeight,
+                                    remark: pr.remark || undefined
+                                })
                             }
                         }
                         break
@@ -464,6 +484,14 @@ export async function GET(
                 }
                 currentState.set(key, codePhrases)
             }
+
+            const prsByTypeCodePend = new Map<string, typeof batch.pullRequests>()
+            batch.pullRequests.forEach(pr => {
+                if (!pr.code || conflictMap.get(pr.id)) return
+                const key = stateKey(pr.type || 'Phrase', pr.code)
+                if (!prsByTypeCodePend.has(key)) prsByTypeCodePend.set(key, [])
+                prsByTypeCodePend.get(key)!.push(pr)
+            })
 
             // Group affected codes by type
             const typeCodeMapPend = new Map<string, Set<string>>()
@@ -481,28 +509,58 @@ export async function GET(
                 for (const code of affectedCodes) {
                     const beforeList = originalState.get(stateKey(phraseType, code)) || []
                     const afterList = currentState.get(stateKey(phraseType, code)) || []
-                    const afterWords = new Set(afterList.map(p => p.word))
-                    const beforeWords = new Set(beforeList.map(p => p.word))
+                    const prs = prsByTypeCodePend.get(stateKey(phraseType, code)) || []
 
-                    beforeList.forEach(p => {
-                        if (!afterWords.has(p.word)) {
-                            diffs.push({ type: 'remove', phrase: p })
-                            removedCount++
-                        } else {
-                            const newP = afterList.find(ap => ap.word === p.word)
-                            if (newP && (p.type !== newP.type || p.weight !== newP.weight || p.remark !== newP.remark)) {
-                                diffs.push({ type: 'modify', before: p, after: newP })
-                                modifiedCount++
-                            }
+                    for (const pr of prs) {
+                        switch (pr.action) {
+                            case 'Create':
+                                if (pr.word) {
+                                    const phrase = afterList.find(p => p.word === pr.word && p.code === code && p.type === phraseType) || {
+                                        word: pr.word,
+                                        code,
+                                        type: phraseType,
+                                        weight: weightMap.get(pr.id) ?? pr.weight ?? 0,
+                                        remark: pr.remark || undefined
+                                    }
+                                    diffs.push({ type: 'add', phrase })
+                                    addedCount++
+                                }
+                                break
+                            case 'Change':
+                                if (pr.oldWord && pr.word) {
+                                    const before = beforeList.find(p => p.word === pr.oldWord && p.code === code && p.type === phraseType) || {
+                                        word: pr.oldWord,
+                                        code,
+                                        type: phraseType,
+                                        weight: weightMap.get(pr.id) ?? pr.weight ?? 0,
+                                        remark: pr.remark || undefined
+                                    }
+                                    const after = afterList.find(p => p.word === pr.word && p.code === code && p.type === phraseType) || {
+                                        word: pr.word,
+                                        code,
+                                        type: phraseType,
+                                        weight: before.weight,
+                                        remark: pr.remark || before.remark
+                                    }
+                                    diffs.push({ type: 'modify', before, after })
+                                    modifiedCount++
+                                }
+                                break
+                            case 'Delete':
+                                if (pr.word) {
+                                    const phrase = beforeList.find(p => p.word === pr.word && p.code === code && p.type === phraseType) || {
+                                        word: pr.word,
+                                        code,
+                                        type: phraseType,
+                                        weight: pr.weight ?? 0,
+                                        remark: pr.remark || undefined
+                                    }
+                                    diffs.push({ type: 'remove', phrase })
+                                    removedCount++
+                                }
+                                break
                         }
-                    })
-
-                    afterList.forEach(p => {
-                        if (!beforeWords.has(p.word)) {
-                            diffs.push({ type: 'add', phrase: p })
-                            addedCount++
-                        }
-                    })
+                    }
                 }
 
                 if (diffs.length > 0) {
