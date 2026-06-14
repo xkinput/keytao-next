@@ -3,6 +3,7 @@ import { create } from 'zustand'
 type FeedbackType = 'alert' | 'confirm'
 
 interface FeedbackState {
+    id: number
     isOpen: boolean
     type: FeedbackType
     title?: string
@@ -25,17 +26,22 @@ interface UIStore {
         cancelLabel?: string
     ) => void
     closeFeedback: () => void
+    closeFeedbackIfCurrent: (id: number) => void
     setLoading: (loading: boolean) => void
 }
 
+let nextFeedbackId = 1
+
 export const useUIStore = create<UIStore>((set) => ({
     feedback: {
+        id: 0,
         isOpen: false,
         type: 'alert',
         message: ''
     },
     openAlert: (message, title = '提示') => set({
         feedback: {
+            id: nextFeedbackId++,
             isOpen: true,
             type: 'alert',
             message,
@@ -45,6 +51,7 @@ export const useUIStore = create<UIStore>((set) => ({
     }),
     openConfirm: (message, onConfirm, title = '确认', confirmLabel = '确定', cancelLabel = '取消') => set({
         feedback: {
+            id: nextFeedbackId++,
             isOpen: true,
             type: 'confirm',
             message,
@@ -57,6 +64,11 @@ export const useUIStore = create<UIStore>((set) => ({
     closeFeedback: () => set((state) => ({
         feedback: { ...state.feedback, isOpen: false }
     })),
+    closeFeedbackIfCurrent: (id) => set((state) => (
+        state.feedback.id === id
+            ? { feedback: { ...state.feedback, isOpen: false } }
+            : state
+    )),
     setLoading: (loading) => set((state) => ({
         feedback: { ...state.feedback, isLoading: loading }
     }))

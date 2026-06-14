@@ -5,8 +5,8 @@ import { useUIStore } from '@/lib/store/ui'
 import { useState } from 'react'
 
 export default function GlobalFeedback() {
-    const { feedback, closeFeedback, setLoading } = useUIStore()
-    const { isOpen, type, title, message, onConfirm, onCancel, confirmLabel, cancelLabel, isLoading } = feedback
+    const { feedback, closeFeedback, closeFeedbackIfCurrent, setLoading } = useUIStore()
+    const { id, isOpen, type, title, message, onConfirm, onCancel, confirmLabel, cancelLabel, isLoading } = feedback
     const [processing, setProcessing] = useState(false)
 
     const handleConfirm = async () => {
@@ -15,7 +15,7 @@ export default function GlobalFeedback() {
             setLoading(true)
             try {
                 await onConfirm()
-                closeFeedback()
+                closeFeedbackIfCurrent(id)
             } catch (error) {
                 // Keep modal open and show error
                 const err = error as Error
@@ -23,7 +23,7 @@ export default function GlobalFeedback() {
                 setLoading(false)
 
                 // Close confirm modal and show error alert
-                closeFeedback()
+                closeFeedbackIfCurrent(id)
 
                 // Wait for modal to close
                 setTimeout(() => {
