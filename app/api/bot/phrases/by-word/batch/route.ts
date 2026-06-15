@@ -8,8 +8,8 @@ import type {
   BotLookupPhrase,
 } from '@/lib/types/bot'
 
-const MAX_BATCH_SIZE = 100
-const MAX_WORD_LENGTH = 20
+const MAX_BATCH_SIZE = 500
+const MAX_WORD_LENGTH = 100
 
 /**
  * Bot API: Batch lookup codes by words

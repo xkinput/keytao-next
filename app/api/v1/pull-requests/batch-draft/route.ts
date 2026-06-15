@@ -25,9 +25,9 @@ interface UserBatchDeleteDraftRequest {
 }
 
 const API_DRAFT_DESCRIPTION_PREFIX = '个人 API 草稿批次'
-const MAX_DRAFT_ITEMS = 100
-const MAX_DELETE_ITEMS = 100
-const MAX_WORD_LENGTH = 20
+const MAX_DRAFT_ITEMS = 500
+const MAX_DELETE_ITEMS = 500
+const MAX_WORD_LENGTH = 100
 const MAX_CODE_LENGTH = 20
 const MAX_REMARK_LENGTH = 500
 
@@ -109,7 +109,7 @@ export async function POST(request: NextRequest) {
       const word = item.word.trim()
       const code = item.code.trim()
       if (!word || !code || word.length > MAX_WORD_LENGTH || code.length > MAX_CODE_LENGTH) {
-        throw new Error(`词条和编码必须为 1-${MAX_WORD_LENGTH} 个字符`)
+        throw new Error(`词条必须为 1-${MAX_WORD_LENGTH} 个字符，编码必须为 1-${MAX_CODE_LENGTH} 个字符`)
       }
       const oldWord = item.oldWord?.trim()
       if (action === 'Change' && (!oldWord || oldWord.length > MAX_WORD_LENGTH)) {

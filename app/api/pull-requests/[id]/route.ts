@@ -7,9 +7,9 @@ import { Prisma, PullRequestType } from '@prisma/client'
 import { checkIsAdmin } from '@/lib/adminAuth'
 import { isValidPhraseType } from '@/lib/constants/phraseTypes'
 
-const PUBLIC_BATCH_STATUSES = ['Submitted', 'Approved', 'Published']
 const ALLOWED_ACTIONS = ['Create', 'Change', 'Delete'] as const
-const MAX_TEXT_LENGTH = 20
+const MAX_WORD_LENGTH = 100
+const MAX_CODE_LENGTH = 20
 const MAX_REMARK_LENGTH = 500
 
 function parsePrId(id: string) {
@@ -29,7 +29,6 @@ export async function GET(
       return NextResponse.json({ error: '无效的 PR ID' }, { status: 400 })
     }
 
-    const session = await getSession()
     const pr = await prisma.pullRequest.findUnique({
       where: { id: prId },
       include: {
@@ -97,17 +96,6 @@ export async function GET(
       return NextResponse.json({ error: 'PR 不存在' }, { status: 404 })
     }
 
-    if (pr.batch && !PUBLIC_BATCH_STATUSES.includes(pr.batch.status)) {
-      if (!session) {
-        return NextResponse.json({ error: '无权限' }, { status: 403 })
-      }
-
-      const isAdmin = await checkIsAdmin(session.id)
-      if (pr.batch.creatorId !== session.id && pr.userId !== session.id && !isAdmin) {
-        return NextResponse.json({ error: '无权限' }, { status: 403 })
-      }
-    }
-
     return NextResponse.json({ pullRequest: pr })
   } catch (error) {
     console.error('Get PR error:', error)
@@ -170,7 +158,7 @@ export async function PATCH(
       return NextResponse.json({ error: '无效的操作类型' }, { status: 400 })
     }
 
-    if (!normalizedWord || !normalizedCode || normalizedWord.length > MAX_TEXT_LENGTH || normalizedCode.length > MAX_TEXT_LENGTH) {
+    if (!normalizedWord || !normalizedCode || normalizedWord.length > MAX_WORD_LENGTH || normalizedCode.length > MAX_CODE_LENGTH) {
       return NextResponse.json({ error: '词条或编码格式错误' }, { status: 400 })
     }
 
@@ -181,7 +169,7 @@ export async function PATCH(
       )
     }
 
-    if (normalizedOldWord !== undefined && normalizedOldWord.length > MAX_TEXT_LENGTH) {
+    if (normalizedOldWord !== undefined && normalizedOldWord.length > MAX_WORD_LENGTH) {
       return NextResponse.json({ error: '旧词过长' }, { status: 400 })
     }
 

@@ -8,7 +8,7 @@ import type {
   BotLookupPhrase,
 } from '@/lib/types/bot'
 
-const MAX_BATCH_SIZE = 100
+const MAX_BATCH_SIZE = 500
 const MAX_CODE_LENGTH = 20
 
 /**

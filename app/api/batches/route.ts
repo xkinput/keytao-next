@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { BatchStatus, Prisma } from '@prisma/client'
-import { checkIsAdmin } from '@/lib/adminAuth'
 
 // GET /api/batches - List batches
 export async function GET(request: NextRequest) {
@@ -17,18 +16,10 @@ export async function GET(request: NextRequest) {
     const search = searchParams.get('search')?.trim() || ''
 
     const session = await getSession()
-    const isAdmin = session ? await checkIsAdmin(session.id) : false
-    const publicStatuses: BatchStatus[] = ['Submitted', 'Approved', 'Published']
 
     const where: Prisma.BatchWhereInput = {}
     if (status && Object.values(BatchStatus).includes(status as BatchStatus)) {
-      const requestedStatus = status as BatchStatus
-      if (!onlyMine && !isAdmin && !publicStatuses.includes(requestedStatus)) {
-        return NextResponse.json({ error: '无权限查询该批次状态' }, { status: 403 })
-      }
-      where.status = requestedStatus
-    } else if (!onlyMine && !isAdmin) {
-      where.status = { in: publicStatuses }
+      where.status = status as BatchStatus
     }
     if (onlyMine && !session) {
       return NextResponse.json({ error: '未登录' }, { status: 401 })

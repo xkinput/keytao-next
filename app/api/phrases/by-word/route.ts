@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 
-const MAX_WORD_LENGTH = 20
+const MAX_WORD_LENGTH = 100
 
 // GET /api/phrases/by-word?word=xxx&page=1 - Get phrases by exact word match with pagination (public access)
 export async function GET(request: NextRequest) {

@@ -2,8 +2,6 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 
-const PUBLIC_BATCH_STATUSES = ['Submitted', 'Approved', 'Published'] as const
-
 // GET single issue with comments
 export async function GET(
   request: NextRequest,
@@ -43,9 +41,6 @@ export async function GET(
           orderBy: { createAt: 'asc' }
         },
         batches: {
-          where: {
-            status: { in: [...PUBLIC_BATCH_STATUSES] }
-          },
           select: {
             id: true,
             description: true,

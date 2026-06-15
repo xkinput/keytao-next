@@ -20,7 +20,7 @@ interface CommitBatchRequest {
 }
 
 const MAX_FILES_PER_COMMIT = 20;
-const MAX_FILE_CONTENT_LENGTH = 2_000_000;
+const MAX_FILE_CONTENT_LENGTH = 5_000_000;
 const FILE_NAME_PATTERN = /^[\w.-]+$/;
 
 export async function POST(request: NextRequest) {

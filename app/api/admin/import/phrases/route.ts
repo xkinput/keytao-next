@@ -13,7 +13,7 @@ interface ImportResult {
 }
 
 const MAX_IMPORT_LINE_LENGTH = 200
-const MAX_WORD_LENGTH = 20
+const MAX_WORD_LENGTH = 100
 
 export async function POST(request: NextRequest) {
   // 验证ROOT管理员权限

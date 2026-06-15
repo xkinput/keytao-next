@@ -10,7 +10,6 @@ export async function GET(
 ) {
   try {
     const { id } = await params
-    const session = await getSession()
     const batch = await prisma.batch.findUnique({
       where: { id },
       include: {
@@ -64,18 +63,6 @@ export async function GET(
 
     if (!batch) {
       return NextResponse.json({ error: '批次不存在' }, { status: 404 })
-    }
-
-    const publicStatuses = ['Submitted', 'Approved', 'Published']
-    if (!publicStatuses.includes(batch.status)) {
-      if (!session) {
-        return NextResponse.json({ error: '无权限' }, { status: 403 })
-      }
-
-      const isAdmin = await checkIsAdmin(session.id)
-      if (batch.creatorId !== session.id && !isAdmin) {
-        return NextResponse.json({ error: '无权限' }, { status: 403 })
-      }
     }
 
     // Calculate dynamic weights and conflicts for all PRs in batch

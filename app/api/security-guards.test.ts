@@ -74,6 +74,7 @@ vi.mock('@/lib/prisma', () => ({
       findUnique: vi.fn(),
       create: vi.fn(),
       findMany: vi.fn(),
+      count: vi.fn(),
       update: vi.fn(),
       delete: vi.fn(),
       deleteMany: vi.fn(),
@@ -152,6 +153,7 @@ beforeEach(() => {
   mockPrisma.batch.findMany.mockResolvedValue([])
   mockPrisma.pullRequest.create.mockResolvedValue({ id: 1 })
   mockPrisma.pullRequest.findMany.mockResolvedValue([])
+  mockPrisma.pullRequest.count.mockResolvedValue(0)
   mockPrisma.issue.create.mockResolvedValue({ id: 1 })
   mockPrisma.issue.findMany.mockResolvedValue([])
   mockPrisma.issue.count.mockResolvedValue(0)
@@ -240,16 +242,16 @@ describe('API abuse guards', () => {
     expect(fetch).not.toHaveBeenCalled()
   })
 
-  it('protects draft batch previews from non-owners', async () => {
+  it('keeps draft batch previews publicly readable', async () => {
     mockPrisma.batch.findUnique.mockResolvedValue({ id: 'batch-1', creatorId: 2, status: 'Draft', pullRequests: [] })
     const { GET } = await import('./batches/[id]/preview/route')
 
     const res = await GET(new NextRequest('http://localhost/api/batches/batch-1/preview'), { params: Promise.resolve({ id: 'batch-1' }) })
 
-    expect(res.status).toBe(403)
+    expect(res.status).toBe(200)
   })
 
-  it('protects draft batch details from public reads', async () => {
+  it('keeps draft batch details publicly readable', async () => {
     mockGetSession.mockResolvedValue(null)
     mockPrisma.batch.findUnique.mockResolvedValue({
       id: 'batch-1',
@@ -261,11 +263,10 @@ describe('API abuse guards', () => {
 
     const res = await GET(new NextRequest('http://localhost/api/batches/batch-1'), { params: Promise.resolve({ id: 'batch-1' }) })
 
-    expect(res.status).toBe(403)
-    expect(mockCheckBatchConflictsWithWeight).not.toHaveBeenCalled()
+    expect(res.status).toBe(200)
   })
 
-  it('filters public batch list to public statuses', async () => {
+  it('does not hide draft or rejected batches from the public list', async () => {
     mockPrisma.batch.findMany.mockResolvedValue([])
     mockPrisma.batch.count.mockResolvedValue(0)
     const { GET } = await import('./batches/route')
@@ -274,13 +275,11 @@ describe('API abuse guards', () => {
 
     expect(res.status).toBe(200)
     expect(mockPrisma.batch.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: expect.objectContaining({
-        status: { in: ['Submitted', 'Approved', 'Published'] },
-      }),
+      where: { pullRequests: { some: {} } },
     }))
   })
 
-  it('protects draft pull request details and lists by batch', async () => {
+  it('keeps draft pull request details and batch lists publicly readable', async () => {
     mockGetSession.mockResolvedValue(null)
     mockPrisma.pullRequest.findUnique.mockResolvedValue({
       id: 1,
@@ -290,15 +289,15 @@ describe('API abuse guards', () => {
     const prDetail = await import('./pull-requests/[id]/route')
 
     const detailRes = await prDetail.GET(new NextRequest('http://localhost/api/pull-requests/1'), { params: Promise.resolve({ id: '1' }) })
-    expect(detailRes.status).toBe(403)
+    expect(detailRes.status).toBe(200)
 
     mockGetSession.mockResolvedValue({ id: 1, name: 'rea' })
     mockPrisma.batch.findUnique.mockResolvedValue({ id: 'batch-1', creatorId: 2, status: 'Draft' })
     const prList = await import('./pull-requests/route')
 
     const listRes = await prList.GET(new NextRequest('http://localhost/api/pull-requests?batchId=batch-1'))
-    expect(listRes.status).toBe(403)
-    expect(mockPrisma.pullRequest.findMany).not.toHaveBeenCalled()
+    expect(listRes.status).toBe(200)
+    expect(mockPrisma.pullRequest.findMany).toHaveBeenCalled()
   })
 
   it('requires admin for sync task history', async () => {
@@ -352,9 +351,8 @@ describe('API abuse guards', () => {
     const byCode = await import('./phrases/by-code/route')
     const byWord = await import('./phrases/by-word/route')
 
-    const longValue = 'x'.repeat(21)
-    const byCodeRes = await byCode.GET(new NextRequest(`http://localhost/api/phrases/by-code?code=${longValue}`))
-    const byWordRes = await byWord.GET(new NextRequest(`http://localhost/api/phrases/by-word?word=${longValue}`))
+    const byCodeRes = await byCode.GET(new NextRequest(`http://localhost/api/phrases/by-code?code=${'x'.repeat(21)}`))
+    const byWordRes = await byWord.GET(new NextRequest(`http://localhost/api/phrases/by-word?word=${'x'.repeat(101)}`))
 
     expect(byCodeRes.status).toBe(400)
     expect(byWordRes.status).toBe(400)
@@ -481,7 +479,7 @@ describe('API abuse guards', () => {
 
   it('rejects oversized conflict-check batches', async () => {
     const { POST } = await import('./pull-requests/check-conflicts-batch/route')
-    const items = Array.from({ length: 101 }, () => draftItem())
+    const items = Array.from({ length: 501 }, () => draftItem())
 
     const res = await POST(jsonRequest('http://localhost/api/pull-requests/check-conflicts-batch', { items }))
 
@@ -491,7 +489,7 @@ describe('API abuse guards', () => {
 
   it('rejects oversized personal API draft batches', async () => {
     const { POST } = await import('./v1/pull-requests/batch-draft/route')
-    const items = Array.from({ length: 101 }, () => draftItem())
+    const items = Array.from({ length: 501 }, () => draftItem())
 
     const res = await POST(jsonRequest('http://localhost/api/v1/pull-requests/batch-draft', { items }))
 

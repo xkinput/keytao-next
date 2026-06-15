@@ -4,12 +4,12 @@ import { prisma } from '@/lib/prisma'
 import { conflictDetector } from '@/lib/services/conflictDetector'
 import { Prisma, PullRequestStatus, PullRequestType } from '@prisma/client'
 import { isValidPhraseType } from '@/lib/constants/phraseTypes'
-import { checkIsAdmin } from '@/lib/adminAuth'
 
 // POST /api/pull-requests - Create a single PR
 export async function POST(request: NextRequest) {
   const allowedActions = ['Create', 'Change', 'Delete'] as const
-  const maxTextLength = 20
+  const maxWordLength = 100
+  const maxCodeLength = 20
 
   try {
     const session = await getSession()
@@ -48,11 +48,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '无效的操作类型' }, { status: 400 })
     }
 
-    if (typeof word !== 'string' || typeof code !== 'string' || word.trim().length > maxTextLength || code.trim().length > maxTextLength) {
+    if (typeof word !== 'string' || typeof code !== 'string' || word.trim().length > maxWordLength || code.trim().length > maxCodeLength) {
       return NextResponse.json({ error: '词条或编码过长' }, { status: 400 })
     }
 
-    if (oldWord !== undefined && (typeof oldWord !== 'string' || oldWord.trim().length > maxTextLength)) {
+    if (oldWord !== undefined && (typeof oldWord !== 'string' || oldWord.trim().length > maxWordLength)) {
       return NextResponse.json({ error: '旧词过长' }, { status: 400 })
     }
 
@@ -200,40 +200,13 @@ export async function GET(request: NextRequest) {
     const pageSize = Number.isFinite(rawPageSize) ? Math.min(100, Math.max(1, rawPageSize)) : 10
     const status = searchParams.get('status')
     const batchId = searchParams.get('batchId')
-    const session = await getSession()
-    const isAdmin = session ? await checkIsAdmin(session.id) : false
-    const publicBatchStatuses = ['Submitted', 'Approved', 'Published'] as const
 
     const where: Prisma.PullRequestWhereInput = {}
     if (status && Object.values(PullRequestStatus).includes(status as PullRequestStatus)) {
       where.status = status as PullRequestStatus
     }
     if (batchId) {
-      const batch = await prisma.batch.findUnique({
-        where: { id: batchId },
-        select: { id: true, creatorId: true, status: true },
-      })
-
-      if (!batch) {
-        return NextResponse.json({ error: '批次不存在' }, { status: 404 })
-      }
-
-      if (!publicBatchStatuses.includes(batch.status as typeof publicBatchStatuses[number])) {
-        if (!session) {
-          return NextResponse.json({ error: '无权限' }, { status: 403 })
-        }
-
-        if (batch.creatorId !== session.id && !isAdmin) {
-          return NextResponse.json({ error: '无权限' }, { status: 403 })
-        }
-      }
-
       where.batchId = batchId
-    } else if (!isAdmin) {
-      where.OR = [
-        { batch: { status: { in: [...publicBatchStatuses] } } },
-        ...(session ? [{ userId: session.id }] : []),
-      ]
     }
 
     const [prs, total] = await Promise.all([

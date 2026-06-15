@@ -7,8 +7,8 @@ import { PullRequestType } from '@prisma/client'
 import { PhraseType } from '@/lib/constants/phraseTypes'
 import type { BotCreatePRRequest, BotCreatePRResponse, BotConflictInfo, BotWarningInfo, BotDeleteNoteInfo } from '@/lib/types/bot'
 
-const MAX_ITEMS = 100
-const MAX_WORD_LENGTH = 20
+const MAX_ITEMS = 500
+const MAX_WORD_LENGTH = 100
 const MAX_CODE_LENGTH = 20
 const MAX_REMARK_LENGTH = 500
 
