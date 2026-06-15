@@ -92,7 +92,7 @@ export default function DeveloperPage() {
       <div className="max-w-4xl mx-auto">
         <div className="mb-6">
           <h1 className="text-3xl font-bold">开发者 API</h1>
-          <p className="text-default-500 mt-2">通过 API Key 调用词库查询接口，频率限制：2 次/秒</p>
+          <p className="text-default-500 mt-2">通过 API Key 调用词库查询接口，频率限制：1 次/秒</p>
         </div>
 
         <div className="grid gap-6">
@@ -244,7 +244,7 @@ export default function DeveloperPage() {
                 path="/api/v1/phrases/by-code/batch"
                 description="批量按编码精确查询词条，跨全部词库类型"
                 params={[
-                  { name: 'codes', desc: 'JSON body: 编码数组，最多 100 个' },
+                  { name: 'codes', desc: 'JSON body: 编码数组，最多 500 个' },
                 ]}
                 example={`curl -X POST -H "Content-Type: application/json" -H "X-API-Key: kt_xxx" \\
   -d '{"codes":["kls","kph","ssf"]}' \\
@@ -258,7 +258,7 @@ export default function DeveloperPage() {
                 path="/api/v1/phrases/by-word/batch"
                 description="批量按词精确查询编码，跨全部词库类型"
                 params={[
-                  { name: 'words', desc: 'JSON body: 词条数组，最多 100 个' },
+                  { name: 'words', desc: 'JSON body: 词条数组，最多 500 个' },
                 ]}
                 example={`curl -X POST -H "Content-Type: application/json" -H "X-API-Key: kt_xxx" \\
   -d '{"words":["北京","般若"]}' \\
@@ -300,7 +300,7 @@ export default function DeveloperPage() {
               <div>
                 <h3 className="font-semibold mb-2">频率限制</h3>
                 <p className="text-sm text-default-500">
-                  每个 API Key 限制 <strong>2 次/秒</strong>。超出限制时返回 HTTP 429，
+                  每个 API Key 限制 <strong>1 次/秒</strong>。超出限制时返回 HTTP 429，
                   响应头 <code className="bg-default-100 px-1 rounded">Retry-After</code> 告知等待秒数。
                 </p>
               </div>
