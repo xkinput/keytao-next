@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { verifyBotToken } from '@/lib/botAuth'
 import { prisma } from '@/lib/prisma'
+import { requireVerifiedBotUser } from '@/lib/botUserAuth'
 import { checkBatchConflictsWithWeight } from '@/lib/services/batchConflictService'
 import { buildBatchSubmitWarnings } from '@/lib/services/batchSubmitWarnings'
 import { PhraseType } from '@/lib/constants/phraseTypes'
@@ -18,21 +18,13 @@ function getErrorMessage(error: unknown): string {
 /**
  * Bot API: Submit batch for review
  * POST /api/bot/batches/:id/submit
- * Requires Bot token authentication
+ * Requires Bot token plus a matching user JWT or API key
  */
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    // Verify bot token
-    if (!await verifyBotToken()) {
-      return NextResponse.json(
-        { success: false, message: '未授权' },
-        { status: 401 }
-      )
-    }
-
     const { id } = await params
     const body = await request.json()
     const { platform, platformId, confirmed = false } = body
@@ -45,41 +37,14 @@ export async function POST(
       )
     }
 
-    // Find user by platform
-    const platformField = platform === 'qq' ? 'qqId' : platform === 'telegram' ? 'telegramId' : null
-    if (!platformField) {
+    const auth = await requireVerifiedBotUser(platform, platformId)
+    if (!auth.authorized) {
       return NextResponse.json(
-        { success: false, message: '不支持的平台' },
-        { status: 400 }
+        { success: false, message: auth.message },
+        { status: auth.status }
       )
     }
-
-    let user
-    try {
-      user = await prisma.user.findFirst({
-        where: {
-          [platformField]: platformId
-        }
-      })
-    } catch (prismaError: unknown) {
-      console.error('[Bot API] Prisma error:', prismaError)
-
-      if (getErrorCode(prismaError) === 'P2022') {
-        return NextResponse.json(
-          { success: false, message: '系统配置错误，请联系管理员更新数据库' },
-          { status: 500 }
-        )
-      }
-
-      throw prismaError
-    }
-
-    if (!user) {
-      return NextResponse.json(
-        { success: false, message: '未找到绑定账号。\n\n请先使用 /bind 命令绑定你的平台账号到键道加词平台～' },
-        { status: 404 }
-      )
-    }
+    const user = auth.user
 
     // Get batch
     const batch = await prisma.batch.findUnique({

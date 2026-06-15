@@ -2,11 +2,14 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { conflictDetector } from '@/lib/services/conflictDetector'
-import { PullRequestType } from '@prisma/client'
-import { getDefaultWeight, isValidPhraseType, type PhraseType } from '@/lib/constants/phraseTypes'
+import { Prisma, PullRequestStatus, PullRequestType } from '@prisma/client'
+import { isValidPhraseType } from '@/lib/constants/phraseTypes'
 
 // POST /api/pull-requests - Create a single PR
 export async function POST(request: NextRequest) {
+  const allowedActions = ['Create', 'Change', 'Delete'] as const
+  const maxTextLength = 20
+
   try {
     const session = await getSession()
     if (!session) {
@@ -38,6 +41,26 @@ export async function POST(request: NextRequest) {
         { error: '修改操作需要指定旧词' },
         { status: 400 }
       )
+    }
+
+    if (!allowedActions.includes(action)) {
+      return NextResponse.json({ error: '无效的操作类型' }, { status: 400 })
+    }
+
+    if (typeof word !== 'string' || typeof code !== 'string' || word.trim().length > maxTextLength || code.trim().length > maxTextLength) {
+      return NextResponse.json({ error: '词条或编码过长' }, { status: 400 })
+    }
+
+    if (oldWord !== undefined && (typeof oldWord !== 'string' || oldWord.trim().length > maxTextLength)) {
+      return NextResponse.json({ error: '旧词过长' }, { status: 400 })
+    }
+
+    if (type && !isValidPhraseType(type)) {
+      return NextResponse.json({ error: '无效的词库类型' }, { status: 400 })
+    }
+
+    if (remark !== undefined && typeof remark === 'string' && remark.length > 500) {
+      return NextResponse.json({ error: '备注过长' }, { status: 400 })
     }
 
     // Check for conflicts
@@ -79,10 +102,27 @@ export async function POST(request: NextRequest) {
 
     // If no batchId provided, create a new batch
     let finalBatchId = batchId
-    if (!finalBatchId) {
+    if (finalBatchId) {
+      const batch = await prisma.batch.findUnique({
+        where: { id: finalBatchId },
+        select: { id: true, creatorId: true, status: true }
+      })
+
+      if (!batch) {
+        return NextResponse.json({ error: '批次不存在' }, { status: 404 })
+      }
+
+      if (batch.creatorId !== session.id) {
+        return NextResponse.json({ error: '无权限操作此批次' }, { status: 403 })
+      }
+
+      if (batch.status !== 'Draft' && batch.status !== 'Rejected') {
+        return NextResponse.json({ error: '只能编辑草稿或已拒绝状态的批次' }, { status: 400 })
+      }
+    } else {
       const batch = await prisma.batch.create({
         data: {
-          description: `修改词条: ${word}`,
+          description: `修改词条: ${word.trim()}`,
           creatorId: session.id,
           status: 'Draft'
         }
@@ -101,9 +141,9 @@ export async function POST(request: NextRequest) {
     // Create PR
     const pr = await prisma.pullRequest.create({
       data: {
-        word,
-        oldWord: action === 'Change' ? oldWord : undefined,
-        code,
+        word: word.trim(),
+        oldWord: action === 'Change' ? oldWord.trim() : undefined,
+        code: code.trim(),
         action: action as PullRequestType,
         phraseId: finalPhraseId || undefined,
         weight: finalWeight || undefined,
@@ -113,7 +153,7 @@ export async function POST(request: NextRequest) {
         batchId: finalBatchId,
         hasConflict: conflict.hasConflict,
         conflictReason: conflict.hasConflict ? conflict.impact : undefined
-      } as any,
+      },
       include: {
         phrase: true,
         batch: true,
@@ -153,14 +193,14 @@ export async function POST(request: NextRequest) {
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams
-    const page = parseInt(searchParams.get('page') || '1')
-    const pageSize = parseInt(searchParams.get('pageSize') || '10')
+    const page = Math.min(100, Math.max(1, parseInt(searchParams.get('page') || '1')))
+    const pageSize = Math.min(100, Math.max(1, parseInt(searchParams.get('pageSize') || '10')))
     const status = searchParams.get('status')
     const batchId = searchParams.get('batchId')
 
-    const where: Record<string, any> = {}
-    if (status) {
-      where.status = status
+    const where: Prisma.PullRequestWhereInput = {}
+    if (status && Object.values(PullRequestStatus).includes(status as PullRequestStatus)) {
+      where.status = status as PullRequestStatus
     }
     if (batchId) {
       where.batchId = batchId

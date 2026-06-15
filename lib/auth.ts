@@ -1,7 +1,12 @@
 import { SignJWT, jwtVerify } from 'jose'
 import { headers } from 'next/headers'
 
-const secret = new TextEncoder().encode(process.env.JWT_SECRET || 'your-secret-key')
+const jwtSecret = process.env.JWT_SECRET
+
+if (process.env.NODE_ENV === 'production' && !jwtSecret) {
+  throw new Error('JWT_SECRET is required in production')
+}
+const secret = new TextEncoder().encode(jwtSecret || 'your-secret-key')
 
 export interface JWTPayload {
   id: number

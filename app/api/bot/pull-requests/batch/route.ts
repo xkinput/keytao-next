@@ -1,31 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { verifyBotToken } from '@/lib/botAuth'
 import { prisma } from '@/lib/prisma'
-import { isValidPlatform, resolveUserByPlatform } from '@/lib/botUserResolver'
+import { requireVerifiedBotUser } from '@/lib/botUserAuth'
 import { checkBatchConflictsWithWeight, recheckBatchConflicts } from '@/lib/services/batchConflictService'
 import { buildDependencies } from '@/lib/services/batchDependencyService'
 import { PullRequestType } from '@prisma/client'
 import { PhraseType } from '@/lib/constants/phraseTypes'
 import type { BotCreatePRRequest, BotCreatePRResponse, BotConflictInfo, BotWarningInfo, BotDeleteNoteInfo } from '@/lib/types/bot'
 
+const MAX_ITEMS = 100
+const MAX_WORD_LENGTH = 20
+const MAX_CODE_LENGTH = 20
+const MAX_REMARK_LENGTH = 500
+
 /**
  * Bot API: Create PRs in batch
  * POST /api/bot/pull-requests/batch
- * Requires Bot token authentication
+ * Requires Bot token plus a matching user JWT or API key
  */
 export async function POST(request: NextRequest) {
   try {
-    // Verify bot token
-    if (!await verifyBotToken()) {
-      return NextResponse.json<BotCreatePRResponse>(
-        {
-          success: false,
-          message: '未授权'
-        },
-        { status: 401 }
-      )
-    }
-
     const body: BotCreatePRRequest = await request.json()
     const { platform, platformId, items, confirmed, batchId } = body
 
@@ -49,28 +42,27 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    if (!isValidPlatform(platform)) {
+    if (items.length > MAX_ITEMS) {
       return NextResponse.json<BotCreatePRResponse>(
         {
           success: false,
-          message: '不支持的平台'
+          message: `一次最多创建 ${MAX_ITEMS} 个修改提议`
         },
         { status: 400 }
       )
     }
 
-    // Find user by platform ID
-    const user = await resolveUserByPlatform(platform, platformId)
-
-    if (!user) {
+    const auth = await requireVerifiedBotUser(platform, platformId)
+    if (!auth.authorized) {
       return NextResponse.json<BotCreatePRResponse>(
         {
           success: false,
-          message: '未找到账号'
+          message: auth.message
         },
-        { status: 404 }
+        { status: auth.status }
       )
     }
+    const user = auth.user
 
     // Validate all items
     const validationItems = items.map((item, idx) => ({
@@ -92,6 +84,30 @@ export async function POST(request: NextRequest) {
             success: false,
             message: `项目 #${i + 1}: 缺少必要字段（word/code/action）`
           },
+          { status: 400 }
+        )
+      }
+      if (!['Create', 'Change', 'Delete'].includes(item.action)) {
+        return NextResponse.json<BotCreatePRResponse>(
+          { success: false, message: `项目 #${i + 1}: 不支持的操作类型` },
+          { status: 400 }
+        )
+      }
+      if (item.word.length > MAX_WORD_LENGTH || item.code.length > MAX_CODE_LENGTH) {
+        return NextResponse.json<BotCreatePRResponse>(
+          { success: false, message: `项目 #${i + 1}: 词条或编码过长` },
+          { status: 400 }
+        )
+      }
+      if (item.oldWord && item.oldWord.length > MAX_WORD_LENGTH) {
+        return NextResponse.json<BotCreatePRResponse>(
+          { success: false, message: `项目 #${i + 1}: 旧词过长` },
+          { status: 400 }
+        )
+      }
+      if (item.remark && item.remark.length > MAX_REMARK_LENGTH) {
+        return NextResponse.json<BotCreatePRResponse>(
+          { success: false, message: `项目 #${i + 1}: 备注过长` },
           { status: 400 }
         )
       }

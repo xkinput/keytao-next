@@ -12,24 +12,51 @@ function botHeaders(): HeadersInit {
 }
 
 export async function POST(req: NextRequest) {
-  const body = await req.json()
   const session = await getSession()
-  const enrichedBody = session ? { ...body, user_id: String(session.id) } : body
+  if (!session) {
+    return NextResponse.json({ error: '未登录' }, { status: 401 })
+  }
+
+  const body = await req.json().catch(() => null)
+  if (!body || typeof body !== 'object') {
+    return NextResponse.json({ error: '请求格式错误' }, { status: 400 })
+  }
+
+  const sessionId = typeof body.session_id === 'string' ? body.session_id.trim() : ''
+  const message = typeof body.message === 'string' ? body.message.trim() : ''
+  if (!sessionId || !message) {
+    return NextResponse.json({ error: '缺少必需参数' }, { status: 400 })
+  }
+
   const res = await fetch(`${BOT_API_URL}/api/chat`, {
     method: 'POST',
     headers: botHeaders(),
-    body: JSON.stringify(enrichedBody),
+    body: JSON.stringify({ message, session_id: sessionId, user_id: String(session.id) }),
   })
   const data = await res.json()
   return NextResponse.json(data, { status: res.status })
 }
 
 export async function DELETE(req: NextRequest) {
-  const body = await req.json()
+  const session = await getSession()
+  if (!session) {
+    return NextResponse.json({ error: '未登录' }, { status: 401 })
+  }
+
+  const body = await req.json().catch(() => null)
+  if (!body || typeof body !== 'object') {
+    return NextResponse.json({ error: '请求格式错误' }, { status: 400 })
+  }
+
+  const sessionId = typeof body.session_id === 'string' ? body.session_id.trim() : ''
+  if (!sessionId) {
+    return NextResponse.json({ error: '缺少必需参数' }, { status: 400 })
+  }
+
   const res = await fetch(`${BOT_API_URL}/api/chat/history`, {
     method: 'DELETE',
     headers: botHeaders(),
-    body: JSON.stringify(body),
+    body: JSON.stringify({ session_id: sessionId, user_id: String(session.id) }),
   })
   const data = await res.json()
   return NextResponse.json(data, { status: res.status })

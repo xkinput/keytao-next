@@ -6,6 +6,17 @@ import { buildDependencies } from '@/lib/services/batchDependencyService'
 import { PullRequestType } from '@prisma/client'
 import { PhraseType } from '@/lib/constants/phraseTypes'
 
+type BatchPullRequestItem = {
+  action: PullRequestType
+  word: string
+  oldWord?: string
+  code: string
+  type?: PhraseType
+  weight?: number
+  phraseId?: number
+  remark?: string
+}
+
 // POST /api/pull-requests/batch - Create multiple PRs in a batch
 export async function POST(request: NextRequest) {
   try {
@@ -28,7 +39,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Validate all changes using unified conflict detection
-    const validationItems = prItems.map((change: any, idx: number) => ({
+    const validationItems = (prItems as BatchPullRequestItem[]).map((change, idx) => ({
       id: idx.toString(),
       action: change.action as 'Create' | 'Change' | 'Delete',
       word: change.word || '',
@@ -70,6 +81,9 @@ export async function POST(request: NextRequest) {
         if (batch.creatorId !== session.id) {
           throw new Error('无权限')
         }
+        if (batch.status !== 'Draft' && batch.status !== 'Rejected') {
+          throw new Error('只能编辑草稿或已拒绝状态的批次')
+        }
       } else {
         batch = await tx.batch.create({
           data: {
@@ -85,7 +99,7 @@ export async function POST(request: NextRequest) {
 
       // Create all PRs
       const prs = await Promise.all(
-        prItems.map((change: any) =>
+        (prItems as BatchPullRequestItem[]).map((change) =>
           tx.pullRequest.create({
             data: {
               word: change.word,

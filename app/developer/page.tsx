@@ -240,6 +240,50 @@ export default function DeveloperPage() {
               <Divider />
 
               <ApiDoc
+                method="POST"
+                path="/api/v1/phrases/by-code/batch"
+                description="批量按编码精确查询词条，跨全部词库类型"
+                params={[
+                  { name: 'codes', desc: 'JSON body: 编码数组，最多 100 个' },
+                ]}
+                example={`curl -X POST -H "Content-Type: application/json" -H "X-API-Key: kt_xxx" \\
+  -d '{"codes":["kls","kph","ssf"]}' \\
+  "/api/v1/phrases/by-code/batch"`}
+              />
+
+              <Divider />
+
+              <ApiDoc
+                method="POST"
+                path="/api/v1/phrases/by-word/batch"
+                description="批量按词精确查询编码，跨全部词库类型"
+                params={[
+                  { name: 'words', desc: 'JSON body: 词条数组，最多 100 个' },
+                ]}
+                example={`curl -X POST -H "Content-Type: application/json" -H "X-API-Key: kt_xxx" \\
+  -d '{"words":["北京","般若"]}' \\
+  "/api/v1/phrases/by-word/batch"`}
+              />
+
+              <Divider />
+
+              <ApiDoc
+                method="POST / DELETE"
+                path="/api/v1/pull-requests/batch-draft"
+                description="维护当前 API Key 所属用户的个人 API 草稿批次"
+                params={[
+                  { name: 'items', desc: 'POST JSON body: 草稿 PR 条目数组' },
+                  { name: 'batchId', desc: 'POST JSON body: 可选，追加到指定草稿批次' },
+                  { name: 'ids', desc: 'DELETE JSON body: 要删除的草稿 PR ID 数组' },
+                ]}
+                example={`curl -X POST -H "Content-Type: application/json" -H "X-API-Key: kt_xxx" \\
+  -d '{"items":[{"action":"Create","word":"示例词","code":"ulci","type":"Phrase","weight":100}]}' \\
+  "/api/v1/pull-requests/batch-draft"`}
+              />
+
+              <Divider />
+
+              <ApiDoc
                 method="GET"
                 path="/api/v1/infer"
                 description="推断词条编码、推荐可用码并返回冲突信息"

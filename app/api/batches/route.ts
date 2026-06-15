@@ -1,22 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
+import { BatchStatus, Prisma } from '@prisma/client'
 
 // GET /api/batches - List batches
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams
     const status = searchParams.get('status')
-    const page = parseInt(searchParams.get('page') || '1')
-    const pageSize = parseInt(searchParams.get('pageSize') || '10')
+    const page = Math.min(100, Math.max(1, parseInt(searchParams.get('page') || '1')))
+    const pageSize = Math.min(100, Math.max(1, parseInt(searchParams.get('pageSize') || '10')))
     const onlyMine = searchParams.get('onlyMine') === 'true'
     const search = searchParams.get('search')
 
     const session = await getSession()
 
-    const where: any = {}
-    if (status) {
-      where.status = status
+    const where: Prisma.BatchWhereInput = {}
+    if (status && Object.values(BatchStatus).includes(status as BatchStatus)) {
+      where.status = status as BatchStatus
     }
     if (onlyMine && session) {
       where.creatorId = session.id

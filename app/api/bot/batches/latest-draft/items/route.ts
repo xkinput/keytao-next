@@ -1,20 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { verifyBotToken } from '@/lib/botAuth'
 import { prisma } from '@/lib/prisma'
-import { isValidPlatform, resolveUserByPlatform } from '@/lib/botUserResolver'
+import { requireVerifiedBotUser } from '@/lib/botUserAuth'
 import type { PhraseType } from '@/lib/constants/phraseTypes'
 
 /**
  * Bot API: List all PR items in the user's latest draft batch
  * GET /api/bot/batches/latest-draft/items
- * Requires Bot token authentication
+ * Requires Bot token plus a matching user JWT or API key
  */
 export async function GET(request: NextRequest) {
   try {
-    if (!await verifyBotToken()) {
-      return NextResponse.json({ success: false, message: '未授权' }, { status: 401 })
-    }
-
     const searchParams = request.nextUrl.searchParams
     const platform = searchParams.get('platform') as 'qq' | 'telegram' | null
     const platformId = searchParams.get('platformId')
@@ -23,18 +18,11 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ success: false, message: '缺少必需参数' }, { status: 400 })
     }
 
-    if (!isValidPlatform(platform)) {
-      return NextResponse.json({ success: false, message: '不支持的平台' }, { status: 400 })
+    const auth = await requireVerifiedBotUser(platform, platformId)
+    if (!auth.authorized) {
+      return NextResponse.json({ success: false, message: auth.message }, { status: auth.status })
     }
-
-    const user = await resolveUserByPlatform(platform, platformId)
-
-    if (!user) {
-      return NextResponse.json(
-        { success: false, message: '未找到账号' },
-        { status: 404 }
-      )
-    }
+    const user = auth.user
 
     const batch = await prisma.batch.findFirst({
       where: {
@@ -120,13 +108,10 @@ export async function GET(request: NextRequest) {
  * Bot API: Add a phrase to the user's latest draft batch (create if not exists)
  * POST /api/bot/batches/latest-draft/items
  * Body: { platform, platformId, word, code, type?, weight?, remark? }
+ * Requires Bot token plus a matching user JWT or API key
  */
 export async function POST(request: NextRequest) {
   try {
-    if (!await verifyBotToken()) {
-      return NextResponse.json({ success: false, message: '未授权' }, { status: 401 })
-    }
-
     const body = await request.json()
     const { platform, platformId, word, code, type = 'Phrase', weight, remark } = body
     const parsedWeight = weight === undefined || weight === null || weight === ''
@@ -137,22 +122,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, message: '缺少必需参数: platform, platformId, word, code' }, { status: 400 })
     }
 
-    if (!isValidPlatform(platform)) {
-      return NextResponse.json({ success: false, message: '不支持的平台' }, { status: 400 })
-    }
-
     if (parsedWeight !== undefined && (!Number.isInteger(parsedWeight) || parsedWeight < 0)) {
       return NextResponse.json({ success: false, message: '权重必须是非负整数' }, { status: 400 })
     }
 
-    const user = await resolveUserByPlatform(platform, platformId)
-
-    if (!user) {
-      return NextResponse.json(
-        { success: false, message: '未找到账号' },
-        { status: 404 }
-      )
+    const auth = await requireVerifiedBotUser(platform, platformId)
+    if (!auth.authorized) {
+      return NextResponse.json({ success: false, message: auth.message }, { status: auth.status })
     }
+    const user = auth.user
 
     // Find or create draft batch
     let batch = await prisma.batch.findFirst({

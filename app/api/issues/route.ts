@@ -1,15 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
+import { Prisma } from '@prisma/client'
 
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams
-    const page = parseInt(searchParams.get('page') || '1')
-    const pageSize = parseInt(searchParams.get('pageSize') || '10')
-    const status = searchParams.get('status')
+    const page = Math.min(100, Math.max(1, parseInt(searchParams.get('page') || '1')))
+    const pageSize = Math.min(100, Math.max(1, parseInt(searchParams.get('pageSize') || '10')))
+    const statusParam = searchParams.get('status')
 
-    const where = status ? { status: status as any } : {}
+    const where: Prisma.IssueWhereInput = {}
+    if (statusParam === 'true' || statusParam === 'false') {
+      where.status = statusParam === 'true'
+    }
 
     const [issues, total] = await Promise.all([
       prisma.issue.findMany({
