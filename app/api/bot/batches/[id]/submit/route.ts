@@ -18,7 +18,7 @@ function getErrorMessage(error: unknown): string {
 /**
  * Bot API: Submit batch for review
  * POST /api/bot/batches/:id/submit
- * Requires Bot token plus a matching user JWT or API key
+ * Requires a valid Bot token and a bound platform user
  */
 export async function POST(
   request: NextRequest,
@@ -28,14 +28,6 @@ export async function POST(
     const { id } = await params
     const body = await request.json()
     const { platform, platformId, confirmed = false } = body
-
-    // Validate parameters
-    if (!platform || !platformId) {
-      return NextResponse.json(
-        { success: false, message: '缺少必需参数' },
-        { status: 400 }
-      )
-    }
 
     const auth = await requireVerifiedBotUser(platform, platformId)
     if (!auth.authorized) {

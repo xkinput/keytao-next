@@ -5,7 +5,7 @@ import { requireVerifiedBotUser } from '@/lib/botUserAuth'
 /**
  * Bot API: Recall (un-submit) the latest submitted batch, reverting it to Draft
  * POST /api/bot/batches/recall
- * Requires Bot token plus a matching user JWT or API key
+ * Requires a valid Bot token and a bound platform user
  *
  * Automatically finds the most recent Submitted batch belonging to the caller
  * and sets it back to Draft status. Only works if batch is still Submitted
@@ -15,10 +15,6 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
     const { platform, platformId } = body
-
-    if (!platform || !platformId) {
-      return NextResponse.json({ success: false, message: '缺少必需参数' }, { status: 400 })
-    }
 
     const auth = await requireVerifiedBotUser(platform, platformId)
     if (!auth.authorized) {

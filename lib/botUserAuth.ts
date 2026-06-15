@@ -1,5 +1,3 @@
-import { getSession } from '@/lib/auth'
-import { verifyApiKey } from '@/lib/apiKeyAuth'
 import { verifyBotToken } from '@/lib/botAuth'
 import { isValidPlatform, resolveUserByPlatform, type BotPlatform, type BotUserBasic } from '@/lib/botUserResolver'
 
@@ -28,21 +26,5 @@ export async function requireVerifiedBotUser(
     return { authorized: false, status: 404, message: '未找到绑定账号，请先使用 /bind 命令绑定' }
   }
 
-  const session = await getSession()
-  if (session) {
-    if (session.id !== user.id) {
-      return { authorized: false, status: 403, message: '登录 token 与平台绑定账号不匹配' }
-    }
-    return { authorized: true, user, platform }
-  }
-
-  const apiKey = await verifyApiKey()
-  if (apiKey.success) {
-    if (apiKey.ctx.userId !== user.id) {
-      return { authorized: false, status: 403, message: 'API Key 与平台绑定账号不匹配' }
-    }
-    return { authorized: true, user, platform }
-  }
-
-  return { authorized: false, status: 401, message: '需要用户 token 或 API Key 验证本人身份' }
+  return { authorized: true, user, platform }
 }

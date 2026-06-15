@@ -15,7 +15,7 @@ const MAX_REMARK_LENGTH = 500
 /**
  * Bot API: Create PRs in batch
  * POST /api/bot/pull-requests/batch
- * Requires Bot token plus a matching user JWT or API key
+ * Requires a valid Bot token and a bound platform user
  */
 export async function POST(request: NextRequest) {
   try {
@@ -31,12 +31,24 @@ export async function POST(request: NextRequest) {
       items: items?.map(i => ({ action: i.action, word: i.word, code: i.code }))
     })
 
-    // Validate parameters
-    if (!platform || !platformId || !items || !Array.isArray(items) || items.length === 0) {
+    const auth = await requireVerifiedBotUser(platform, platformId)
+    if (!auth.authorized) {
       return NextResponse.json<BotCreatePRResponse>(
         {
           success: false,
-          message: '缺少必需参数'
+          message: auth.message
+        },
+        { status: auth.status }
+      )
+    }
+    const user = auth.user
+
+    // Validate parameters
+    if (!items || !Array.isArray(items) || items.length === 0) {
+      return NextResponse.json<BotCreatePRResponse>(
+        {
+          success: false,
+          message: '缺少必需参数: items'
         },
         { status: 400 }
       )
@@ -51,18 +63,6 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       )
     }
-
-    const auth = await requireVerifiedBotUser(platform, platformId)
-    if (!auth.authorized) {
-      return NextResponse.json<BotCreatePRResponse>(
-        {
-          success: false,
-          message: auth.message
-        },
-        { status: auth.status }
-      )
-    }
-    const user = auth.user
 
     // Validate all items
     const validationItems = items.map((item, idx) => ({

@@ -6,7 +6,7 @@ import { recheckBatchConflicts } from '@/lib/services/batchConflictService'
 /**
  * Bot API: Delete a PR item from the user's draft batch
  * DELETE /api/bot/pull-requests/:id
- * Requires Bot token plus a matching user JWT or API key
+ * Requires a valid Bot token and a bound platform user
  *
  * Only allows deletion if:
  * - The PR belongs to the caller's batch
@@ -26,10 +26,6 @@ export async function DELETE(
 
     const body = await request.json()
     const { platform, platformId } = body
-
-    if (!platform || !platformId) {
-      return NextResponse.json({ success: false, message: '缺少必需参数' }, { status: 400 })
-    }
 
     const auth = await requireVerifiedBotUser(platform, platformId)
     if (!auth.authorized) {

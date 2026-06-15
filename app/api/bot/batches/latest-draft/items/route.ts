@@ -6,17 +6,13 @@ import type { PhraseType } from '@/lib/constants/phraseTypes'
 /**
  * Bot API: List all PR items in the user's latest draft batch
  * GET /api/bot/batches/latest-draft/items
- * Requires Bot token plus a matching user JWT or API key
+ * Requires a valid Bot token and a bound platform user
  */
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams
     const platform = searchParams.get('platform') as 'qq' | 'telegram' | null
     const platformId = searchParams.get('platformId')
-
-    if (!platform || !platformId) {
-      return NextResponse.json({ success: false, message: '缺少必需参数' }, { status: 400 })
-    }
 
     const auth = await requireVerifiedBotUser(platform, platformId)
     if (!auth.authorized) {
@@ -108,7 +104,7 @@ export async function GET(request: NextRequest) {
  * Bot API: Add a phrase to the user's latest draft batch (create if not exists)
  * POST /api/bot/batches/latest-draft/items
  * Body: { platform, platformId, word, code, type?, weight?, remark? }
- * Requires Bot token plus a matching user JWT or API key
+ * Requires a valid Bot token and a bound platform user
  */
 export async function POST(request: NextRequest) {
   try {
@@ -118,19 +114,19 @@ export async function POST(request: NextRequest) {
       ? undefined
       : Number(weight)
 
-    if (!platform || !platformId || !word || !code) {
-      return NextResponse.json({ success: false, message: '缺少必需参数: platform, platformId, word, code' }, { status: 400 })
-    }
-
-    if (parsedWeight !== undefined && (!Number.isInteger(parsedWeight) || parsedWeight < 0)) {
-      return NextResponse.json({ success: false, message: '权重必须是非负整数' }, { status: 400 })
-    }
-
     const auth = await requireVerifiedBotUser(platform, platformId)
     if (!auth.authorized) {
       return NextResponse.json({ success: false, message: auth.message }, { status: auth.status })
     }
     const user = auth.user
+
+    if (!word || !code) {
+      return NextResponse.json({ success: false, message: '缺少必需参数: word, code' }, { status: 400 })
+    }
+
+    if (parsedWeight !== undefined && (!Number.isInteger(parsedWeight) || parsedWeight < 0)) {
+      return NextResponse.json({ success: false, message: '权重必须是非负整数' }, { status: 400 })
+    }
 
     // Find or create draft batch
     let batch = await prisma.batch.findFirst({

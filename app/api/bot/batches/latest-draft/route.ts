@@ -5,7 +5,7 @@ import { requireVerifiedBotUser } from '@/lib/botUserAuth'
 /**
  * Bot API: Get or create latest draft batch
  * GET /api/bot/batches/latest-draft
- * Requires Bot token plus a matching user JWT or API key
+ * Requires a valid Bot token and a bound platform user
  * 
  * Returns the user's latest Draft batch, or creates a new one if none exists
  */
@@ -19,17 +19,6 @@ export async function GET(request: NextRequest) {
       platform,
       platformId
     })
-
-    // Validate parameters
-    if (!platform || !platformId) {
-      return NextResponse.json(
-        {
-          success: false,
-          message: '缺少必需参数'
-        },
-        { status: 400 }
-      )
-    }
 
     const auth = await requireVerifiedBotUser(platform, platformId)
     if (!auth.authorized) {

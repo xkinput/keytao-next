@@ -228,6 +228,46 @@ describe('API abuse guards', () => {
     expect(proxiedBody).toEqual({ message: 'hi', session_id: 's1', user_id: '1' })
   })
 
+  it('allows bot token privileged draft access for bound platform users', async () => {
+    mockGetSession.mockResolvedValue(null)
+    mockVerifyApiKey.mockResolvedValue({ success: false, response: NextResponse.json({ error: 'missing' }, { status: 401 }) })
+    mockPrisma.user.findFirst.mockResolvedValue({ id: 2, name: 'garth', nickname: 'Garth' })
+    mockPrisma.batch.findFirst.mockResolvedValue(null)
+    mockPrisma.batch.create.mockResolvedValue({
+      id: 'batch-new',
+      description: '键道助手草稿批次',
+      status: 'Draft',
+      createAt: new Date(),
+      _count: { pullRequests: 0 },
+    })
+
+    const { GET } = await import('./bot/batches/latest-draft/route')
+    const res = await GET(new NextRequest('http://localhost/api/bot/batches/latest-draft?platform=qq&platformId=1449533601'))
+
+    expect(res.status).toBe(200)
+    expect(mockVerifyBotToken).toHaveBeenCalled()
+    expect(mockVerifyApiKey).not.toHaveBeenCalled()
+    expect(mockGetSession).not.toHaveBeenCalled()
+    expect(mockPrisma.batch.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ creatorId: 2 }),
+    }))
+  })
+
+  it('ignores platform identity when bot token is missing', async () => {
+    mockVerifyBotToken.mockResolvedValue(false)
+    const { GET } = await import('./bot/batches/latest-draft/route')
+
+    const withIdentity = await GET(new NextRequest('http://localhost/api/bot/batches/latest-draft?platform=qq&platformId=1449533601'))
+    const withoutIdentity = await GET(new NextRequest('http://localhost/api/bot/batches/latest-draft'))
+
+    expect(withIdentity.status).toBe(401)
+    expect(await withIdentity.json()).toEqual({ success: false, message: '未授权' })
+    expect(withoutIdentity.status).toBe(401)
+    expect(await withoutIdentity.json()).toEqual({ success: false, message: '未授权' })
+    expect(mockPrisma.user.findFirst).not.toHaveBeenCalled()
+    expect(mockPrisma.batch.findFirst).not.toHaveBeenCalled()
+  })
+
   it('rate limits logged-in bot chat proxy requests', async () => {
     mockCheckRateLimit.mockReturnValue({ allowed: false, retryAfterMs: 700 })
     const { POST } = await import('./bot/chat/route')

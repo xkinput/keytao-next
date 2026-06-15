@@ -24,7 +24,7 @@ const MAX_REMARK_LENGTH = 500
 /**
  * Bot API: Bulk add items to draft batch (tolerant mode)
  * POST /api/bot/pull-requests/batch-draft
- * Requires Bot token plus a matching user JWT or API key
+ * Requires a valid Bot token and a bound platform user
  *
  * Unlike the regular batch endpoint, this one:
  * - Processes each item individually
@@ -38,9 +38,18 @@ export async function POST(request: NextRequest) {
     const body: BotBatchDraftRequest = await request.json()
     const { platform, platformId, items, batchId: requestedBatchId } = body
 
-    if (!platform || !platformId || !items || !Array.isArray(items) || items.length === 0) {
+    const auth = await requireVerifiedBotUser(platform, platformId)
+    if (!auth.authorized) {
       return NextResponse.json<BotBatchDraftResponse>(
-        { success: false, message: '缺少必需参数', successCount: 0, failedCount: 0, skippedCount: 0, warnedCount: 0, failed: [], skipped: [], warned: [], draftItems: [], draftTotal: 0 },
+        { success: false, message: auth.message, successCount: 0, failedCount: 0, skippedCount: 0, warnedCount: 0, failed: [], skipped: [], warned: [], draftItems: [], draftTotal: 0 },
+        { status: auth.status }
+      )
+    }
+    const user = auth.user
+
+    if (!items || !Array.isArray(items) || items.length === 0) {
+      return NextResponse.json<BotBatchDraftResponse>(
+        { success: false, message: '缺少必需参数: items', successCount: 0, failedCount: 0, skippedCount: 0, warnedCount: 0, failed: [], skipped: [], warned: [], draftItems: [], draftTotal: 0 },
         { status: 400 }
       )
     }
@@ -51,15 +60,6 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       )
     }
-
-    const auth = await requireVerifiedBotUser(platform, platformId)
-    if (!auth.authorized) {
-      return NextResponse.json<BotBatchDraftResponse>(
-        { success: false, message: auth.message, successCount: 0, failedCount: 0, skippedCount: 0, warnedCount: 0, failed: [], skipped: [], warned: [], draftItems: [], draftTotal: 0 },
-        { status: auth.status }
-      )
-    }
-    const user = auth.user
 
     // Resolve or create draft batch
     let batchId = requestedBatchId
@@ -320,7 +320,7 @@ function normalizeWeight(weight: unknown): number | undefined {
 /**
  * Bot API: Batch delete items from draft batch
  * DELETE /api/bot/pull-requests/batch-draft
- * Requires Bot token plus a matching user JWT or API key
+ * Requires a valid Bot token and a bound platform user
  *
  * Body: { platform, platformId, ids: number[] }
  * Only deletes items that belong to the caller and are in Draft status.
@@ -330,9 +330,18 @@ export async function DELETE(request: NextRequest) {
     const body: BotBatchDeleteDraftRequest = await request.json()
     const { platform, platformId, ids } = body
 
-    if (!platform || !platformId || !ids || !Array.isArray(ids) || ids.length === 0) {
+    const auth = await requireVerifiedBotUser(platform, platformId)
+    if (!auth.authorized) {
       return NextResponse.json<BotBatchDeleteDraftResponse>(
-        { success: false, message: '缺少必需参数', successCount: 0, failedCount: 0, deleted: [], failed: [], draftItems: [], draftTotal: 0 },
+        { success: false, message: auth.message, successCount: 0, failedCount: 0, deleted: [], failed: [], draftItems: [], draftTotal: 0 },
+        { status: auth.status }
+      )
+    }
+    const user = auth.user
+
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      return NextResponse.json<BotBatchDeleteDraftResponse>(
+        { success: false, message: '缺少必需参数: ids', successCount: 0, failedCount: 0, deleted: [], failed: [], draftItems: [], draftTotal: 0 },
         { status: 400 }
       )
     }
@@ -343,15 +352,6 @@ export async function DELETE(request: NextRequest) {
         { status: 400 }
       )
     }
-
-    const auth = await requireVerifiedBotUser(platform, platformId)
-    if (!auth.authorized) {
-      return NextResponse.json<BotBatchDeleteDraftResponse>(
-        { success: false, message: auth.message, successCount: 0, failedCount: 0, deleted: [], failed: [], draftItems: [], draftTotal: 0 },
-        { status: auth.status }
-      )
-    }
-    const user = auth.user
 
     // Fetch all requested PRs with batch info
     const prs = await prisma.pullRequest.findMany({
