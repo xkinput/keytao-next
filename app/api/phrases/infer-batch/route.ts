@@ -1,12 +1,29 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { inferPhrases } from '@/lib/services/phraseInference'
+import { checkRateLimit } from '@/lib/rateLimit'
 
-const MAX_WORDS = 200
+const MAX_WORDS = 500
+
+function clientKey(request: NextRequest) {
+  const forwardedFor = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
+  return forwardedFor || request.headers.get('x-real-ip')?.trim() || 'unknown'
+}
 
 // POST /api/phrases/infer-batch
 // Body: { words: string[] }
 // Single DB query for all words + all candidate codes combined — O(1) round-trips regardless of batch size
 export async function POST(request: NextRequest) {
+  const { allowed, retryAfterMs } = checkRateLimit(`phrases:infer-batch:${clientKey(request)}`)
+  if (!allowed) {
+    return NextResponse.json(
+      { error: '请求过于频繁', retryAfterMs },
+      {
+        status: 429,
+        headers: { 'Retry-After': String(Math.ceil(retryAfterMs / 1000)) },
+      }
+    )
+  }
+
   let body: { words: unknown }
   try {
     body = await request.json()
@@ -23,7 +40,7 @@ export async function POST(request: NextRequest) {
   }
 
   const validWords = words
-    .filter((w): w is string => typeof w === 'string' && w.trim().length > 0 && w.trim().length <= 20)
+    .filter((w): w is string => typeof w === 'string' && w.trim().length > 0 && w.trim().length <= 100)
     .map(w => w.trim())
 
   if (validWords.length === 0) {

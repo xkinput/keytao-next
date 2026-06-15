@@ -3,8 +3,19 @@ import { getSession } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { conflictDetector } from '@/lib/services/conflictDetector'
 import { rebuildBatchDependencies } from '@/lib/services/batchDependencyService'
-import { PullRequestType } from '@prisma/client'
+import { Prisma, PullRequestType } from '@prisma/client'
 import { checkIsAdmin } from '@/lib/adminAuth'
+import { isValidPhraseType } from '@/lib/constants/phraseTypes'
+
+const ALLOWED_ACTIONS = ['Create', 'Change', 'Delete'] as const
+const MAX_WORD_LENGTH = 100
+const MAX_CODE_LENGTH = 20
+const MAX_REMARK_LENGTH = 500
+
+function parsePrId(id: string) {
+  const prId = parseInt(id, 10)
+  return Number.isInteger(prId) && prId > 0 ? prId : null
+}
 
 // GET /api/pull-requests/:id - Get PR with dependencies
 export async function GET(
@@ -13,8 +24,13 @@ export async function GET(
 ) {
   try {
     const { id } = await params
+    const prId = parsePrId(id)
+    if (!prId) {
+      return NextResponse.json({ error: '无效的 PR ID' }, { status: 400 })
+    }
+
     const pr = await prisma.pullRequest.findUnique({
-      where: { id: parseInt(id) },
+      where: { id: prId },
       include: {
         phrase: true,
         batch: {
@@ -94,13 +110,18 @@ export async function PATCH(
 ) {
   try {
     const { id } = await params
+    const prId = parsePrId(id)
+    if (!prId) {
+      return NextResponse.json({ error: '无效的 PR ID' }, { status: 400 })
+    }
+
     const session = await getSession()
     if (!session) {
       return NextResponse.json({ error: '未登录' }, { status: 401 })
     }
 
     const pr = await prisma.pullRequest.findUnique({
-      where: { id: parseInt(id) },
+      where: { id: prId },
       include: {
         batch: true
       }
@@ -129,20 +150,43 @@ export async function PATCH(
 
     const body = await request.json()
     const { word, oldWord, code, action, type, weight, remark } = body
+    const normalizedWord = typeof word === 'string' ? word.trim() : ''
+    const normalizedCode = typeof code === 'string' ? code.trim() : ''
+    const normalizedOldWord = typeof oldWord === 'string' ? oldWord.trim() : undefined
 
-    if (action === 'Change' && !oldWord) {
+    if (!ALLOWED_ACTIONS.includes(action)) {
+      return NextResponse.json({ error: '无效的操作类型' }, { status: 400 })
+    }
+
+    if (!normalizedWord || !normalizedCode || normalizedWord.length > MAX_WORD_LENGTH || normalizedCode.length > MAX_CODE_LENGTH) {
+      return NextResponse.json({ error: '词条或编码格式错误' }, { status: 400 })
+    }
+
+    if (action === 'Change' && !normalizedOldWord) {
       return NextResponse.json(
         { error: '修改操作需要指定旧词' },
         { status: 400 }
       )
     }
 
+    if (normalizedOldWord !== undefined && normalizedOldWord.length > MAX_WORD_LENGTH) {
+      return NextResponse.json({ error: '旧词过长' }, { status: 400 })
+    }
+
+    if (type && !isValidPhraseType(type)) {
+      return NextResponse.json({ error: '无效的词库类型' }, { status: 400 })
+    }
+
+    if (remark !== undefined && (typeof remark !== 'string' || remark.length > MAX_REMARK_LENGTH)) {
+      return NextResponse.json({ error: '备注格式错误' }, { status: 400 })
+    }
+
     // Check for conflicts with updated data
     const conflict = await conflictDetector.checkConflict({
       action: action as PullRequestType,
-      word,
-      oldWord,
-      code,
+      word: normalizedWord,
+      oldWord: normalizedOldWord,
+      code: normalizedCode,
       type,
       phraseId: pr.phraseId || undefined,
       weight
@@ -160,19 +204,21 @@ export async function PATCH(
     }
 
     // Update PR
+    const updateData: Prisma.PullRequestUpdateInput = {
+      word: normalizedWord,
+      oldWord: action === 'Change' ? normalizedOldWord : null,
+      code: normalizedCode,
+      action: action as PullRequestType,
+      type: type || undefined,
+      weight: weight || undefined,
+      remark: remark !== undefined ? (remark || null) : undefined,
+      hasConflict: conflict.hasConflict,
+      conflictReason: conflict.hasConflict ? conflict.impact : null
+    }
+
     const updated = await prisma.pullRequest.update({
-      where: { id: parseInt(id) },
-      data: {
-        word,
-        oldWord: action === 'Change' ? oldWord : null,
-        code,
-        action: action as PullRequestType,
-        type: type || undefined,
-        weight: weight || undefined,
-        remark: remark !== undefined ? (remark || null) : undefined,
-        hasConflict: conflict.hasConflict,
-        conflictReason: conflict.hasConflict ? conflict.impact : null
-      } as any,
+      where: { id: prId },
+      data: updateData,
       include: {
         phrase: true,
         batch: true,
@@ -196,7 +242,7 @@ export async function PATCH(
         data: {
           code: conflict.code,
           currentWord: conflict.currentPhrase.word,
-          proposedWord: word,
+          proposedWord: normalizedWord,
           pullRequestId: pr.id
         }
       })
@@ -219,13 +265,18 @@ export async function DELETE(
 ) {
   try {
     const { id } = await params
+    const prId = parsePrId(id)
+    if (!prId) {
+      return NextResponse.json({ error: '无效的 PR ID' }, { status: 400 })
+    }
+
     const session = await getSession()
     if (!session) {
       return NextResponse.json({ error: '未登录' }, { status: 401 })
     }
 
     const pr = await prisma.pullRequest.findUnique({
-      where: { id: parseInt(id) },
+      where: { id: prId },
       include: {
         batch: true,
         dependedBy: true
@@ -261,7 +312,7 @@ export async function DELETE(
     }
 
     await prisma.pullRequest.delete({
-      where: { id: parseInt(id) }
+      where: { id: prId }
     })
 
     return NextResponse.json({ success: true })

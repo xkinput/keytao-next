@@ -8,10 +8,12 @@ export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams
     const status = searchParams.get('status')
-    const page = Math.min(100, Math.max(1, parseInt(searchParams.get('page') || '1')))
-    const pageSize = Math.min(100, Math.max(1, parseInt(searchParams.get('pageSize') || '10')))
+    const rawPage = parseInt(searchParams.get('page') || '1', 10)
+    const rawPageSize = parseInt(searchParams.get('pageSize') || '10', 10)
+    const page = Number.isFinite(rawPage) ? Math.min(100, Math.max(1, rawPage)) : 1
+    const pageSize = Number.isFinite(rawPageSize) ? Math.min(100, Math.max(1, rawPageSize)) : 10
     const onlyMine = searchParams.get('onlyMine') === 'true'
-    const search = searchParams.get('search')
+    const search = searchParams.get('search')?.trim() || ''
 
     const session = await getSession()
 
@@ -19,15 +21,21 @@ export async function GET(request: NextRequest) {
     if (status && Object.values(BatchStatus).includes(status as BatchStatus)) {
       where.status = status as BatchStatus
     }
+    if (onlyMine && !session) {
+      return NextResponse.json({ error: '未登录' }, { status: 401 })
+    }
     if (onlyMine && session) {
       where.creatorId = session.id
     }
-    if (search && search.trim()) {
+    if (search.length > 50) {
+      return NextResponse.json({ error: '搜索参数过长' }, { status: 400 })
+    }
+    if (search) {
       where.pullRequests = {
         some: {
           OR: [
-            { word: { contains: search.trim(), mode: 'insensitive' } },
-            { code: { contains: search.trim(), mode: 'insensitive' } }
+            { word: { contains: search, mode: 'insensitive' } },
+            { code: { contains: search, mode: 'insensitive' } }
           ]
         }
       }
@@ -104,10 +112,19 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json()
     const { description, issueId } = body
+    const normalizedDescription = typeof description === 'string' ? description.trim() : ''
+
+    if (normalizedDescription.length > 200) {
+      return NextResponse.json({ error: '批次描述过长' }, { status: 400 })
+    }
+
+    if (issueId !== undefined && (!Number.isInteger(issueId) || issueId <= 0)) {
+      return NextResponse.json({ error: 'Issue ID 无效' }, { status: 400 })
+    }
 
     const batch = await prisma.batch.create({
       data: {
-        description,
+        description: normalizedDescription || undefined,
         creatorId: session.id,
         issueId: issueId || undefined,
         status: 'Draft'

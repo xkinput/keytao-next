@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 
+const MAX_COMMENT_LENGTH = 2000
+
 // POST create comment
 export async function POST(
   request: NextRequest,
@@ -20,7 +22,7 @@ export async function POST(
     const { id } = await params
     const issueId = parseInt(id)
 
-    if (isNaN(issueId)) {
+    if (!Number.isInteger(issueId) || issueId <= 0) {
       return NextResponse.json(
         { error: '无效的Issue ID' },
         { status: 400 }
@@ -29,10 +31,18 @@ export async function POST(
 
     const body = await request.json()
     const { content } = body
+    const normalizedContent = typeof content === 'string' ? content.trim() : ''
 
-    if (!content || content.trim() === '') {
+    if (!normalizedContent) {
       return NextResponse.json(
         { error: '评论内容不能为空' },
+        { status: 400 }
+      )
+    }
+
+    if (normalizedContent.length > MAX_COMMENT_LENGTH) {
+      return NextResponse.json(
+        { error: '评论内容过长' },
         { status: 400 }
       )
     }
@@ -51,7 +61,7 @@ export async function POST(
 
     const comment = await prisma.comment.create({
       data: {
-        content,
+        content: normalizedContent,
         issueId,
         authorId: session.id
       },

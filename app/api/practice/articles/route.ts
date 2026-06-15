@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { DEFAULT_PRACTICE_ARTICLE_OPTIONS, normalizePracticeArticleText, type PracticeArticleOption } from '@/lib/services/practiceArticles'
+import { checkRateLimit } from '@/lib/rateLimit'
 
 export const dynamic = 'force-dynamic'
 
@@ -32,6 +33,11 @@ const MAX_ARTICLE_TEXT_LENGTH = 3200
 const REMOTE_ARTICLE_CACHE_TTL_MS = 30 * 60 * 1000
 
 let practiceArticleCache: PracticeArticleCache | null = null
+
+function clientKey(request: NextRequest) {
+  const forwardedFor = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
+  return forwardedFor || request.headers.get('x-real-ip')?.trim() || 'unknown'
+}
 
 function decodeHtmlEntities(text: string) {
   return text
@@ -137,6 +143,19 @@ export async function GET(request: NextRequest) {
   const now = Date.now()
   const forceRefresh = request.nextUrl.searchParams.has('refresh')
   const hasFreshCache = Boolean(practiceArticleCache) && (now - (practiceArticleCache?.fetchedAt ?? 0) < REMOTE_ARTICLE_CACHE_TTL_MS)
+
+  if (forceRefresh) {
+    const { allowed, retryAfterMs } = checkRateLimit(`practice:articles-refresh:${clientKey(request)}`)
+    if (!allowed) {
+      return NextResponse.json(
+        { error: '请求过于频繁', retryAfterMs },
+        {
+          status: 429,
+          headers: { 'Retry-After': String(Math.ceil(retryAfterMs / 1000)) },
+        }
+      )
+    }
+  }
 
   if (!forceRefresh && hasFreshCache) {
     return NextResponse.json({

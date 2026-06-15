@@ -10,8 +10,8 @@ export async function DELETE(
   if (!session) return NextResponse.json({ error: '未登录' }, { status: 401 })
 
   const { id } = await params
-  const keyId = parseInt(id)
-  if (isNaN(keyId)) return NextResponse.json({ error: '无效 ID' }, { status: 400 })
+  const keyId = parseInt(id, 10)
+  if (!Number.isInteger(keyId) || keyId <= 0) return NextResponse.json({ error: '无效 ID' }, { status: 400 })
 
   const record = await prisma.apiKey.findUnique({
     where: { id: keyId },

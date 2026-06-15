@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { checkRootAdminPermission } from '@/lib/adminAuth'
 
+const MAX_NAME_LENGTH = 80
+const MAX_MESSAGE_LENGTH = 500
+const MAX_CHANNEL_LENGTH = 40
+
 // GET /api/sponsors — public, returns visible sponsors
 export async function GET() {
   const sponsors = await prisma.sponsor.findMany({
@@ -38,21 +42,31 @@ export async function POST(request: NextRequest) {
 
   const body = await request.json()
   const { payerName, remark, amount, message, channel, visible } = body
+  const normalizedPayerName = typeof payerName === 'string' ? payerName.trim() : ''
+  const normalizedRemark = typeof remark === 'string' ? remark.trim() : ''
+  const normalizedMessage = typeof message === 'string' ? message.trim() : ''
+  const normalizedChannel = typeof channel === 'string' ? channel.trim() : 'other'
 
-  if (!payerName?.trim()) {
+  if (!normalizedPayerName) {
     return NextResponse.json({ error: '付款姓名不能为空' }, { status: 400 })
   }
-  if (typeof amount !== 'number' || amount <= 0) {
+  if (normalizedPayerName.length > MAX_NAME_LENGTH || normalizedRemark.length > MAX_NAME_LENGTH) {
+    return NextResponse.json({ error: '名称过长' }, { status: 400 })
+  }
+  if (normalizedMessage.length > MAX_MESSAGE_LENGTH || normalizedChannel.length > MAX_CHANNEL_LENGTH) {
+    return NextResponse.json({ error: '留言或渠道过长' }, { status: 400 })
+  }
+  if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0) {
     return NextResponse.json({ error: '金额必须为正整数' }, { status: 400 })
   }
 
   const sponsor = await prisma.sponsor.create({
     data: {
-      payerName: payerName.trim(),
-      remark: remark?.trim() || null,
+      payerName: normalizedPayerName,
+      remark: normalizedRemark || null,
       amount: Math.round(amount),
-      message: message?.trim() || null,
-      channel: channel || 'other',
+      message: normalizedMessage || null,
+      channel: normalizedChannel || 'other',
       visible: visible !== false,
     },
   })

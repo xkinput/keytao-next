@@ -10,6 +10,8 @@ import { NextRequest, NextResponse } from 'next/server';
 export const runtime = 'nodejs';
 export const maxDuration = 10;
 
+const MAX_TAG_MESSAGE_LENGTH = 200;
+
 export async function GET() {
   try {
     const authResult = await checkAdminPermission();
@@ -52,6 +54,13 @@ export async function POST(request: NextRequest) {
     if (!/^v\d+\.\d+\.\d+$/.test(tagName)) {
       return NextResponse.json(
         { success: false, error: 'Tag 格式必须为 v[x.x.x]，例如 v1.0.0' },
+        { status: 400 }
+      );
+    }
+
+    if (message !== undefined && (typeof message !== 'string' || message.length > MAX_TAG_MESSAGE_LENGTH)) {
+      return NextResponse.json(
+        { success: false, error: 'Tag message 格式错误或过长' },
         { status: 400 }
       );
     }

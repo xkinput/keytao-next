@@ -13,8 +13,9 @@ export async function PUT(
     { params }: { params: Promise<{ id: string }> }
 ) {
     try {
-        const maxItems = 100
-        const maxTextLength = 20
+        const maxItems = 500
+        const maxWordLength = 100
+        const maxCodeLength = 20
         const maxRemarkLength = 500
         const { id } = await params
         const session = await getSession()
@@ -72,9 +73,9 @@ export async function PUT(
                 typeof item.code !== 'string' ||
                 item.word.trim().length === 0 ||
                 item.code.trim().length === 0 ||
-                item.word.trim().length > maxTextLength ||
-                item.code.trim().length > maxTextLength ||
-                (item.oldWord !== undefined && item.oldWord.length > maxTextLength) ||
+                item.word.trim().length > maxWordLength ||
+                item.code.trim().length > maxCodeLength ||
+                (item.oldWord !== undefined && item.oldWord.length > maxWordLength) ||
                 (item.remark !== undefined && item.remark.length > maxRemarkLength)
             ) {
                 return NextResponse.json({ error: '词条、编码或备注格式错误' }, { status: 400 })

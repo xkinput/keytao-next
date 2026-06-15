@@ -8,9 +8,17 @@ const mockVerifyApiKey = vi.fn()
 const mockCheckConflict = vi.fn()
 const mockCheckBatchConflictsWithWeight = vi.fn()
 const mockBuildBatchSubmitWarnings = vi.fn()
+const mockCheckRateLimit = vi.fn()
+const mockVerifyBotToken = vi.fn()
+const mockVerifyToken = vi.fn()
+const mockInferPhrases = vi.fn()
+const mockCreateGithubSyncService = vi.fn()
 
 vi.mock('@/lib/auth', () => ({
   getSession: mockGetSession,
+  signToken: vi.fn(async () => 'token'),
+  verifyToken: mockVerifyToken,
+  validatePassword: vi.fn(() => ({ valid: true })),
 }))
 
 vi.mock('@/lib/adminAuth', () => ({
@@ -20,6 +28,14 @@ vi.mock('@/lib/adminAuth', () => ({
 
 vi.mock('@/lib/apiKeyAuth', () => ({
   verifyApiKey: mockVerifyApiKey,
+}))
+
+vi.mock('@/lib/rateLimit', () => ({
+  checkRateLimit: mockCheckRateLimit,
+}))
+
+vi.mock('@/lib/botAuth', () => ({
+  verifyBotToken: mockVerifyBotToken,
 }))
 
 vi.mock('@/lib/services/conflictDetector', () => ({
@@ -37,18 +53,41 @@ vi.mock('@/lib/services/batchSubmitWarnings', () => ({
   buildBatchSubmitWarnings: mockBuildBatchSubmitWarnings,
 }))
 
+vi.mock('@/lib/services/phraseInference', () => ({
+  inferPhrases: mockInferPhrases,
+}))
+
+vi.mock('@/lib/services/githubSync', () => ({
+  createGithubSyncService: mockCreateGithubSyncService,
+}))
+
 vi.mock('@/lib/prisma', () => ({
   prisma: {
     batch: {
       findUnique: vi.fn(),
+      findMany: vi.fn(),
       create: vi.fn(),
       findFirst: vi.fn(),
       count: vi.fn(),
     },
     pullRequest: {
+      findUnique: vi.fn(),
       create: vi.fn(),
       findMany: vi.fn(),
+      count: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
       deleteMany: vi.fn(),
+    },
+    issue: {
+      create: vi.fn(),
+      findMany: vi.fn(),
+      findUnique: vi.fn(),
+      update: vi.fn(),
+      count: vi.fn(),
+    },
+    comment: {
+      create: vi.fn(),
     },
     phrase: {
       findFirst: vi.fn(),
@@ -59,8 +98,18 @@ vi.mock('@/lib/prisma', () => ({
     codeConflict: {
       create: vi.fn(),
     },
+    user: {
+      findUnique: vi.fn(),
+      findFirst: vi.fn(),
+      create: vi.fn(),
+    },
+    role: {
+      findUnique: vi.fn(),
+    },
     syncTask: {
+      findUnique: vi.fn(),
       findMany: vi.fn(),
+      update: vi.fn(),
       count: vi.fn(),
     },
     apiKey: {
@@ -92,12 +141,22 @@ beforeEach(() => {
   mockCheckIsAdmin.mockResolvedValue(false)
   mockCheckAdminPermission.mockResolvedValue({ authorized: true, response: undefined })
   mockVerifyApiKey.mockResolvedValue({ success: true, ctx: { userId: 1, apiKeyId: 1 } })
+  mockVerifyBotToken.mockResolvedValue(true)
+  mockVerifyToken.mockResolvedValue({ id: 1, name: 'rea' })
+  mockInferPhrases.mockResolvedValue([])
+  mockCheckRateLimit.mockReturnValue({ allowed: true, retryAfterMs: 0 })
   mockCheckConflict.mockResolvedValue({ hasConflict: false })
   mockCheckBatchConflictsWithWeight.mockResolvedValue([])
   mockBuildBatchSubmitWarnings.mockReturnValue([])
+  mockCreateGithubSyncService.mockReturnValue({})
   mockPrisma.batch.create.mockResolvedValue({ id: 'batch-new' })
+  mockPrisma.batch.findMany.mockResolvedValue([])
   mockPrisma.pullRequest.create.mockResolvedValue({ id: 1 })
   mockPrisma.pullRequest.findMany.mockResolvedValue([])
+  mockPrisma.pullRequest.count.mockResolvedValue(0)
+  mockPrisma.issue.create.mockResolvedValue({ id: 1 })
+  mockPrisma.issue.findMany.mockResolvedValue([])
+  mockPrisma.issue.count.mockResolvedValue(0)
   mockPrisma.phrase.findMany.mockResolvedValue([])
   mockPrisma.phrase.count.mockResolvedValue(0)
   mockPrisma.phrase.groupBy.mockResolvedValue([])
@@ -169,13 +228,76 @@ describe('API abuse guards', () => {
     expect(proxiedBody).toEqual({ message: 'hi', session_id: 's1', user_id: '1' })
   })
 
-  it('protects draft batch previews from non-owners', async () => {
+  it('rate limits logged-in bot chat proxy requests', async () => {
+    mockCheckRateLimit.mockReturnValue({ allowed: false, retryAfterMs: 700 })
+    const { POST } = await import('./bot/chat/route')
+
+    const res = await POST(jsonRequest('http://localhost/api/bot/chat', {
+      message: 'hi',
+      session_id: 's1',
+    }))
+
+    expect(res.status).toBe(429)
+    expect(mockCheckRateLimit).toHaveBeenCalledWith('bot-chat:1')
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it('keeps draft batch previews publicly readable', async () => {
     mockPrisma.batch.findUnique.mockResolvedValue({ id: 'batch-1', creatorId: 2, status: 'Draft', pullRequests: [] })
     const { GET } = await import('./batches/[id]/preview/route')
 
     const res = await GET(new NextRequest('http://localhost/api/batches/batch-1/preview'), { params: Promise.resolve({ id: 'batch-1' }) })
 
-    expect(res.status).toBe(403)
+    expect(res.status).toBe(200)
+  })
+
+  it('keeps draft batch details publicly readable', async () => {
+    mockGetSession.mockResolvedValue(null)
+    mockPrisma.batch.findUnique.mockResolvedValue({
+      id: 'batch-1',
+      creatorId: 2,
+      status: 'Draft',
+      pullRequests: [],
+    })
+    const { GET } = await import('./batches/[id]/route')
+
+    const res = await GET(new NextRequest('http://localhost/api/batches/batch-1'), { params: Promise.resolve({ id: 'batch-1' }) })
+
+    expect(res.status).toBe(200)
+  })
+
+  it('does not hide draft or rejected batches from the public list', async () => {
+    mockPrisma.batch.findMany.mockResolvedValue([])
+    mockPrisma.batch.count.mockResolvedValue(0)
+    const { GET } = await import('./batches/route')
+
+    const res = await GET(new NextRequest('http://localhost/api/batches'))
+
+    expect(res.status).toBe(200)
+    expect(mockPrisma.batch.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { pullRequests: { some: {} } },
+    }))
+  })
+
+  it('keeps draft pull request details and batch lists publicly readable', async () => {
+    mockGetSession.mockResolvedValue(null)
+    mockPrisma.pullRequest.findUnique.mockResolvedValue({
+      id: 1,
+      userId: 2,
+      batch: { id: 'batch-1', creatorId: 2, status: 'Draft' },
+    })
+    const prDetail = await import('./pull-requests/[id]/route')
+
+    const detailRes = await prDetail.GET(new NextRequest('http://localhost/api/pull-requests/1'), { params: Promise.resolve({ id: '1' }) })
+    expect(detailRes.status).toBe(200)
+
+    mockGetSession.mockResolvedValue({ id: 1, name: 'rea' })
+    mockPrisma.batch.findUnique.mockResolvedValue({ id: 'batch-1', creatorId: 2, status: 'Draft' })
+    const prList = await import('./pull-requests/route')
+
+    const listRes = await prList.GET(new NextRequest('http://localhost/api/pull-requests?batchId=batch-1'))
+    expect(listRes.status).toBe(200)
+    expect(mockPrisma.pullRequest.findMany).toHaveBeenCalled()
   })
 
   it('requires admin for sync task history', async () => {
@@ -204,9 +326,160 @@ describe('API abuse guards', () => {
     }))
   })
 
+  it('filters public by-code and by-word lookups to finished phrases', async () => {
+    mockPrisma.phrase.findMany.mockResolvedValue([])
+    mockPrisma.phrase.count.mockResolvedValue(0)
+
+    const byCode = await import('./phrases/by-code/route')
+    const byCodeRes = await byCode.GET(new NextRequest('http://localhost/api/phrases/by-code?code=gv'))
+
+    expect(byCodeRes.status).toBe(200)
+    expect(mockPrisma.phrase.findMany).toHaveBeenLastCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ status: 'Finish', code: { startsWith: 'gv' } }),
+    }))
+
+    const byWord = await import('./phrases/by-word/route')
+    const byWordRes = await byWord.GET(new NextRequest('http://localhost/api/phrases/by-word?word=中国'))
+
+    expect(byWordRes.status).toBe(200)
+    expect(mockPrisma.phrase.findMany).toHaveBeenLastCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ status: 'Finish', word: '中国' }),
+    }))
+  })
+
+  it('rejects overly long public lookup parameters', async () => {
+    const byCode = await import('./phrases/by-code/route')
+    const byWord = await import('./phrases/by-word/route')
+
+    const byCodeRes = await byCode.GET(new NextRequest(`http://localhost/api/phrases/by-code?code=${'x'.repeat(21)}`))
+    const byWordRes = await byWord.GET(new NextRequest(`http://localhost/api/phrases/by-word?word=${'x'.repeat(101)}`))
+
+    expect(byCodeRes.status).toBe(400)
+    expect(byWordRes.status).toBe(400)
+  })
+
+  it('rejects invalid phrase context type and clamps count', async () => {
+    const { GET } = await import('./phrases/context/route')
+
+    const invalidTypeRes = await GET(new NextRequest('http://localhost/api/phrases/context?code=gv&type=Fake'))
+    expect(invalidTypeRes.status).toBe(400)
+
+    const res = await GET(new NextRequest('http://localhost/api/phrases/context?code=gv&count=-10&type=Phrase'))
+    expect(res.status).toBe(200)
+    expect(mockPrisma.phrase.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 1 }))
+  })
+
+  it('limits v1 phrase search length and scan size', async () => {
+    const { GET } = await import('./v1/phrases/route')
+
+    const tooLong = await GET(new NextRequest(`http://localhost/api/v1/phrases?search=${'中'.repeat(51)}`))
+    expect(tooLong.status).toBe(400)
+    expect(mockPrisma.phrase.findMany).not.toHaveBeenCalled()
+
+    mockPrisma.phrase.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+
+    const res = await GET(new NextRequest('http://localhost/api/v1/phrases?search=中国'))
+    expect(res.status).toBe(200)
+    expect(mockPrisma.phrase.findMany).toHaveBeenCalledTimes(3)
+    for (const call of mockPrisma.phrase.findMany.mock.calls) {
+      expect(call[0]).toEqual(expect.objectContaining({ take: 500 }))
+    }
+  })
+
+  it('rejects malformed personal and bot batch lookup payloads', async () => {
+    const personalByCode = await import('./v1/phrases/by-code/batch/route')
+    const botByWord = await import('./bot/phrases/by-word/batch/route')
+
+    const personalRes = await personalByCode.POST(jsonRequest('http://localhost/api/v1/phrases/by-code/batch', {
+      codes: ['a'.repeat(21)],
+    }))
+    const botRes = await botByWord.POST(jsonRequest('http://localhost/api/bot/phrases/by-word/batch', {
+      words: [123],
+    }))
+
+    expect(personalRes.status).toBe(400)
+    expect(botRes.status).toBe(400)
+    expect(mockPrisma.phrase.findMany).not.toHaveBeenCalled()
+  })
+
+  it('rate limits login and register attempts before database work', async () => {
+    mockCheckRateLimit.mockReturnValue({ allowed: false, retryAfterMs: 900 })
+    const login = await import('./auth/login/route')
+    const register = await import('./auth/register/route')
+
+    const loginRes = await login.POST(jsonRequest('http://localhost/api/auth/login', {
+      name: 'rea',
+      password: 'password',
+    }))
+    const registerRes = await register.POST(jsonRequest('http://localhost/api/auth/register', {
+      name: 'rea',
+      email: 'rea@example.com',
+      password: 'password',
+    }))
+
+    expect(loginRes.status).toBe(429)
+    expect(registerRes.status).toBe(429)
+    expect(mockPrisma.user.findUnique).not.toHaveBeenCalled()
+    expect(mockPrisma.user.findFirst).not.toHaveBeenCalled()
+  })
+
+  it('rate limits refresh and public infer-batch before expensive work', async () => {
+    mockCheckRateLimit.mockReturnValue({ allowed: false, retryAfterMs: 900 })
+    const refresh = await import('./auth/refresh/route')
+    const inferBatch = await import('./phrases/infer-batch/route')
+
+    const refreshRes = await refresh.POST(new NextRequest('http://localhost/api/auth/refresh', {
+      method: 'POST',
+      headers: { authorization: 'Bearer token' },
+    }))
+    const inferRes = await inferBatch.POST(jsonRequest('http://localhost/api/phrases/infer-batch', {
+      words: ['中国'],
+    }))
+
+    expect(refreshRes.status).toBe(429)
+    expect(inferRes.status).toBe(429)
+    expect(mockVerifyToken).not.toHaveBeenCalled()
+    expect(mockInferPhrases).not.toHaveBeenCalled()
+  })
+
+  it('rejects long issues and unsafe sync file names', async () => {
+    const issues = await import('./issues/route')
+    const issueRes = await issues.POST(jsonRequest('http://localhost/api/issues', {
+      title: 'x'.repeat(121),
+      content: 'body',
+    }))
+
+    expect(issueRes.status).toBe(400)
+    expect(mockPrisma.issue.create).not.toHaveBeenCalled()
+
+    const commitBatch = await import('./admin/sync-to-github/commit-batch/route')
+    const commitRes = await commitBatch.POST(jsonRequest('http://localhost/api/admin/sync-to-github/commit-batch', {
+      taskId: 'task-1',
+      files: [{ name: '../evil.dict.yaml', content: 'x' }],
+      processedCount: 1,
+      totalCount: 1,
+    }))
+
+    expect(commitRes?.status).toBe(400)
+    expect(mockPrisma.syncTask.findUnique).not.toHaveBeenCalled()
+  })
+
+  it('rate limits install download before proxying upstream', async () => {
+    mockCheckRateLimit.mockReturnValue({ allowed: false, retryAfterMs: 900 })
+    const { GET } = await import('./install/download/route')
+
+    const res = await GET(new NextRequest('http://localhost/api/install/download?url=https://github.com/xkinput/KeyTao/releases/download/v1/keytao.zip'))
+
+    expect(res.status).toBe(429)
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
   it('rejects oversized conflict-check batches', async () => {
     const { POST } = await import('./pull-requests/check-conflicts-batch/route')
-    const items = Array.from({ length: 101 }, () => draftItem())
+    const items = Array.from({ length: 501 }, () => draftItem())
 
     const res = await POST(jsonRequest('http://localhost/api/pull-requests/check-conflicts-batch', { items }))
 
@@ -216,7 +489,7 @@ describe('API abuse guards', () => {
 
   it('rejects oversized personal API draft batches', async () => {
     const { POST } = await import('./v1/pull-requests/batch-draft/route')
-    const items = Array.from({ length: 101 }, () => draftItem())
+    const items = Array.from({ length: 501 }, () => draftItem())
 
     const res = await POST(jsonRequest('http://localhost/api/v1/pull-requests/batch-draft', { items }))
 

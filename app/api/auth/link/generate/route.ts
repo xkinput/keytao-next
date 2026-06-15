@@ -1,16 +1,28 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextResponse } from 'next/server'
 import { getSession } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
+import { checkRateLimit } from '@/lib/rateLimit'
 
 /**
  * Generate link key for platform binding
  * POST /api/auth/link/generate
  */
-export async function POST(_request: NextRequest) {
+export async function POST() {
   try {
     const session = await getSession()
     if (!session) {
       return NextResponse.json({ error: '未登录' }, { status: 401 })
+    }
+
+    const { allowed, retryAfterMs } = checkRateLimit(`auth:link-generate:${session.id}`)
+    if (!allowed) {
+      return NextResponse.json(
+        { error: '请求过于频繁', retryAfterMs },
+        {
+          status: 429,
+          headers: { 'Retry-After': String(Math.ceil(retryAfterMs / 1000)) },
+        }
+      )
     }
 
     // Generate 6-character key (uppercase letters + digits, excluding confusing chars)

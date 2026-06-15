@@ -11,7 +11,7 @@ export async function GET(
     const { id } = await params
     const issueId = parseInt(id)
 
-    if (isNaN(issueId)) {
+    if (!Number.isInteger(issueId) || issueId <= 0) {
       return NextResponse.json(
         { error: '无效的Issue ID' },
         { status: 400 }
@@ -86,7 +86,7 @@ export async function PATCH(
     const { id } = await params
     const issueId = parseInt(id)
 
-    if (isNaN(issueId)) {
+    if (!Number.isInteger(issueId) || issueId <= 0) {
       return NextResponse.json(
         { error: '无效的Issue ID' },
         { status: 400 }

@@ -8,7 +8,8 @@ import { isValidPhraseType } from '@/lib/constants/phraseTypes'
 // POST /api/pull-requests - Create a single PR
 export async function POST(request: NextRequest) {
   const allowedActions = ['Create', 'Change', 'Delete'] as const
-  const maxTextLength = 20
+  const maxWordLength = 100
+  const maxCodeLength = 20
 
   try {
     const session = await getSession()
@@ -47,11 +48,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '无效的操作类型' }, { status: 400 })
     }
 
-    if (typeof word !== 'string' || typeof code !== 'string' || word.trim().length > maxTextLength || code.trim().length > maxTextLength) {
+    if (typeof word !== 'string' || typeof code !== 'string' || word.trim().length > maxWordLength || code.trim().length > maxCodeLength) {
       return NextResponse.json({ error: '词条或编码过长' }, { status: 400 })
     }
 
-    if (oldWord !== undefined && (typeof oldWord !== 'string' || oldWord.trim().length > maxTextLength)) {
+    if (oldWord !== undefined && (typeof oldWord !== 'string' || oldWord.trim().length > maxWordLength)) {
       return NextResponse.json({ error: '旧词过长' }, { status: 400 })
     }
 
@@ -193,8 +194,10 @@ export async function POST(request: NextRequest) {
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams
-    const page = Math.min(100, Math.max(1, parseInt(searchParams.get('page') || '1')))
-    const pageSize = Math.min(100, Math.max(1, parseInt(searchParams.get('pageSize') || '10')))
+    const rawPage = parseInt(searchParams.get('page') || '1', 10)
+    const rawPageSize = parseInt(searchParams.get('pageSize') || '10', 10)
+    const page = Number.isFinite(rawPage) ? Math.min(100, Math.max(1, rawPage)) : 1
+    const pageSize = Number.isFinite(rawPageSize) ? Math.min(100, Math.max(1, rawPageSize)) : 10
     const status = searchParams.get('status')
     const batchId = searchParams.get('batchId')
 

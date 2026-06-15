@@ -19,6 +19,10 @@ interface CommitBatchRequest {
   totalCount: number;
 }
 
+const MAX_FILES_PER_COMMIT = 20;
+const MAX_FILE_CONTENT_LENGTH = 5_000_000;
+const FILE_NAME_PATTERN = /^[\w.-]+$/;
+
 export async function POST(request: NextRequest) {
   try {
     // Verify admin permission
@@ -29,6 +33,36 @@ export async function POST(request: NextRequest) {
 
     const body: CommitBatchRequest = await request.json();
     const { taskId, files, processedCount, totalCount } = body;
+
+    if (typeof taskId !== 'string' || !taskId || !Array.isArray(files) || files.length === 0 || files.length > MAX_FILES_PER_COMMIT) {
+      return NextResponse.json(
+        { success: false, error: '请求参数格式错误' },
+        { status: 400 }
+      );
+    }
+
+    if (!Number.isInteger(processedCount) || !Number.isInteger(totalCount) || processedCount < 0 || totalCount <= 0 || processedCount > totalCount) {
+      return NextResponse.json(
+        { success: false, error: '进度参数无效' },
+        { status: 400 }
+      );
+    }
+
+    for (const file of files) {
+      if (
+        !file ||
+        typeof file.name !== 'string' ||
+        typeof file.content !== 'string' ||
+        !FILE_NAME_PATTERN.test(file.name) ||
+        file.name.includes('..') ||
+        file.content.length > MAX_FILE_CONTENT_LENGTH
+      ) {
+        return NextResponse.json(
+          { success: false, error: '文件参数格式错误' },
+          { status: 400 }
+        );
+      }
+    }
 
     console.log(`[CommitBatch] Task ${taskId}: committing ${files.length} files (${processedCount}/${totalCount})`);
 

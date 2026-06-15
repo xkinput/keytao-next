@@ -8,7 +8,8 @@ import type {
   BotLookupPhrase,
 } from '@/lib/types/bot'
 
-const MAX_BATCH_SIZE = 100
+const MAX_BATCH_SIZE = 500
+const MAX_CODE_LENGTH = 20
 
 /**
  * Bot API: Batch lookup phrases by exact codes
@@ -31,6 +32,18 @@ export async function POST(request: NextRequest) {
 
     const body: BotBatchLookupByCodeRequest = await request.json()
     const rawCodes = Array.isArray(body.codes) ? body.codes : []
+    if (rawCodes.some((code) => typeof code !== 'string')) {
+      return NextResponse.json<BotBatchLookupByCodeResponse>(
+        {
+          success: false,
+          count: 0,
+          results: [],
+          message: '编码必须是字符串',
+        },
+        { status: 400 }
+      )
+    }
+
     const codes = rawCodes
       .map((code) => code.trim())
       .filter((code) => code.length > 0)
@@ -54,6 +67,18 @@ export async function POST(request: NextRequest) {
           count: 0,
           results: [],
           message: `一次最多查询 ${MAX_BATCH_SIZE} 个编码`,
+        },
+        { status: 400 }
+      )
+    }
+
+    if (codes.some((code) => code.length > MAX_CODE_LENGTH)) {
+      return NextResponse.json<BotBatchLookupByCodeResponse>(
+        {
+          success: false,
+          count: 0,
+          results: [],
+          message: '编码过长',
         },
         { status: 400 }
       )

@@ -67,6 +67,7 @@ export async function GET(
 
     // Calculate dynamic weights and conflicts for all PRs in batch
     const { checkBatchConflictsWithWeight } = await import('@/lib/services/batchConflictService')
+    type ConflictResult = Awaited<ReturnType<typeof checkBatchConflictsWithWeight>>[number]
 
     const prItems = batch.pullRequests.map(pr => ({
       id: String(pr.id),
@@ -78,7 +79,7 @@ export async function GET(
       weight: pr.weight || undefined,
     }))
 
-    let conflictResults: any[] = []
+    let conflictResults: ConflictResult[] = []
     if (prItems.length > 0) {
       conflictResults = await checkBatchConflictsWithWeight(prItems)
     }
@@ -89,7 +90,7 @@ export async function GET(
 
     for (let i = 0; i < conflictResults.length; i++) {
       const resolvedSuggestion = conflictResults[i].conflict.suggestions?.find(
-        (s: any) => s.action === 'Resolved'
+        (s: { action?: string }) => s.action === 'Resolved'
       )
       if (resolvedSuggestion?.resolverIndex === undefined) continue
 
@@ -160,7 +161,7 @@ export async function PATCH(
     const body = await request.json()
     const { description } = body
 
-    if (!description || typeof description !== 'string' || description.trim().length === 0) {
+    if (!description || typeof description !== 'string' || description.trim().length === 0 || description.trim().length > 200) {
       return NextResponse.json({ error: '批次名称不能为空' }, { status: 400 })
     }
 

@@ -4,6 +4,7 @@ import { getSession } from '@/lib/auth'
 import { randomBytes } from 'crypto'
 
 const MAX_KEYS_PER_USER = 5
+const MAX_KEY_NAME_LENGTH = 60
 
 function generateApiKey(): string {
   return 'kt_' + randomBytes(24).toString('base64url')
@@ -35,8 +36,9 @@ export async function POST(request: NextRequest) {
   if (!session) return NextResponse.json({ error: '未登录' }, { status: 401 })
 
   const body = await request.json()
-  const name = body?.name?.trim()
+  const name = typeof body?.name === 'string' ? body.name.trim() : ''
   if (!name) return NextResponse.json({ error: '请填写 Key 名称' }, { status: 400 })
+  if (name.length > MAX_KEY_NAME_LENGTH) return NextResponse.json({ error: 'Key 名称过长' }, { status: 400 })
 
   const count = await prisma.apiKey.count({ where: { userId: session.id } })
   if (count >= MAX_KEYS_PER_USER) {

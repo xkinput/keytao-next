@@ -16,8 +16,9 @@ interface PRItemInput {
 
 export async function POST(request: NextRequest) {
   try {
-    const maxItems = 100
-    const maxTextLength = 20
+    const maxItems = 500
+    const maxWordLength = 100
+    const maxCodeLength = 20
 
     const session = await getSession()
     if (!session) {
@@ -44,8 +45,8 @@ export async function POST(request: NextRequest) {
         typeof item.code !== 'string' ||
         item.word.trim().length === 0 ||
         item.code.trim().length === 0 ||
-        item.word.trim().length > maxTextLength ||
-        item.code.trim().length > maxTextLength
+        item.word.trim().length > maxWordLength ||
+        item.code.trim().length > maxCodeLength
       ) {
         return NextResponse.json({ error: '词条或编码格式错误' }, { status: 400 })
       }
