@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/auth'
+import { checkRateLimit } from '@/lib/rateLimit'
 
 const BOT_API_URL = process.env.BOT_API_URL || 'http://localhost:8080'
 const BOT_API_KEY = process.env.BOT_API_KEY || ''
@@ -11,10 +12,30 @@ function botHeaders(): HeadersInit {
   }
 }
 
+function checkBotChatRateLimit(userId: number) {
+  const { allowed, retryAfterMs } = checkRateLimit(`bot-chat:${userId}`)
+  if (allowed) {
+    return null
+  }
+
+  return NextResponse.json(
+    { error: '请求过于频繁', retryAfterMs },
+    {
+      status: 429,
+      headers: { 'Retry-After': String(Math.ceil(retryAfterMs / 1000)) },
+    }
+  )
+}
+
 export async function POST(req: NextRequest) {
   const session = await getSession()
   if (!session) {
     return NextResponse.json({ error: '未登录' }, { status: 401 })
+  }
+
+  const rateLimitResponse = checkBotChatRateLimit(session.id)
+  if (rateLimitResponse) {
+    return rateLimitResponse
   }
 
   const body = await req.json().catch(() => null)
@@ -41,6 +62,11 @@ export async function DELETE(req: NextRequest) {
   const session = await getSession()
   if (!session) {
     return NextResponse.json({ error: '未登录' }, { status: 401 })
+  }
+
+  const rateLimitResponse = checkBotChatRateLimit(session.id)
+  if (rateLimitResponse) {
+    return rateLimitResponse
   }
 
   const body = await req.json().catch(() => null)

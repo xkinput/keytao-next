@@ -8,6 +8,7 @@ const mockVerifyApiKey = vi.fn()
 const mockCheckConflict = vi.fn()
 const mockCheckBatchConflictsWithWeight = vi.fn()
 const mockBuildBatchSubmitWarnings = vi.fn()
+const mockCheckRateLimit = vi.fn()
 
 vi.mock('@/lib/auth', () => ({
   getSession: mockGetSession,
@@ -20,6 +21,10 @@ vi.mock('@/lib/adminAuth', () => ({
 
 vi.mock('@/lib/apiKeyAuth', () => ({
   verifyApiKey: mockVerifyApiKey,
+}))
+
+vi.mock('@/lib/rateLimit', () => ({
+  checkRateLimit: mockCheckRateLimit,
 }))
 
 vi.mock('@/lib/services/conflictDetector', () => ({
@@ -92,6 +97,7 @@ beforeEach(() => {
   mockCheckIsAdmin.mockResolvedValue(false)
   mockCheckAdminPermission.mockResolvedValue({ authorized: true, response: undefined })
   mockVerifyApiKey.mockResolvedValue({ success: true, ctx: { userId: 1, apiKeyId: 1 } })
+  mockCheckRateLimit.mockReturnValue({ allowed: true, retryAfterMs: 0 })
   mockCheckConflict.mockResolvedValue({ hasConflict: false })
   mockCheckBatchConflictsWithWeight.mockResolvedValue([])
   mockBuildBatchSubmitWarnings.mockReturnValue([])
@@ -167,6 +173,20 @@ describe('API abuse guards', () => {
     expect(fetch).toHaveBeenCalledOnce()
     const proxiedBody = JSON.parse(String(vi.mocked(fetch).mock.calls[0][1]?.body))
     expect(proxiedBody).toEqual({ message: 'hi', session_id: 's1', user_id: '1' })
+  })
+
+  it('rate limits logged-in bot chat proxy requests', async () => {
+    mockCheckRateLimit.mockReturnValue({ allowed: false, retryAfterMs: 700 })
+    const { POST } = await import('./bot/chat/route')
+
+    const res = await POST(jsonRequest('http://localhost/api/bot/chat', {
+      message: 'hi',
+      session_id: 's1',
+    }))
+
+    expect(res.status).toBe(429)
+    expect(mockCheckRateLimit).toHaveBeenCalledWith('bot-chat:1')
+    expect(fetch).not.toHaveBeenCalled()
   })
 
   it('protects draft batch previews from non-owners', async () => {
