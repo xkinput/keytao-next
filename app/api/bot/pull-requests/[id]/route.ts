@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { verifyBotToken } from '@/lib/botAuth'
 import { prisma } from '@/lib/prisma'
+import { requireVerifiedBotUser } from '@/lib/botUserAuth'
 import { recheckBatchConflicts } from '@/lib/services/batchConflictService'
 
 /**
  * Bot API: Delete a PR item from the user's draft batch
  * DELETE /api/bot/pull-requests/:id
- * Requires Bot token authentication
+ * Requires Bot token plus a matching user JWT or API key
  *
  * Only allows deletion if:
  * - The PR belongs to the caller's batch
@@ -17,10 +17,6 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    if (!await verifyBotToken()) {
-      return NextResponse.json({ success: false, message: '未授权' }, { status: 401 })
-    }
-
     const { id } = await params
     const prId = parseInt(id, 10)
 
@@ -35,23 +31,11 @@ export async function DELETE(
       return NextResponse.json({ success: false, message: '缺少必需参数' }, { status: 400 })
     }
 
-    if (!['qq', 'telegram'].includes(platform)) {
-      return NextResponse.json({ success: false, message: '不支持的平台' }, { status: 400 })
+    const auth = await requireVerifiedBotUser(platform, platformId)
+    if (!auth.authorized) {
+      return NextResponse.json({ success: false, message: auth.message }, { status: auth.status })
     }
-
-    const fieldName = platform === 'qq' ? 'qqId' : 'telegramId'
-
-    const user = await prisma.user.findFirst({
-      where: { [fieldName]: platformId, status: 'ENABLE' },
-      select: { id: true }
-    })
-
-    if (!user) {
-      return NextResponse.json(
-        { success: false, message: '未找到绑定账号，请先使用 /bind 命令绑定' },
-        { status: 404 }
-      )
-    }
+    const user = auth.user
 
     // Fetch PR and its batch in one query to verify ownership
     const pr = await prisma.pullRequest.findUnique({

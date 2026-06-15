@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { getSession } from '@/lib/auth'
+import { checkIsAdmin } from '@/lib/adminAuth'
 import type { PhraseType } from '@/lib/constants/phraseTypes'
 
 interface PreviewPhrase {
@@ -169,6 +171,18 @@ export async function GET(
 
         if (!batch) {
             return NextResponse.json({ error: '批次不存在' }, { status: 404 })
+        }
+
+        const isPublicStatus = ['Submitted', 'Approved', 'Published'].includes(batch.status)
+        if (!isPublicStatus) {
+            const session = await getSession()
+            if (!session) {
+                return NextResponse.json({ error: '未登录' }, { status: 401 })
+            }
+            const isAdmin = await checkIsAdmin(session.id)
+            if (batch.creatorId !== session.id && !isAdmin) {
+                return NextResponse.json({ error: '无权限' }, { status: 403 })
+            }
         }
 
         const codes = new Set<string>()

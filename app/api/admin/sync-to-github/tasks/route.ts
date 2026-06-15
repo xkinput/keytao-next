@@ -1,8 +1,9 @@
 /**
  * GET /api/admin/sync-to-github/tasks
- * List all sync tasks (publicly accessible, no authentication required)
+ * List all sync tasks. Requires admin authentication.
  */
 
+import { checkAdminPermission } from '@/lib/adminAuth';
 import { prisma } from '@/lib/prisma';
 import { NextRequest, NextResponse } from 'next/server';
 
@@ -10,12 +11,13 @@ export const runtime = 'nodejs';
 
 export async function GET(request: NextRequest) {
   try {
-    // No authentication required - allow public access to view sync history
+    const authResult = await checkAdminPermission();
+    if (!authResult.authorized) return authResult.response!;
 
     // Get query parameters
     const { searchParams } = new URL(request.url);
-    const page = parseInt(searchParams.get('page') || '1');
-    const pageSize = parseInt(searchParams.get('pageSize') || '20');
+    const page = Math.min(100, Math.max(1, parseInt(searchParams.get('page') || '1')));
+    const pageSize = Math.min(100, Math.max(1, parseInt(searchParams.get('pageSize') || '20')));
     const skip = (page - 1) * pageSize;
 
     // Query tasks
@@ -97,13 +99,14 @@ export async function GET(request: NextRequest) {
         totalPages: Math.ceil(total / pageSize),
       },
     });
-  } catch (error: any) {
+  } catch (error) {
     console.error('Failed to list sync tasks:', error);
+    const message = error instanceof Error ? error.message : '获取同步任务列表失败';
 
     return NextResponse.json(
       {
         success: false,
-        error: error.message || '获取同步任务列表失败',
+        error: message,
       },
       { status: 500 }
     );

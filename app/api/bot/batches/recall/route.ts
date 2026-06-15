@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { verifyBotToken } from '@/lib/botAuth'
 import { prisma } from '@/lib/prisma'
+import { requireVerifiedBotUser } from '@/lib/botUserAuth'
 
 /**
  * Bot API: Recall (un-submit) the latest submitted batch, reverting it to Draft
  * POST /api/bot/batches/recall
+ * Requires Bot token plus a matching user JWT or API key
  *
  * Automatically finds the most recent Submitted batch belonging to the caller
  * and sets it back to Draft status. Only works if batch is still Submitted
@@ -12,10 +13,6 @@ import { prisma } from '@/lib/prisma'
  */
 export async function POST(request: NextRequest) {
   try {
-    if (!await verifyBotToken()) {
-      return NextResponse.json({ success: false, message: '未授权' }, { status: 401 })
-    }
-
     const body = await request.json()
     const { platform, platformId } = body
 
@@ -23,22 +20,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, message: '缺少必需参数' }, { status: 400 })
     }
 
-    if (!['qq', 'telegram'].includes(platform)) {
-      return NextResponse.json({ success: false, message: '不支持的平台' }, { status: 400 })
-    }
-
-    const fieldName = platform === 'qq' ? 'qqId' : 'telegramId'
-    const user = await prisma.user.findFirst({
-      where: { [fieldName]: platformId, status: 'ENABLE' },
-      select: { id: true },
-    })
-
-    if (!user) {
+    const auth = await requireVerifiedBotUser(platform, platformId)
+    if (!auth.authorized) {
       return NextResponse.json(
-        { success: false, message: '未找到绑定账号，请先使用 /bind 命令绑定' },
-        { status: 404 }
+        { success: false, message: auth.message },
+        { status: auth.status }
       )
     }
+    const user = auth.user
 
     // Find the most recent Submitted batch belonging to this user
     const batch = await prisma.batch.findFirst({

@@ -3,7 +3,7 @@ import { getSession } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { conflictDetector } from '@/lib/services/conflictDetector'
 import { PullRequestType, PhraseType as PrismaPhraseType } from '@prisma/client'
-import { getDefaultWeight, type PhraseType } from '@/lib/constants/phraseTypes'
+import { type PhraseType } from '@/lib/constants/phraseTypes'
 import { calculateWeightForType } from '@/lib/services/batchConflictService'
 import { checkIsAdmin } from '@/lib/adminAuth'
 
@@ -13,6 +13,9 @@ export async function PUT(
     { params }: { params: Promise<{ id: string }> }
 ) {
     try {
+        const maxItems = 100
+        const maxTextLength = 20
+        const maxRemarkLength = 500
         const { id } = await params
         const session = await getSession()
         if (!session) {
@@ -59,11 +62,29 @@ export async function PUT(
             return NextResponse.json({ error: '数据格式错误' }, { status: 400 })
         }
 
+        if (items.length > maxItems) {
+            return NextResponse.json({ error: `一次最多保存 ${maxItems} 个条目` }, { status: 400 })
+        }
+
+        for (const item of items) {
+            if (
+                typeof item.word !== 'string' ||
+                typeof item.code !== 'string' ||
+                item.word.trim().length === 0 ||
+                item.code.trim().length === 0 ||
+                item.word.trim().length > maxTextLength ||
+                item.code.trim().length > maxTextLength ||
+                (item.oldWord !== undefined && item.oldWord.length > maxTextLength) ||
+                (item.remark !== undefined && item.remark.length > maxRemarkLength)
+            ) {
+                return NextResponse.json({ error: '词条、编码或备注格式错误' }, { status: 400 })
+            }
+        }
+
         // 1. Identify Deletions
         // Items provided in body are the desired state. 
         // PRs in DB but NOT in items should be deleted.
         const inputIds = new Set(items.map(i => i.id).filter(Boolean))
-        const existingIds = new Set(batch.pullRequests.map(pr => pr.id))
 
         const idsToDelete = batch.pullRequests
             .filter(pr => !inputIds.has(pr.id))
@@ -92,8 +113,6 @@ export async function PUT(
             list.push(p.word)
             dbPhrasesMap.set(key, list)
         })
-
-        const results = []
 
         // Execute in transaction
         await prisma.$transaction(async (tx) => {

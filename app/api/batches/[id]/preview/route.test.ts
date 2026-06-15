@@ -17,18 +17,31 @@ vi.mock('@/lib/services/batchConflictService', () => ({
     checkBatchConflictsWithWeight: vi.fn(),
 }))
 
+vi.mock('@/lib/auth', () => ({
+    getSession: vi.fn(),
+}))
+
+vi.mock('@/lib/adminAuth', () => ({
+    checkIsAdmin: vi.fn(),
+}))
+
 const { prisma } = await import('@/lib/prisma')
 const { checkBatchConflictsWithWeight } = await import('@/lib/services/batchConflictService')
+const { getSession } = await import('@/lib/auth')
+const { checkIsAdmin } = await import('@/lib/adminAuth')
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const mockPrisma = prisma as any
 const mockCheckBatchConflictsWithWeight = vi.mocked(checkBatchConflictsWithWeight)
+const mockGetSession = vi.mocked(getSession)
+const mockCheckIsAdmin = vi.mocked(checkIsAdmin)
 
 const request = new NextRequest('http://localhost/api/batches/batch-1/preview')
 
 function draftChangeBatch() {
     return {
         id: 'batch-1',
+        creatorId: 1,
         status: 'Draft',
         pullRequests: [
             {
@@ -48,6 +61,8 @@ function draftChangeBatch() {
 
 beforeEach(() => {
     vi.clearAllMocks()
+    mockGetSession.mockResolvedValue({ id: 1, name: 'rea' })
+    mockCheckIsAdmin.mockResolvedValue(false)
     mockPrisma.batch.findUnique.mockResolvedValue(draftChangeBatch())
     mockPrisma.phrase.count.mockResolvedValue(0)
     mockPrisma.phrase.findMany.mockResolvedValue([])
