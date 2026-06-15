@@ -17,7 +17,10 @@ interface FinalizeRequest {
   summary: string;
 }
 
+const MAX_SUMMARY_LENGTH = 20_000;
+
 export async function POST(request: NextRequest) {
+  let taskIdForFailure: string | undefined;
   try {
     // Verify admin permission
     const authResult = await checkAdminPermission();
@@ -27,6 +30,14 @@ export async function POST(request: NextRequest) {
 
     const body: FinalizeRequest = await request.json();
     const { taskId, summary } = body;
+    taskIdForFailure = taskId;
+
+    if (typeof taskId !== 'string' || !taskId || typeof summary !== 'string' || summary.length > MAX_SUMMARY_LENGTH) {
+      return NextResponse.json(
+        { success: false, error: '请求参数格式错误' },
+        { status: 400 }
+      );
+    }
 
     console.log(`[Finalize] Creating PR for task ${taskId}`);
     console.log(`[Finalize] Summary length: ${summary?.length || 0}`);
@@ -121,10 +132,9 @@ export async function POST(request: NextRequest) {
     console.error('[Finalize] Error:', error);
 
     // Mark task as failed
-    const { taskId } = await request.json();
-    if (taskId) {
+    if (taskIdForFailure) {
       await prisma.syncTask.update({
-        where: { id: taskId },
+        where: { id: taskIdForFailure },
         data: {
           status: SyncTaskStatus.Failed,
           error: error instanceof Error ? error.message : '创建 PR 失败',

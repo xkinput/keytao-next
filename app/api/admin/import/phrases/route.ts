@@ -12,6 +12,9 @@ interface ImportResult {
   error?: string
 }
 
+const MAX_IMPORT_LINE_LENGTH = 200
+const MAX_WORD_LENGTH = 20
+
 export async function POST(request: NextRequest) {
   // 验证ROOT管理员权限
   const authCheck = await checkRootAdminPermission()
@@ -60,6 +63,14 @@ export async function POST(request: NextRequest) {
         continue
       }
 
+      if (line.length > MAX_IMPORT_LINE_LENGTH) {
+        results.push({
+          success: false,
+          error: `第 ${currentLine} 行：单行内容过长`
+        })
+        continue
+      }
+
       // Parse line
       const parts = line.split('\t')
       if (parts.length < 2) {
@@ -80,6 +91,16 @@ export async function POST(request: NextRequest) {
           word,
           code,
           error: `第 ${currentLine} 行：词条不能为空`
+        })
+        continue
+      }
+
+      if (word.length > MAX_WORD_LENGTH) {
+        results.push({
+          success: false,
+          word,
+          code,
+          error: `第 ${currentLine} 行：词条长度超过${MAX_WORD_LENGTH}个字符`
         })
         continue
       }
@@ -205,13 +226,10 @@ export async function POST(request: NextRequest) {
 
         // Step 4: Batch insert using createMany (10-100x faster than loop create)
         try {
-          const createResult = await prisma.phrase.createMany({
+          await prisma.phrase.createMany({
             data: phrasesToCreate,
             skipDuplicates: true // Skip if unique constraint violated
           })
-
-          // Mark successful inserts
-          const successCount = createResult.count
 
           // Since createMany doesn't return which records succeeded, 
           // we assume all non-duplicates succeeded

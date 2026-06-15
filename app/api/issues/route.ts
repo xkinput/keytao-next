@@ -3,11 +3,16 @@ import { getSession } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { Prisma } from '@prisma/client'
 
+const MAX_TITLE_LENGTH = 120
+const MAX_CONTENT_LENGTH = 5000
+
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams
-    const page = Math.min(100, Math.max(1, parseInt(searchParams.get('page') || '1')))
-    const pageSize = Math.min(100, Math.max(1, parseInt(searchParams.get('pageSize') || '10')))
+    const rawPage = parseInt(searchParams.get('page') || '1', 10)
+    const rawPageSize = parseInt(searchParams.get('pageSize') || '10', 10)
+    const page = Number.isFinite(rawPage) ? Math.min(100, Math.max(1, rawPage)) : 1
+    const pageSize = Number.isFinite(rawPageSize) ? Math.min(100, Math.max(1, rawPageSize)) : 10
     const statusParam = searchParams.get('status')
 
     const where: Prisma.IssueWhereInput = {}
@@ -79,18 +84,27 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json()
     const { title, content } = body
+    const normalizedTitle = typeof title === 'string' ? title.trim() : ''
+    const normalizedContent = typeof content === 'string' ? content.trim() : ''
 
-    if (!title || !content) {
+    if (!normalizedTitle || !normalizedContent) {
       return NextResponse.json(
         { error: '标题和内容不能为空' },
         { status: 400 }
       )
     }
 
+    if (normalizedTitle.length > MAX_TITLE_LENGTH || normalizedContent.length > MAX_CONTENT_LENGTH) {
+      return NextResponse.json(
+        { error: '标题或内容过长' },
+        { status: 400 }
+      )
+    }
+
     const issue = await prisma.issue.create({
       data: {
-        title,
-        content,
+        title: normalizedTitle,
+        content: normalizedContent,
         status: true, // true = 开放, false = 已关闭
         authorId: session.id
       },

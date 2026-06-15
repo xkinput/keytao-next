@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 
+const PUBLIC_BATCH_STATUSES = ['Submitted', 'Approved', 'Published'] as const
+
 // GET single issue with comments
 export async function GET(
   request: NextRequest,
@@ -11,7 +13,7 @@ export async function GET(
     const { id } = await params
     const issueId = parseInt(id)
 
-    if (isNaN(issueId)) {
+    if (!Number.isInteger(issueId) || issueId <= 0) {
       return NextResponse.json(
         { error: '无效的Issue ID' },
         { status: 400 }
@@ -41,6 +43,9 @@ export async function GET(
           orderBy: { createAt: 'asc' }
         },
         batches: {
+          where: {
+            status: { in: [...PUBLIC_BATCH_STATUSES] }
+          },
           select: {
             id: true,
             description: true,
@@ -86,7 +91,7 @@ export async function PATCH(
     const { id } = await params
     const issueId = parseInt(id)
 
-    if (isNaN(issueId)) {
+    if (!Number.isInteger(issueId) || issueId <= 0) {
       return NextResponse.json(
         { error: '无效的Issue ID' },
         { status: 400 }

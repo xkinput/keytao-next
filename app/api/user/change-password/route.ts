@@ -3,6 +3,8 @@ import { getSession, validatePassword } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import bcrypt from 'bcrypt'
 
+const MAX_PASSWORD_LENGTH = 128
+
 export async function POST(request: NextRequest) {
   try {
     const session = await getSession()
@@ -12,8 +14,12 @@ export async function POST(request: NextRequest) {
 
     const { currentPassword, newPassword } = await request.json()
 
-    if (!currentPassword) {
+    if (typeof currentPassword !== 'string' || !currentPassword) {
       return NextResponse.json({ error: '请输入当前密码' }, { status: 400 })
+    }
+
+    if (currentPassword.length > MAX_PASSWORD_LENGTH || typeof newPassword !== 'string' || newPassword.length > MAX_PASSWORD_LENGTH) {
+      return NextResponse.json({ error: '密码格式不正确' }, { status: 400 })
     }
 
     const passwordValidation = validatePassword(newPassword)

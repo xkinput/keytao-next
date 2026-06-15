@@ -19,6 +19,10 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'word 最多 20 个字符' }, { status: 400 })
   }
 
+  if (requestedCode && requestedCode.length > 20) {
+    return NextResponse.json({ error: 'code 最多 20 个字符' }, { status: 400 })
+  }
+
   try {
     return NextResponse.json(await inferPhrase(word, requestedCode))
   } catch (error) {

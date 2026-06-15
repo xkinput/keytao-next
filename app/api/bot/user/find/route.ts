@@ -3,6 +3,8 @@ import { verifyBotToken } from '@/lib/botAuth'
 import { prisma } from '@/lib/prisma'
 import type { UserFindResult } from '@/lib/types/platform'
 
+const MAX_PLATFORM_ID_LENGTH = 64
+
 /**
  * Find user by platform ID
  * POST /api/bot/user/find
@@ -18,9 +20,17 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     const { platform, platformId } = body
 
-    if (!platform || !platformId) {
+    if (typeof platform !== 'string' || typeof platformId !== 'string' || !platform || !platformId.trim()) {
       return NextResponse.json(
         { error: '缺少必需参数' },
+        { status: 400 }
+      )
+    }
+
+    const normalizedPlatformId = platformId.trim()
+    if (normalizedPlatformId.length > MAX_PLATFORM_ID_LENGTH) {
+      return NextResponse.json(
+        { error: '平台 ID 过长' },
         { status: 400 }
       )
     }
@@ -36,7 +46,7 @@ export async function POST(request: NextRequest) {
     const fieldName = platform === 'qq' ? 'qqId' : 'telegramId'
     const user = await prisma.user.findFirst({
       where: {
-        [fieldName]: platformId,
+        [fieldName]: normalizedPlatformId,
         status: 'ENABLE'
       },
       select: {

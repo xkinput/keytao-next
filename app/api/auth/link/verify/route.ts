@@ -3,6 +3,9 @@ import { verifyBotToken } from '@/lib/botAuth'
 import { prisma } from '@/lib/prisma'
 import type { BindResult } from '@/lib/types/platform'
 
+const LINK_KEY_PATTERN = /^[A-Z2-9]{6}$/
+const MAX_PLATFORM_ID_LENGTH = 64
+
 /**
  * Verify link key and bind platform account
  * POST /api/auth/link/verify
@@ -18,11 +21,24 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     const { key, platform, platformId } = body
 
-    if (!key || !platform || !platformId) {
+    if (typeof key !== 'string' || typeof platform !== 'string' || typeof platformId !== 'string' || !key || !platform || !platformId) {
       return NextResponse.json<BindResult>(
         {
           success: false,
           message: '缺少必需参数'
+        },
+        { status: 400 }
+      )
+    }
+
+    const normalizedKey = key.trim().toUpperCase()
+    const normalizedPlatformId = platformId.trim()
+
+    if (!LINK_KEY_PATTERN.test(normalizedKey) || normalizedPlatformId.length === 0 || normalizedPlatformId.length > MAX_PLATFORM_ID_LENGTH) {
+      return NextResponse.json<BindResult>(
+        {
+          success: false,
+          message: '绑定参数格式错误'
         },
         { status: 400 }
       )
@@ -41,7 +57,7 @@ export async function POST(request: NextRequest) {
     // Find link key
     const linkKey = await prisma.linkKey.findFirst({
       where: {
-        key: key.toUpperCase(),
+        key: normalizedKey,
         isUsed: false
       },
       include: {
@@ -83,7 +99,7 @@ export async function POST(request: NextRequest) {
     const fieldName = platform === 'qq' ? 'qqId' : 'telegramId'
     const existingUser = await prisma.user.findFirst({
       where: {
-        [fieldName]: platformId,
+        [fieldName]: normalizedPlatformId,
         id: { not: linkKey.userId }
       }
     })
@@ -100,7 +116,7 @@ export async function POST(request: NextRequest) {
 
     // Check if user already has a different account bound
     const currentBinding = linkKey.user[fieldName]
-    if (currentBinding && currentBinding !== platformId) {
+    if (currentBinding && currentBinding !== normalizedPlatformId) {
       return NextResponse.json<BindResult>(
         {
           success: false,
@@ -116,7 +132,7 @@ export async function POST(request: NextRequest) {
       prisma.user.update({
         where: { id: linkKey.userId },
         data: {
-          [fieldName]: platformId
+          [fieldName]: normalizedPlatformId
         }
       }),
       // Mark key as used
@@ -126,7 +142,7 @@ export async function POST(request: NextRequest) {
           isUsed: true,
           usedAt: new Date(),
           platform,
-          platformId
+          platformId: normalizedPlatformId
         }
       })
     ])
