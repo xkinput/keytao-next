@@ -9,6 +9,7 @@ import type {
 } from '@/lib/types/bot'
 
 const MAX_BATCH_SIZE = 100
+const MAX_WORD_LENGTH = 20
 
 export async function POST(request: NextRequest) {
   try {
@@ -17,6 +18,13 @@ export async function POST(request: NextRequest) {
 
     const body: BotBatchLookupByWordRequest = await request.json()
     const rawWords = Array.isArray(body.words) ? body.words : []
+    if (rawWords.some((word) => typeof word !== 'string')) {
+      return NextResponse.json<BotBatchLookupByWordResponse>(
+        { success: false, count: 0, results: [], message: '词条必须是字符串' },
+        { status: 400 }
+      )
+    }
+
     const words = rawWords
       .map((word) => word.trim())
       .filter((word) => word.length > 0)
@@ -31,6 +39,13 @@ export async function POST(request: NextRequest) {
     if (words.length > MAX_BATCH_SIZE) {
       return NextResponse.json<BotBatchLookupByWordResponse>(
         { success: false, count: 0, results: [], message: `一次最多查询 ${MAX_BATCH_SIZE} 个词` },
+        { status: 400 }
+      )
+    }
+
+    if (words.some((word) => word.length > MAX_WORD_LENGTH)) {
+      return NextResponse.json<BotBatchLookupByWordResponse>(
+        { success: false, count: 0, results: [], message: '词条过长' },
         { status: 400 }
       )
     }

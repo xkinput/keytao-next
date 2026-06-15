@@ -2,9 +2,26 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { hashSync, genSaltSync } from 'bcrypt'
 import { signToken, validatePassword } from '@/lib/auth'
+import { checkRateLimit } from '@/lib/rateLimit'
+
+function clientKey(request: NextRequest) {
+  const forwardedFor = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
+  return forwardedFor || request.headers.get('x-real-ip')?.trim() || 'unknown'
+}
 
 export async function POST(request: NextRequest) {
   try {
+    const { allowed, retryAfterMs } = checkRateLimit(`auth:register:${clientKey(request)}`)
+    if (!allowed) {
+      return NextResponse.json(
+        { error: '请求过于频繁', retryAfterMs },
+        {
+          status: 429,
+          headers: { 'Retry-After': String(Math.ceil(retryAfterMs / 1000)) },
+        }
+      )
+    }
+
     const body = await request.json()
     const normalizedName = typeof body.name === 'string' ? body.name.trim() : ''
     const normalizedNickname = typeof body.nickname === 'string' ? body.nickname.trim() : ''

@@ -9,9 +9,15 @@ const mockCheckConflict = vi.fn()
 const mockCheckBatchConflictsWithWeight = vi.fn()
 const mockBuildBatchSubmitWarnings = vi.fn()
 const mockCheckRateLimit = vi.fn()
+const mockVerifyBotToken = vi.fn()
+const mockVerifyToken = vi.fn()
+const mockInferPhrases = vi.fn()
 
 vi.mock('@/lib/auth', () => ({
   getSession: mockGetSession,
+  signToken: vi.fn(async () => 'token'),
+  verifyToken: mockVerifyToken,
+  validatePassword: vi.fn(() => ({ valid: true })),
 }))
 
 vi.mock('@/lib/adminAuth', () => ({
@@ -27,6 +33,10 @@ vi.mock('@/lib/rateLimit', () => ({
   checkRateLimit: mockCheckRateLimit,
 }))
 
+vi.mock('@/lib/botAuth', () => ({
+  verifyBotToken: mockVerifyBotToken,
+}))
+
 vi.mock('@/lib/services/conflictDetector', () => ({
   conflictDetector: {
     checkConflict: mockCheckConflict,
@@ -40,6 +50,10 @@ vi.mock('@/lib/services/batchConflictService', () => ({
 
 vi.mock('@/lib/services/batchSubmitWarnings', () => ({
   buildBatchSubmitWarnings: mockBuildBatchSubmitWarnings,
+}))
+
+vi.mock('@/lib/services/phraseInference', () => ({
+  inferPhrases: mockInferPhrases,
 }))
 
 vi.mock('@/lib/prisma', () => ({
@@ -63,6 +77,14 @@ vi.mock('@/lib/prisma', () => ({
     },
     codeConflict: {
       create: vi.fn(),
+    },
+    user: {
+      findUnique: vi.fn(),
+      findFirst: vi.fn(),
+      create: vi.fn(),
+    },
+    role: {
+      findUnique: vi.fn(),
     },
     syncTask: {
       findMany: vi.fn(),
@@ -97,6 +119,9 @@ beforeEach(() => {
   mockCheckIsAdmin.mockResolvedValue(false)
   mockCheckAdminPermission.mockResolvedValue({ authorized: true, response: undefined })
   mockVerifyApiKey.mockResolvedValue({ success: true, ctx: { userId: 1, apiKeyId: 1 } })
+  mockVerifyBotToken.mockResolvedValue(true)
+  mockVerifyToken.mockResolvedValue({ id: 1, name: 'rea' })
+  mockInferPhrases.mockResolvedValue([])
   mockCheckRateLimit.mockReturnValue({ allowed: true, retryAfterMs: 0 })
   mockCheckConflict.mockResolvedValue({ hasConflict: false })
   mockCheckBatchConflictsWithWeight.mockResolvedValue([])
@@ -222,6 +247,126 @@ describe('API abuse guards', () => {
       skip: 0,
       take: 100,
     }))
+  })
+
+  it('filters public by-code and by-word lookups to finished phrases', async () => {
+    mockPrisma.phrase.findMany.mockResolvedValue([])
+    mockPrisma.phrase.count.mockResolvedValue(0)
+
+    const byCode = await import('./phrases/by-code/route')
+    const byCodeRes = await byCode.GET(new NextRequest('http://localhost/api/phrases/by-code?code=gv'))
+
+    expect(byCodeRes.status).toBe(200)
+    expect(mockPrisma.phrase.findMany).toHaveBeenLastCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ status: 'Finish', code: { startsWith: 'gv' } }),
+    }))
+
+    const byWord = await import('./phrases/by-word/route')
+    const byWordRes = await byWord.GET(new NextRequest('http://localhost/api/phrases/by-word?word=中国'))
+
+    expect(byWordRes.status).toBe(200)
+    expect(mockPrisma.phrase.findMany).toHaveBeenLastCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ status: 'Finish', word: '中国' }),
+    }))
+  })
+
+  it('rejects overly long public lookup parameters', async () => {
+    const byCode = await import('./phrases/by-code/route')
+    const byWord = await import('./phrases/by-word/route')
+
+    const longValue = 'x'.repeat(21)
+    const byCodeRes = await byCode.GET(new NextRequest(`http://localhost/api/phrases/by-code?code=${longValue}`))
+    const byWordRes = await byWord.GET(new NextRequest(`http://localhost/api/phrases/by-word?word=${longValue}`))
+
+    expect(byCodeRes.status).toBe(400)
+    expect(byWordRes.status).toBe(400)
+  })
+
+  it('rejects invalid phrase context type and clamps count', async () => {
+    const { GET } = await import('./phrases/context/route')
+
+    const invalidTypeRes = await GET(new NextRequest('http://localhost/api/phrases/context?code=gv&type=Fake'))
+    expect(invalidTypeRes.status).toBe(400)
+
+    const res = await GET(new NextRequest('http://localhost/api/phrases/context?code=gv&count=-10&type=Phrase'))
+    expect(res.status).toBe(200)
+    expect(mockPrisma.phrase.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 1 }))
+  })
+
+  it('limits v1 phrase search length and scan size', async () => {
+    const { GET } = await import('./v1/phrases/route')
+
+    const tooLong = await GET(new NextRequest(`http://localhost/api/v1/phrases?search=${'中'.repeat(51)}`))
+    expect(tooLong.status).toBe(400)
+    expect(mockPrisma.phrase.findMany).not.toHaveBeenCalled()
+
+    mockPrisma.phrase.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+
+    const res = await GET(new NextRequest('http://localhost/api/v1/phrases?search=中国'))
+    expect(res.status).toBe(200)
+    expect(mockPrisma.phrase.findMany).toHaveBeenCalledTimes(3)
+    for (const call of mockPrisma.phrase.findMany.mock.calls) {
+      expect(call[0]).toEqual(expect.objectContaining({ take: 500 }))
+    }
+  })
+
+  it('rejects malformed personal and bot batch lookup payloads', async () => {
+    const personalByCode = await import('./v1/phrases/by-code/batch/route')
+    const botByWord = await import('./bot/phrases/by-word/batch/route')
+
+    const personalRes = await personalByCode.POST(jsonRequest('http://localhost/api/v1/phrases/by-code/batch', {
+      codes: ['a'.repeat(21)],
+    }))
+    const botRes = await botByWord.POST(jsonRequest('http://localhost/api/bot/phrases/by-word/batch', {
+      words: [123],
+    }))
+
+    expect(personalRes.status).toBe(400)
+    expect(botRes.status).toBe(400)
+    expect(mockPrisma.phrase.findMany).not.toHaveBeenCalled()
+  })
+
+  it('rate limits login and register attempts before database work', async () => {
+    mockCheckRateLimit.mockReturnValue({ allowed: false, retryAfterMs: 900 })
+    const login = await import('./auth/login/route')
+    const register = await import('./auth/register/route')
+
+    const loginRes = await login.POST(jsonRequest('http://localhost/api/auth/login', {
+      name: 'rea',
+      password: 'password',
+    }))
+    const registerRes = await register.POST(jsonRequest('http://localhost/api/auth/register', {
+      name: 'rea',
+      email: 'rea@example.com',
+      password: 'password',
+    }))
+
+    expect(loginRes.status).toBe(429)
+    expect(registerRes.status).toBe(429)
+    expect(mockPrisma.user.findUnique).not.toHaveBeenCalled()
+    expect(mockPrisma.user.findFirst).not.toHaveBeenCalled()
+  })
+
+  it('rate limits refresh and public infer-batch before expensive work', async () => {
+    mockCheckRateLimit.mockReturnValue({ allowed: false, retryAfterMs: 900 })
+    const refresh = await import('./auth/refresh/route')
+    const inferBatch = await import('./phrases/infer-batch/route')
+
+    const refreshRes = await refresh.POST(new NextRequest('http://localhost/api/auth/refresh', {
+      method: 'POST',
+      headers: { authorization: 'Bearer token' },
+    }))
+    const inferRes = await inferBatch.POST(jsonRequest('http://localhost/api/phrases/infer-batch', {
+      words: ['中国'],
+    }))
+
+    expect(refreshRes.status).toBe(429)
+    expect(inferRes.status).toBe(429)
+    expect(mockVerifyToken).not.toHaveBeenCalled()
+    expect(mockInferPhrases).not.toHaveBeenCalled()
   })
 
   it('rejects oversized conflict-check batches', async () => {
