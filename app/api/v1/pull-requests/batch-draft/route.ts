@@ -1,67 +1,59 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/lib/prisma'
-import { requireVerifiedBotUser } from '@/lib/botUserAuth'
-import { checkBatchConflictsWithWeight } from '@/lib/services/batchConflictService'
 import { PullRequestType } from '@prisma/client'
-import { detectPhraseType, isValidPhraseType, PhraseType } from '@/lib/constants/phraseTypes'
+
+import { verifyApiKey } from '@/lib/apiKeyAuth'
+import { prisma } from '@/lib/prisma'
+import { detectPhraseType, isValidPhraseType, type PhraseType } from '@/lib/constants/phraseTypes'
+import { checkBatchConflictsWithWeight } from '@/lib/services/batchConflictService'
 import type {
-  BotBatchDraftRequest,
-  BotBatchDraftResponse,
   BotBatchDraftFailedItem,
-  BotDraftSnapshotItem,
-  BotBatchDeleteDraftRequest,
-  BotBatchDeleteDraftResponse,
+  BotBatchDraftItem,
+  BotBatchDraftResponse,
   BotBatchDeleteDraftDeletedItem,
   BotBatchDeleteDraftFailedItem,
+  BotBatchDeleteDraftResponse,
+  BotDraftSnapshotItem,
 } from '@/lib/types/bot'
 
+interface UserBatchDraftRequest {
+  items: BotBatchDraftItem[]
+  batchId?: string
+}
+
+interface UserBatchDeleteDraftRequest {
+  ids: number[]
+}
+
+const API_DRAFT_DESCRIPTION_PREFIX = '个人 API 草稿批次'
 const MAX_DRAFT_ITEMS = 100
 const MAX_DELETE_ITEMS = 100
 const MAX_WORD_LENGTH = 20
 const MAX_CODE_LENGTH = 20
 const MAX_REMARK_LENGTH = 500
 
-/**
- * Bot API: Bulk add items to draft batch (tolerant mode)
- * POST /api/bot/pull-requests/batch-draft
- * Requires Bot token plus a matching user JWT or API key
- *
- * Unlike the regular batch endpoint, this one:
- * - Processes each item individually
- * - Hard conflicts (duplicate word+code, missing existing phrase) → skip, report in `failed`
- * - Duplicate-in-draft → skip silently, report in `skipped`
- * - Warnings (重码) → auto-confirm and write to draft
- * - Returns success count, failed list, and current draft snapshot
- */
 export async function POST(request: NextRequest) {
   try {
-    const body: BotBatchDraftRequest = await request.json()
-    const { platform, platformId, items, batchId: requestedBatchId } = body
+    const auth = await verifyApiKey()
+    if (!auth.success) return auth.response
 
-    if (!platform || !platformId || !items || !Array.isArray(items) || items.length === 0) {
+    const body: UserBatchDraftRequest = await request.json()
+    const { items, batchId: requestedBatchId } = body
+    const userId = auth.ctx.userId
+
+    if (!items || !Array.isArray(items) || items.length === 0) {
       return NextResponse.json<BotBatchDraftResponse>(
-        { success: false, message: '缺少必需参数', successCount: 0, failedCount: 0, skippedCount: 0, warnedCount: 0, failed: [], skipped: [], warned: [], draftItems: [], draftTotal: 0 },
+        emptyDraftResponse('缺少必需参数'),
         { status: 400 }
       )
     }
 
     if (items.length > MAX_DRAFT_ITEMS) {
       return NextResponse.json<BotBatchDraftResponse>(
-        { success: false, message: `一次最多写入 ${MAX_DRAFT_ITEMS} 条`, successCount: 0, failedCount: 0, skippedCount: 0, warnedCount: 0, failed: [], skipped: [], warned: [], draftItems: [], draftTotal: 0 },
+        emptyDraftResponse(`一次最多写入 ${MAX_DRAFT_ITEMS} 条`),
         { status: 400 }
       )
     }
 
-    const auth = await requireVerifiedBotUser(platform, platformId)
-    if (!auth.authorized) {
-      return NextResponse.json<BotBatchDraftResponse>(
-        { success: false, message: auth.message, successCount: 0, failedCount: 0, skippedCount: 0, warnedCount: 0, failed: [], skipped: [], warned: [], draftItems: [], draftTotal: 0 },
-        { status: auth.status }
-      )
-    }
-    const user = auth.user
-
-    // Resolve or create draft batch
     let batchId = requestedBatchId
     if (batchId) {
       const batch = await prisma.batch.findUnique({
@@ -70,45 +62,43 @@ export async function POST(request: NextRequest) {
       })
       if (!batch) {
         return NextResponse.json<BotBatchDraftResponse>(
-          { success: false, message: '批次不存在', successCount: 0, failedCount: 0, skippedCount: 0, warnedCount: 0, failed: [], skipped: [], warned: [], draftItems: [], draftTotal: 0 },
+          emptyDraftResponse('批次不存在'),
           { status: 404 }
         )
       }
-      if (batch.creatorId !== user.id) {
+      if (batch.creatorId !== userId) {
         return NextResponse.json<BotBatchDraftResponse>(
-          { success: false, message: '无权限操作此批次', successCount: 0, failedCount: 0, skippedCount: 0, warnedCount: 0, failed: [], skipped: [], warned: [], draftItems: [], draftTotal: 0 },
+          emptyDraftResponse('无权限操作此批次'),
           { status: 403 }
         )
       }
       if (batch.status !== 'Draft') {
         return NextResponse.json<BotBatchDraftResponse>(
-          { success: false, message: '只能写入草稿状态的批次', successCount: 0, failedCount: 0, skippedCount: 0, warnedCount: 0, failed: [], skipped: [], warned: [], draftItems: [], draftTotal: 0 },
+          emptyDraftResponse('只能写入草稿状态的批次'),
           { status: 400 }
         )
       }
     } else {
       let batch = await prisma.batch.findFirst({
-        where: { creatorId: user.id, status: 'Draft', description: { startsWith: '键道助手' } },
+        where: { creatorId: userId, status: 'Draft', description: { startsWith: API_DRAFT_DESCRIPTION_PREFIX } },
         orderBy: { createAt: 'desc' },
-        select: { id: true }
+        select: { id: true },
       })
       if (!batch) {
         batch = await prisma.batch.create({
-          data: { description: '键道助手草稿批次', creatorId: user.id, status: 'Draft' },
-          select: { id: true }
+          data: { description: API_DRAFT_DESCRIPTION_PREFIX, creatorId: userId, status: 'Draft' },
+          select: { id: true },
         })
       }
       batchId = batch.id
     }
 
-    // Load existing draft items (for duplicate detection)
     const existingPRs = await prisma.pullRequest.findMany({
       where: { batchId },
-      select: { action: true, word: true, oldWord: true, code: true, type: true, weight: true }
+      select: { action: true, word: true, oldWord: true, code: true, type: true, weight: true },
     })
 
-    // Normalize items: explicit type/weight wins, fallback to local detection/default weight.
-    const normalizedItems = items.map(item => {
+    const normalizedItems = items.map((item) => {
       if (typeof item.word !== 'string' || typeof item.code !== 'string') {
         throw new Error('词条和编码必须是字符串')
       }
@@ -144,7 +134,6 @@ export async function POST(request: NextRequest) {
       }
     })
 
-    // Run conflict detection on all items at once (handles intra-batch resolution)
     const conflictItems = normalizedItems.map((item, idx) => ({
       id: String(idx),
       action: item.action,
@@ -165,7 +154,6 @@ export async function POST(request: NextRequest) {
       const item = normalizedItems[i]
       const result = conflictResults[i]
 
-      // Hard conflict → reject
       if (result.conflict.hasConflict) {
         failed.push({
           index: i,
@@ -176,7 +164,6 @@ export async function POST(request: NextRequest) {
         continue
       }
 
-      // Duplicate in existing draft → skip
       const isDuplicate = existingPRs.some(
         pr => pr.action === item.action &&
           pr.word === item.word &&
@@ -195,18 +182,22 @@ export async function POST(request: NextRequest) {
         continue
       }
 
-      // Warning (重码) or clean → write (warnings auto-confirmed for bulk operations)
       const isResolved = result.conflict.suggestions?.some(s => s.action === 'Resolved')
       const conflictReason = isResolved ? undefined : result.conflict.impact || undefined
       if (conflictReason) {
         warned.push({ index: i, word: item.word, code: item.code, reason: conflictReason })
       }
       toWrite.push({ item, conflictReason })
-      // Mark this as "now in draft" so subsequent items in same request see it
-      existingPRs.push({ action: item.action, word: item.word, oldWord: item.oldWord ?? null, code: item.code, type: item.type, weight: item.weight ?? null })
+      existingPRs.push({
+        action: item.action,
+        word: item.word,
+        oldWord: item.oldWord ?? null,
+        code: item.code,
+        type: item.type,
+        weight: item.weight ?? null,
+      })
     }
 
-    // Write all accepted items in one transaction
     if (toWrite.length > 0) {
       await prisma.$transaction(
         toWrite.map(({ item, conflictReason }) =>
@@ -219,7 +210,7 @@ export async function POST(request: NextRequest) {
               type: item.type as PhraseType,
               weight: item.weight,
               remark: item.remark ?? null,
-              userId: user.id,
+              userId,
               batchId: batchId!,
               hasConflict: false,
               conflictReason: conflictReason ?? null,
@@ -229,28 +220,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Fetch updated draft snapshot
-    const updatedBatch = await prisma.batch.findUnique({
-      where: { id: batchId! },
-      select: {
-        pullRequests: {
-          orderBy: { createAt: 'asc' },
-          select: { id: true, action: true, word: true, code: true, type: true, weight: true, status: true, conflictReason: true },
-        },
-      },
-    })
-
-    const draftItems: BotDraftSnapshotItem[] = (updatedBatch?.pullRequests ?? []).map(pr => ({
-      id: pr.id,
-      action: pr.action,
-      word: pr.word ?? '',
-      code: pr.code ?? '',
-      type: pr.type ?? 'Phrase',
-      weight: pr.weight,
-      status: pr.status,
-      ...(pr.conflictReason && { hasWarning: true, warningNote: pr.conflictReason }),
-    }))
-
+    const draftItems = await getDraftItems(batchId!)
     const successCount = toWrite.length
     const failedCount = failed.length
     const skippedCount = skipped.length
@@ -275,23 +245,101 @@ export async function POST(request: NextRequest) {
       draftItems,
       draftTotal: draftItems.length,
     })
-  } catch (error: unknown) {
-    console.error('[Bot API] batch-draft error:', error)
+  } catch (error) {
+    console.error('[API v1] batch-draft error:', error)
     const msg = error instanceof Error ? error.message : '未知错误'
     return NextResponse.json<BotBatchDraftResponse>(
-      {
-        success: false,
-        message: `批量写入失败：${msg}`,
-        successCount: 0,
-        failedCount: 0,
-        skippedCount: 0,
-        warnedCount: 0,
-        failed: [],
-        skipped: [],
-        warned: [],
-        draftItems: [],
-        draftTotal: 0,
+      emptyDraftResponse(`批量写入失败：${msg}`),
+      { status: 500 }
+    )
+  }
+}
+
+export async function DELETE(request: NextRequest) {
+  try {
+    const auth = await verifyApiKey()
+    if (!auth.success) return auth.response
+
+    const body: UserBatchDeleteDraftRequest = await request.json()
+    const { ids } = body
+    const userId = auth.ctx.userId
+
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      return NextResponse.json<BotBatchDeleteDraftResponse>(
+        emptyDeleteResponse('缺少必需参数'),
+        { status: 400 }
+      )
+    }
+
+    if (ids.length > MAX_DELETE_ITEMS || ids.some(id => !Number.isInteger(id) || id <= 0)) {
+      return NextResponse.json<BotBatchDeleteDraftResponse>(
+        emptyDeleteResponse(`一次最多删除 ${MAX_DELETE_ITEMS} 条，且 ID 必须为正整数`),
+        { status: 400 }
+      )
+    }
+
+    const prs = await prisma.pullRequest.findMany({
+      where: { id: { in: ids } },
+      select: {
+        id: true,
+        action: true,
+        word: true,
+        code: true,
+        userId: true,
+        batchId: true,
+        batch: { select: { id: true, status: true, creatorId: true } },
       },
+    })
+
+    const prMap = new Map(prs.map(pr => [pr.id, pr]))
+    const deleted: BotBatchDeleteDraftDeletedItem[] = []
+    const failed: BotBatchDeleteDraftFailedItem[] = []
+    const toDeleteIds: number[] = []
+    let batchId: string | undefined
+
+    for (const id of ids) {
+      const pr = prMap.get(id)
+      if (!pr) {
+        failed.push({ id, reason: '条目不存在' })
+        continue
+      }
+      if (pr.userId !== userId || pr.batch?.creatorId !== userId) {
+        failed.push({ id, reason: '无权限删除此条目' })
+        continue
+      }
+      if (pr.batch?.status !== 'Draft') {
+        failed.push({ id, reason: '只能删除草稿状态的条目' })
+        continue
+      }
+      toDeleteIds.push(id)
+      deleted.push({ id, word: pr.word ?? '', code: pr.code ?? '', action: pr.action })
+      batchId = batchId ?? (pr.batchId ?? undefined)
+    }
+
+    if (toDeleteIds.length > 0) {
+      await prisma.pullRequest.deleteMany({ where: { id: { in: toDeleteIds } } })
+    }
+
+    const draftItems = batchId ? await getDraftItems(batchId) : []
+    const parts: string[] = [`成功删除 ${deleted.length} 条`]
+    if (failed.length > 0) parts.push(`失败 ${failed.length} 条`)
+
+    return NextResponse.json<BotBatchDeleteDraftResponse>({
+      success: true,
+      message: parts.join('，'),
+      ...(batchId && { batchId }),
+      successCount: deleted.length,
+      failedCount: failed.length,
+      deleted,
+      failed,
+      draftItems,
+      draftTotal: draftItems.length,
+    })
+  } catch (error) {
+    console.error('[API v1] batch-draft DELETE error:', error)
+    const msg = error instanceof Error ? error.message : '未知错误'
+    return NextResponse.json<BotBatchDeleteDraftResponse>(
+      emptyDeleteResponse(`批量删除失败：${msg}`),
       { status: 500 }
     )
   }
@@ -317,128 +365,54 @@ function normalizeWeight(weight: unknown): number | undefined {
   return parsed
 }
 
-/**
- * Bot API: Batch delete items from draft batch
- * DELETE /api/bot/pull-requests/batch-draft
- * Requires Bot token plus a matching user JWT or API key
- *
- * Body: { platform, platformId, ids: number[] }
- * Only deletes items that belong to the caller and are in Draft status.
- */
-export async function DELETE(request: NextRequest) {
-  try {
-    const body: BotBatchDeleteDraftRequest = await request.json()
-    const { platform, platformId, ids } = body
-
-    if (!platform || !platformId || !ids || !Array.isArray(ids) || ids.length === 0) {
-      return NextResponse.json<BotBatchDeleteDraftResponse>(
-        { success: false, message: '缺少必需参数', successCount: 0, failedCount: 0, deleted: [], failed: [], draftItems: [], draftTotal: 0 },
-        { status: 400 }
-      )
-    }
-
-    if (ids.length > MAX_DELETE_ITEMS || ids.some(id => !Number.isInteger(id) || id <= 0)) {
-      return NextResponse.json<BotBatchDeleteDraftResponse>(
-        { success: false, message: `一次最多删除 ${MAX_DELETE_ITEMS} 条，且 ID 必须为正整数`, successCount: 0, failedCount: 0, deleted: [], failed: [], draftItems: [], draftTotal: 0 },
-        { status: 400 }
-      )
-    }
-
-    const auth = await requireVerifiedBotUser(platform, platformId)
-    if (!auth.authorized) {
-      return NextResponse.json<BotBatchDeleteDraftResponse>(
-        { success: false, message: auth.message, successCount: 0, failedCount: 0, deleted: [], failed: [], draftItems: [], draftTotal: 0 },
-        { status: auth.status }
-      )
-    }
-    const user = auth.user
-
-    // Fetch all requested PRs with batch info
-    const prs = await prisma.pullRequest.findMany({
-      where: { id: { in: ids } },
-      select: {
-        id: true,
-        action: true,
-        word: true,
-        code: true,
-        userId: true,
-        batchId: true,
-        batch: { select: { id: true, status: true } },
+async function getDraftItems(batchId: string): Promise<BotDraftSnapshotItem[]> {
+  const batch = await prisma.batch.findUnique({
+    where: { id: batchId },
+    select: {
+      pullRequests: {
+        orderBy: { createAt: 'asc' },
+        select: { id: true, action: true, word: true, code: true, type: true, weight: true, status: true, conflictReason: true },
       },
-    })
+    },
+  })
 
-    const prMap = new Map(prs.map(pr => [pr.id, pr]))
-    const deleted: BotBatchDeleteDraftDeletedItem[] = []
-    const failed: BotBatchDeleteDraftFailedItem[] = []
-    const toDeleteIds: number[] = []
-    let batchId: string | undefined
+  return (batch?.pullRequests ?? []).map(pr => ({
+    id: pr.id,
+    action: pr.action,
+    word: pr.word ?? '',
+    code: pr.code ?? '',
+    type: pr.type ?? 'Phrase',
+    weight: pr.weight,
+    status: pr.status,
+    ...(pr.conflictReason && { hasWarning: true, warningNote: pr.conflictReason }),
+  }))
+}
 
-    for (const id of ids) {
-      const pr = prMap.get(id)
-      if (!pr) {
-        failed.push({ id, reason: '条目不存在' })
-        continue
-      }
-      if (pr.userId !== user.id) {
-        failed.push({ id, reason: '无权限删除此条目' })
-        continue
-      }
-      if (pr.batch?.status !== 'Draft') {
-        failed.push({ id, reason: '只能删除草稿状态的条目' })
-        continue
-      }
-      toDeleteIds.push(id)
-      deleted.push({ id, word: pr.word ?? '', code: pr.code ?? '', action: pr.action })
-      batchId = batchId ?? (pr.batchId ?? undefined)
-    }
+function emptyDraftResponse(message: string): BotBatchDraftResponse {
+  return {
+    success: false,
+    message,
+    successCount: 0,
+    failedCount: 0,
+    skippedCount: 0,
+    warnedCount: 0,
+    failed: [],
+    skipped: [],
+    warned: [],
+    draftItems: [],
+    draftTotal: 0,
+  }
+}
 
-    if (toDeleteIds.length > 0) {
-      await prisma.pullRequest.deleteMany({ where: { id: { in: toDeleteIds } } })
-    }
-
-    // Fetch updated draft snapshot
-    const updatedBatch = batchId
-      ? await prisma.batch.findUnique({
-        where: { id: batchId },
-        select: {
-          pullRequests: {
-            orderBy: { createAt: 'asc' },
-            select: { id: true, action: true, word: true, code: true, type: true, weight: true, status: true },
-          },
-        },
-      })
-      : null
-
-    const draftItems: BotDraftSnapshotItem[] = (updatedBatch?.pullRequests ?? []).map(pr => ({
-      id: pr.id,
-      action: pr.action,
-      word: pr.word ?? '',
-      code: pr.code ?? '',
-      type: pr.type ?? 'Phrase',
-      weight: pr.weight,
-      status: pr.status,
-    }))
-
-    const parts: string[] = [`成功删除 ${deleted.length} 条`]
-    if (failed.length > 0) parts.push(`失败 ${failed.length} 条`)
-
-    return NextResponse.json<BotBatchDeleteDraftResponse>({
-      success: true,
-      message: parts.join('，'),
-      ...(batchId && { batchId }),
-      successCount: deleted.length,
-      failedCount: failed.length,
-      deleted,
-      failed,
-      draftItems,
-      draftTotal: draftItems.length,
-    })
-  } catch (error: unknown) {
-    console.error('[Bot API] batch-draft DELETE error:', error)
-    const msg = error instanceof Error ? error.message : '未知错误'
-    return NextResponse.json<BotBatchDeleteDraftResponse>(
-      { success: false, message: `批量删除失败：${msg}`, successCount: 0, failedCount: 0, deleted: [], failed: [], draftItems: [], draftTotal: 0 },
-      { status: 500 }
-    )
+function emptyDeleteResponse(message: string): BotBatchDeleteDraftResponse {
+  return {
+    success: false,
+    message,
+    successCount: 0,
+    failedCount: 0,
+    deleted: [],
+    failed: [],
+    draftItems: [],
+    draftTotal: 0,
   }
 }

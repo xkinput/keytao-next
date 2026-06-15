@@ -16,6 +16,9 @@ interface PRItemInput {
 
 export async function POST(request: NextRequest) {
   try {
+    const maxItems = 100
+    const maxTextLength = 20
+
     const session = await getSession()
     if (!session) {
       return NextResponse.json({ error: '未登录' }, { status: 401 })
@@ -29,6 +32,23 @@ export async function POST(request: NextRequest) {
         { error: 'Invalid items array' },
         { status: 400 }
       )
+    }
+
+    if (items.length > maxItems) {
+      return NextResponse.json({ error: `最多 ${maxItems} 个条目` }, { status: 400 })
+    }
+
+    for (const item of items) {
+      if (
+        typeof item.word !== 'string' ||
+        typeof item.code !== 'string' ||
+        item.word.trim().length === 0 ||
+        item.code.trim().length === 0 ||
+        item.word.trim().length > maxTextLength ||
+        item.code.trim().length > maxTextLength
+      ) {
+        return NextResponse.json({ error: '词条或编码格式错误' }, { status: 400 })
+      }
     }
 
     // Use unified batch conflict detection service

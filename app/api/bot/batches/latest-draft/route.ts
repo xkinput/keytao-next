@@ -1,28 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { verifyBotToken } from '@/lib/botAuth'
 import { prisma } from '@/lib/prisma'
-import { isValidPlatform, resolveUserByPlatform } from '@/lib/botUserResolver'
+import { requireVerifiedBotUser } from '@/lib/botUserAuth'
 
 /**
  * Bot API: Get or create latest draft batch
  * GET /api/bot/batches/latest-draft
- * Requires Bot token authentication
+ * Requires Bot token plus a matching user JWT or API key
  * 
  * Returns the user's latest Draft batch, or creates a new one if none exists
  */
 export async function GET(request: NextRequest) {
   try {
-    // Verify bot token
-    if (!await verifyBotToken()) {
-      return NextResponse.json(
-        {
-          success: false,
-          message: '未授权'
-        },
-        { status: 401 }
-      )
-    }
-
     const searchParams = request.nextUrl.searchParams
     const platform = searchParams.get('platform') as 'qq' | 'telegram' | null
     const platformId = searchParams.get('platformId')
@@ -43,45 +31,17 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    if (!isValidPlatform(platform)) {
+    const auth = await requireVerifiedBotUser(platform, platformId)
+    if (!auth.authorized) {
       return NextResponse.json(
         {
           success: false,
-          message: '不支持的平台'
+          message: auth.message
         },
-        { status: 400 }
+        { status: auth.status }
       )
     }
-
-    // Find user by platform ID
-    let user
-    try {
-      user = await resolveUserByPlatform(platform, platformId)
-    } catch (prismaError) {
-      console.error('[Bot API] Prisma error:', prismaError)
-
-      if (prismaError && typeof prismaError === 'object' && 'code' in prismaError && prismaError.code === 'P2022') {
-        return NextResponse.json(
-          {
-            success: false,
-            message: '系统配置错误，请联系管理员更新数据库'
-          },
-          { status: 500 }
-        )
-      }
-
-      throw prismaError
-    }
-
-    if (!user) {
-      return NextResponse.json(
-        {
-          success: false,
-          message: '未找到绑定账号。\n\n请先使用 /bind 命令绑定你的平台账号到键道加词平台～'
-        },
-        { status: 404 }
-      )
-    }
+    const user = auth.user
 
     // Find latest Draft batch for this user (bot-created only)
     // Bot-created batches have description starting with "键道助手"
