@@ -3,9 +3,53 @@ import { getSession } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { conflictDetector } from '@/lib/services/conflictDetector'
 import { PullRequestType, PhraseType as PrismaPhraseType } from '@prisma/client'
-import { type PhraseType } from '@/lib/constants/phraseTypes'
+import { isValidPhraseType, type PhraseType } from '@/lib/constants/phraseTypes'
 import { calculateWeightForType } from '@/lib/services/batchConflictService'
 import { checkIsAdmin } from '@/lib/adminAuth'
+
+const allowedActions = ['Create', 'Change', 'Delete'] as const
+
+type RawBatchSyncItem = {
+    id?: unknown
+    action?: unknown
+    word?: unknown
+    oldWord?: unknown
+    code?: unknown
+    type?: unknown
+    weight?: unknown
+    remark?: unknown
+}
+
+type BatchSyncItem = {
+    id?: number
+    action: PullRequestType
+    word: string
+    oldWord?: string
+    code: string
+    type?: PhraseType
+    weight?: number
+    remark?: string | null
+}
+
+class BatchSyncInputError extends Error {
+    status = 400
+}
+
+function parseOptionalPositiveInt(value: unknown): number | undefined | null {
+    if (value === undefined || value === null || value === '') return undefined
+    const parsed = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN
+    return Number.isInteger(parsed) && parsed > 0 ? parsed : null
+}
+
+function parseOptionalInt(value: unknown): number | undefined | null {
+    if (value === undefined || value === null || value === '') return undefined
+    const parsed = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN
+    return Number.isInteger(parsed) ? parsed : null
+}
+
+function isAllowedAction(action: unknown): action is PullRequestType {
+    return typeof action === 'string' && allowedActions.includes(action as typeof allowedActions[number])
+}
 
 // PUT /api/batches/:id/pull-requests - Batch sync PRs (Create/Update/Delete)
 export async function PUT(
@@ -46,46 +90,76 @@ export async function PUT(
         }
 
         const body = await request.json()
-        const { items } = body as {
-            items: Array<{
-                id?: number
-                action: PullRequestType
-                word: string
-                oldWord?: string
-                code: string
-                type?: string
-                weight?: number
-                remark?: string
-            }>
-        }
+        const rawItems = (body as { items?: unknown }).items
 
-        if (!Array.isArray(items)) {
+        if (!Array.isArray(rawItems)) {
             return NextResponse.json({ error: '数据格式错误' }, { status: 400 })
         }
 
-        if (items.length > maxItems) {
+        if (rawItems.length > maxItems) {
             return NextResponse.json({ error: `一次最多保存 ${maxItems} 个条目` }, { status: 400 })
         }
 
-        for (const item of items) {
+        const items: BatchSyncItem[] = []
+        for (const rawItem of rawItems) {
+            if (!rawItem || typeof rawItem !== 'object') {
+                return NextResponse.json({ error: '数据格式错误' }, { status: 400 })
+            }
+
+            const item = rawItem as RawBatchSyncItem
+            const itemId = parseOptionalPositiveInt(item.id)
+            const weight = parseOptionalInt(item.weight)
+            const word = typeof item.word === 'string' ? item.word.trim() : ''
+            const code = typeof item.code === 'string' ? item.code.trim() : ''
+            const oldWord = typeof item.oldWord === 'string' ? item.oldWord.trim() : undefined
+            const type = typeof item.type === 'string' && item.type ? item.type : undefined
+            const remark = item.remark === undefined
+                ? undefined
+                : item.remark === null
+                    ? null
+                    : typeof item.remark === 'string'
+                        ? item.remark
+                        : undefined
+
             if (
-                typeof item.word !== 'string' ||
-                typeof item.code !== 'string' ||
-                item.word.trim().length === 0 ||
-                item.code.trim().length === 0 ||
-                item.word.trim().length > maxWordLength ||
-                item.code.trim().length > maxCodeLength ||
-                (item.oldWord !== undefined && item.oldWord.length > maxWordLength) ||
-                (item.remark !== undefined && item.remark.length > maxRemarkLength)
+                itemId === null ||
+                weight === null ||
+                !isAllowedAction(item.action) ||
+                word.length === 0 ||
+                code.length === 0 ||
+                word.length > maxWordLength ||
+                code.length > maxCodeLength ||
+                (item.oldWord !== undefined && item.oldWord !== null && typeof item.oldWord !== 'string') ||
+                (oldWord !== undefined && oldWord.length > maxWordLength) ||
+                (type !== undefined && !isValidPhraseType(type)) ||
+                (item.remark !== undefined && item.remark !== null && typeof item.remark !== 'string') ||
+                (typeof remark === 'string' && remark.length > maxRemarkLength)
             ) {
                 return NextResponse.json({ error: '词条、编码或备注格式错误' }, { status: 400 })
             }
+
+            items.push({
+                id: itemId,
+                action: item.action,
+                word,
+                oldWord,
+                code,
+                type,
+                weight,
+                remark
+            })
+        }
+
+        const batchPullRequestIds = new Set(batch.pullRequests.map(pr => pr.id))
+        const invalidItem = items.find(item => item.id !== undefined && !batchPullRequestIds.has(item.id))
+        if (invalidItem) {
+            return NextResponse.json({ error: '修改项不存在或不属于此批次' }, { status: 400 })
         }
 
         // 1. Identify Deletions
         // Items provided in body are the desired state. 
         // PRs in DB but NOT in items should be deleted.
-        const inputIds = new Set(items.map(i => i.id).filter(Boolean))
+        const inputIds = new Set(items.map(i => i.id).filter((itemId): itemId is number => itemId !== undefined))
 
         const idsToDelete = batch.pullRequests
             .filter(pr => !inputIds.has(pr.id))
@@ -120,7 +194,7 @@ export async function PUT(
             // A. Delete removed PRs
             if (idsToDelete.length > 0) {
                 await tx.pullRequest.deleteMany({
-                    where: { id: { in: idsToDelete } }
+                    where: { id: { in: idsToDelete }, batchId: id }
                 })
             }
 
@@ -198,45 +272,43 @@ export async function PUT(
                     word: item.word,
                     oldWord: item.oldWord,
                     code: item.code,
+                    type: item.type ? (item.type as PrismaPhraseType) : undefined,
                     weight: finalWeight,
                     phraseId: finalPhraseId
                 })
 
                 if (item.id) {
-                    // Update
-                    // Verify item belongs to batch? (Security)
-                    // Actually `idsToDelete` logic handles membership check implicitly for removal.
-                    // But update ID must prevent updating other's PRs.
-                    // We are in a transaction. We can trust ID if we checked ownership?
-                    // The Prisma `update` where `{ id, batchId: id }` limits scope.
-
-                    await tx.pullRequest.update({
-                        where: { id: item.id, batchId: id }, // Ensure PR belongs to this batch
+                    const result = await tx.pullRequest.updateMany({
+                        where: { id: item.id, batchId: id },
                         data: {
                             word: item.word,
                             oldWord: item.action === 'Change' ? item.oldWord : null,
                             code: item.code,
                             action: item.action,
-                            type: item.type ? (item.type as PhraseType) : undefined,
-                            weight: finalWeight || undefined,
+                            type: item.type ? (item.type as PrismaPhraseType) : undefined,
+                            weight: finalWeight ?? undefined,
                             remark: item.remark !== undefined ? (item.remark || null) : undefined,
                             phraseId: finalPhraseId,
                             hasConflict: conflict.hasConflict,
                             conflictReason: conflict.hasConflict ? conflict.impact : null
                         }
                     })
+
+                    if (result.count !== 1) {
+                        throw new BatchSyncInputError('修改项不存在或不属于此批次')
+                    }
                 } else {
                     // Create
                     await tx.pullRequest.create({
                         data: {
                             batchId: id,
-                            userId: session.id,
+                            userId: batch.creatorId,
                             word: item.word,
                             oldWord: item.action === 'Change' ? item.oldWord : undefined,
                             code: item.code,
                             action: item.action,
-                            type: item.type ? (item.type as PhraseType) : undefined,
-                            weight: finalWeight || undefined,
+                            type: item.type ? (item.type as PrismaPhraseType) : undefined,
+                            weight: finalWeight ?? undefined,
                             remark: item.remark || null,
                             phraseId: finalPhraseId,
                             hasConflict: conflict.hasConflict,
@@ -249,6 +321,10 @@ export async function PUT(
 
         return NextResponse.json({ success: true })
     } catch (error) {
+        if (error instanceof BatchSyncInputError) {
+            return NextResponse.json({ error: error.message }, { status: error.status })
+        }
+
         console.error('Batch sync PRs error:', error)
         return NextResponse.json({ error: '保存失败' }, { status: 500 })
     }

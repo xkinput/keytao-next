@@ -84,6 +84,7 @@ interface BatchConflictCheckResponse {
 
 // Form data managed by react-hook-form
 interface FormItem {
+  pullRequestId?: number
   action: 'Create' | 'Change' | 'Delete'
   word: string
   oldWord: string
@@ -274,6 +275,7 @@ export default function CreatePRModal({
       if (batchPRs && batchPRs.length > 0) {
         // Batch edit mode: load all PRs from the batch
         const items: FormItem[] = batchPRs.map((pr) => ({
+          pullRequestId: pr.id,
           action: pr.action,
           word: pr.word,
           oldWord: pr.oldWord || '',
@@ -813,7 +815,7 @@ export default function CreatePRModal({
           method: 'PUT',
           body: {
             items: data.items.map((item, idx) => ({
-              id: batchPRs?.[idx]?.id, // Existing PR ID from batchPRs
+              id: item.pullRequestId ?? (fields[idx] as typeof fields[number] & { pullRequestId?: number } | undefined)?.pullRequestId,
               action: item.action,
               word: item.word,
               oldWord: item.action === 'Change' ? item.oldWord : undefined,
