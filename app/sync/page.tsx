@@ -50,7 +50,7 @@ interface SyncTask {
       delete: number
     }
     creator: {
-      id: string
+      id: number
       name: string
     }
     totalPullRequests: number
@@ -94,10 +94,6 @@ export default function SyncPage() {
   const [tagError, setTagError] = useState<string | null>(null)
   const [tagSuccess, setTagSuccess] = useState<string | null>(null)
 
-  // Check if user is admin
-  const { data: adminCheck } = useAPI('/api/admin/stats')
-  const isAdmin = !!adminCheck
-
   // Get sync tasks with pagination (public access, no auth required)
   const {
     data: tasksData,
@@ -105,14 +101,15 @@ export default function SyncPage() {
     isLoading,
     mutate,
   } = useAPI<TasksResponse>(
-    `/api/admin/sync-to-github/tasks?page=${currentPage}&pageSize=10`,
+    `/api/sync-to-github/tasks?page=${currentPage}&pageSize=10`,
     { withAuth: false }
   )
 
   // Get stats including pending sync batches count
   const { data: statsData, mutate: mutateStats } = useAPI<StatsResponse>(
-    '/api/admin/stats'
+    token ? '/api/admin/stats' : null
   )
+  const isAdmin = !!statsData
 
   // Get latest tag (admin only)
   const { data: tagData, mutate: mutateTag } = useAPI<{

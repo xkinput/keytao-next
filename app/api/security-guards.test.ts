@@ -353,6 +353,28 @@ describe('API abuse guards', () => {
     expect(mockPrisma.syncTask.findMany).not.toHaveBeenCalled()
   })
 
+  it('keeps sync task history publicly readable', async () => {
+    mockGetSession.mockResolvedValue(null)
+    mockPrisma.syncTask.findMany.mockResolvedValue([])
+    mockPrisma.syncTask.count.mockResolvedValue(0)
+    const { GET } = await import('./sync-to-github/tasks/route')
+
+    const res = await GET(new NextRequest('http://localhost/api/sync-to-github/tasks?page=1&pageSize=10'))
+
+    expect(res.status).toBe(200)
+    await expect(res.json()).resolves.toMatchObject({
+      tasks: [],
+      pagination: {
+        page: 1,
+        pageSize: 10,
+        total: 0,
+        totalPages: 0,
+      },
+    })
+    expect(mockCheckAdminPermission).not.toHaveBeenCalled()
+    expect(mockPrisma.syncTask.findMany).toHaveBeenCalled()
+  })
+
   it('clamps public phrase pagination and only returns finished phrases', async () => {
     const { GET } = await import('./phrases/route')
 
