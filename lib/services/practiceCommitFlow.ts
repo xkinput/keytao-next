@@ -1,5 +1,13 @@
 import type { RimeComposition } from '@/lib/librime-wasm/types'
 
+export type PracticeCodeDetectionMode = 'full' | 'phonetic'
+
+export type PracticeDetectionCodeEntry = {
+  code: string
+  source?: string
+  phoneticCode?: string
+}
+
 export type PracticeCommitResolution =
   | { type: 'noop' }
   | { type: 'partial'; text: string }
@@ -27,6 +35,105 @@ export function hasActiveRimeComposition(composition: RimeComposition | null | u
   if (!composition) return false
 
   return composition.preedit.trim().length > 0 || composition.candidates.length > 0
+}
+
+function normalizePracticeCode(code: string): string {
+  return code.trim().toLowerCase()
+}
+
+export function isCssPracticeCodeSource(source: string | undefined): boolean {
+  const normalizedSource = source?.toLowerCase() ?? ''
+  return normalizedSource.includes('css') || normalizedSource.includes('声笔笔')
+}
+
+export function buildPracticeDetectionCodes(
+  entries: Array<string | PracticeDetectionCodeEntry>,
+  mode: PracticeCodeDetectionMode
+): string[] {
+  const detectionCodes: string[] = []
+  const seenCodes = new Set<string>()
+
+  for (const entry of entries) {
+    const code = normalizePracticeCode(typeof entry === 'string' ? entry : entry.code)
+    if (!code) continue
+
+    const source = typeof entry === 'string' ? undefined : entry.source
+    const phoneticCode = typeof entry === 'string' ? '' : normalizePracticeCode(entry.phoneticCode ?? '')
+    const isCssSource = isCssPracticeCodeSource(source)
+    const detectionCode = mode === 'phonetic'
+      ? isCssSource
+        ? code.slice(0, 1)
+        : phoneticCode || code.slice(0, 2)
+      : code
+
+    if (!detectionCode || seenCodes.has(detectionCode)) continue
+    seenCodes.add(detectionCode)
+    detectionCodes.push(detectionCode)
+  }
+
+  return detectionCodes
+}
+
+export function buildPureDoublePinyinTextCodes(
+  text: string | undefined,
+  getCodesForChar: (char: string) => string[],
+  limit = 6
+): string[] {
+  const chars = text ? Array.from(text) : []
+  if (chars.length === 0) return []
+
+  const selectedChars = chars.length >= 4
+    ? [chars[0], chars[1], chars[2], chars[chars.length - 1]]
+    : chars
+  const useInitialOnly = chars.length >= 3
+  let codes = ['']
+
+  for (const char of selectedChars) {
+    const charCodes = Array.from(new Set(
+      getCodesForChar(char)
+        .map(normalizePracticeCode)
+        .map((code) => useInitialOnly ? code.slice(0, 1) : code.slice(0, 2))
+        .filter((code) => code.length === (useInitialOnly ? 1 : 2) && !code.includes('?'))
+    ))
+    if (charCodes.length === 0) return []
+
+    const nextCodes: string[] = []
+    for (const prefix of codes) {
+      for (const charCode of charCodes) {
+        nextCodes.push(`${prefix}${charCode}`)
+      }
+    }
+    codes = Array.from(new Set(nextCodes)).slice(0, limit)
+  }
+
+  return codes.filter(Boolean)
+}
+
+export function findAutoCommitCandidateIndex(
+  composition: RimeComposition | null | undefined,
+  currentCommittedText: string,
+  currentTargetText: string | undefined,
+  targetCodes: string[]
+): number {
+  if (!composition || !currentTargetText) return -1
+
+  const preedit = normalizePracticeCode(composition.preedit)
+  const normalizedTargetCodes = targetCodes.map(normalizePracticeCode)
+  if (!preedit || !normalizedTargetCodes.some((code) => code === preedit)) return -1
+
+  return composition.candidates.findIndex((candidate) => `${currentCommittedText}${candidate.text}` === currentTargetText)
+}
+
+export function hasMatchingPracticeCode(
+  composition: RimeComposition | null | undefined,
+  targetCodes: string[]
+): boolean {
+  if (!composition) return false
+
+  const preedit = normalizePracticeCode(composition.preedit)
+  if (!preedit) return false
+
+  return targetCodes.some((code) => normalizePracticeCode(code) === preedit)
 }
 
 export function resolvePracticeCommit(params: {

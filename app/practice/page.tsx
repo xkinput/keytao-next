@@ -52,7 +52,18 @@ import {
   type PracticeDictionary,
   type PracticeEntry,
 } from '@/lib/services/keytaoPracticeDictionary'
-import { resolveFollowPracticeCommit, resolvePracticeCommit, splitFollowRemainingTexts, type FollowCurrentItemSegment } from '@/lib/services/practiceCommitFlow'
+import {
+  buildPracticeDetectionCodes,
+  buildPureDoublePinyinTextCodes,
+  findAutoCommitCandidateIndex,
+  hasMatchingPracticeCode,
+  isCssPracticeCodeSource,
+  resolveFollowPracticeCommit,
+  resolvePracticeCommit,
+  splitFollowRemainingTexts,
+  type FollowCurrentItemSegment,
+  type PracticeDetectionCodeEntry,
+} from '@/lib/services/practiceCommitFlow'
 import {
   deleteCachedPracticeSchemeZip,
   getCachedPracticeSchemeZip,
@@ -351,21 +362,6 @@ function shufflePracticeItems<T>(items: T[]): T[] {
   return nextItems
 }
 
-function findAutoCommitCandidateIndex(
-  composition: RimeComposition | null | undefined,
-  currentCommittedText: string,
-  currentTargetText: string | undefined,
-  targetCodes: string[]
-): number {
-  if (!composition || !currentTargetText) return -1
-
-  const preedit = composition.preedit.trim().toLowerCase()
-  const normalizedTargetCodes = targetCodes.map((code) => code.trim().toLowerCase())
-  if (!preedit || !normalizedTargetCodes.some((code) => code === preedit)) return -1
-
-  return composition.candidates.findIndex((candidate) => `${currentCommittedText}${candidate.text}` === currentTargetText)
-}
-
 function normalizePinyin(value: string): string {
   return value
     .replace(/[āáǎà]/g, 'a').replace(/[ēéěè]/g, 'e').replace(/[īíǐì]/g, 'i')
@@ -405,6 +401,38 @@ function getPinyinForChar(char: string): string {
 function getPinyinReadingsForChar(char: string): string[] {
   const result = pinyin(char, { type: 'array', toneType: 'none', multiple: true })
   return Array.isArray(result) ? Array.from(new Set(result.filter(Boolean))) : []
+}
+
+function getFallbackPhoneticCodesForChar(char: string): string[] {
+  return getPinyinReadingsForChar(char)
+    .map((reading) => {
+      const { initial, final } = parsePinyinSyllable(reading)
+      return encodePhoneticCode(initial, final)
+    })
+    .filter((code) => code.length === 2 && !code.includes('?'))
+}
+
+function getPureDoublePinyinCodesForChar(char: string, dictionary: PracticeDictionary | null): string[] {
+  const dictionaryCodes = (dictionary?.entriesByText.get(char) ?? [])
+    .filter((entry) => !isCssPracticeCodeSource(entry.source))
+    .map((entry) => entry.code.trim().toLowerCase().slice(0, 2))
+    .filter((code) => code.length === 2 && !code.includes('?'))
+  const uniqueDictionaryCodes = Array.from(new Set(dictionaryCodes))
+  if (uniqueDictionaryCodes.length > 0) return uniqueDictionaryCodes
+
+  return Array.from(new Set(getFallbackPhoneticCodesForChar(char)))
+}
+
+function buildPureDoublePinyinCodesForText(
+  text: string | undefined,
+  dictionary: PracticeDictionary | null,
+  limit = 6
+): string[] {
+  return buildPureDoublePinyinTextCodes(
+    text,
+    (char) => getPureDoublePinyinCodesForChar(char, dictionary),
+    limit
+  )
 }
 
 function getFlyKeyHints(initial: string, final: string): FlyKeyHint[] {
@@ -897,11 +925,13 @@ export default function KeyTaoPracticePage() {
   const practiceSource = usePracticeStore((state) => state.practiceSource) as PracticeSource
   const selectedArticleId = usePracticeStore((state) => state.selectedArticleId)
   const practiceMode = usePracticeStore((state) => state.practiceMode) as PracticeMode
+  const pureDoublePinyinPractice = usePracticeStore((state) => state.pureDoublePinyinPractice)
   const hasHydratedPracticeStore = usePracticeStore((state) => state.hasHydrated)
   const setSelectedSchemeKey = usePracticeStore((state) => state.setSelectedSchemeKey)
   const setPracticeSource = usePracticeStore((state) => state.setPracticeSource)
   const setSelectedArticleId = usePracticeStore((state) => state.setSelectedArticleId)
   const setStoredPracticeMode = usePracticeStore((state) => state.setPracticeMode)
+  const setPureDoublePinyinPractice = usePracticeStore((state) => state.setPureDoublePinyinPractice)
   const upsertCachedSchemeVersion = usePracticeStore((state) => state.upsertCachedSchemeVersion)
   const removeCachedSchemeVersion = usePracticeStore((state) => state.removeCachedSchemeVersion)
 
@@ -994,9 +1024,57 @@ export default function KeyTaoPracticePage() {
   )
   const isStudyMode = practiceMode === 'study'
   const isRimeReady = rimeStatus === 'ready' && Boolean(rimeEngineRef.current)
+  const shouldUsePureDoublePinyinDetection = isStudyMode && pureDoublePinyinPractice
+  const shouldPreferCssDetectionCodes = shouldUsePureDoublePinyinDetection && isCssPracticeCodeSource(
+    selectedRimeSchema ? `${selectedRimeSchema.id} ${selectedRimeSchema.name}` : undefined
+  )
+  const pureDoublePinyinTextCodes = useMemo(
+    () => buildPureDoublePinyinCodesForText(currentItem?.text, dictionary),
+    [currentItem?.text, dictionary]
+  )
+  const currentTargetCodeEntries = useMemo<PracticeDetectionCodeEntry[]>(() => {
+    const fallbackCodes = currentItem?.codes ?? currentInsight?.codes ?? []
+    if (!shouldUsePureDoublePinyinDetection) return fallbackCodes.map((code) => ({ code }))
+
+    const dictionaryEntries = currentItem && dictionary
+      ? dictionary.entriesByText.get(currentItem.text) ?? []
+      : []
+
+    if (dictionaryEntries.length > 0) {
+      const preferredEntries = dictionaryEntries.filter(
+        (entry) => isCssPracticeCodeSource(entry.source) === shouldPreferCssDetectionCodes
+      )
+      const selectedEntries = preferredEntries.length > 0 ? preferredEntries : dictionaryEntries
+
+      if (!shouldPreferCssDetectionCodes && pureDoublePinyinTextCodes.length > 0) {
+        return pureDoublePinyinTextCodes.map((phoneticCode, index) => ({
+          code: selectedEntries[index]?.code ?? selectedEntries[0]?.code ?? fallbackCodes[0] ?? phoneticCode,
+          source: selectedEntries[index]?.source ?? selectedEntries[0]?.source,
+          phoneticCode,
+        }))
+      }
+
+      return selectedEntries.slice(0, 6).map((entry) => ({
+        code: entry.code,
+        source: entry.source,
+      }))
+    }
+
+    if (!shouldPreferCssDetectionCodes && pureDoublePinyinTextCodes.length > 0) {
+      return pureDoublePinyinTextCodes.map((phoneticCode) => ({
+        code: fallbackCodes[0] ?? phoneticCode,
+        phoneticCode,
+      }))
+    }
+
+    return fallbackCodes.map((code) => ({ code }))
+  }, [currentInsight?.codes, currentItem, dictionary, pureDoublePinyinTextCodes, shouldPreferCssDetectionCodes, shouldUsePureDoublePinyinDetection])
   const currentTargetCodes = useMemo(
-    () => currentItem?.codes?.slice(0, 6) ?? currentInsight?.codes ?? [],
-    [currentInsight?.codes, currentItem?.codes]
+    () => buildPracticeDetectionCodes(
+      currentTargetCodeEntries,
+      shouldUsePureDoublePinyinDetection ? 'phonetic' : 'full'
+    ),
+    [currentTargetCodeEntries, shouldUsePureDoublePinyinDetection]
   )
   const followRenderedSegments = useMemo(
     () => splitFollowRemainingTexts(remainingPracticeTexts, currentCommittedText),
@@ -1659,6 +1737,11 @@ export default function KeyTaoPracticePage() {
             return
           }
 
+          if (shouldUsePureDoublePinyinDetection && !currentCommittedTextRef.current && hasMatchingPracticeCode(result.composition, currentTargetCodes)) {
+            completeCurrentItem(null)
+            return
+          }
+
           const currentTargetText = currentItemTextRef.current
           const autoCommitCandidateIndex = isStudyMode
             ? findAutoCommitCandidateIndex(result.composition, currentCommittedTextRef.current, currentTargetText, currentTargetCodes)
@@ -1680,7 +1763,7 @@ export default function KeyTaoPracticePage() {
           setRimeMessage(error instanceof Error ? error.message : 'librime wasm 输入失败')
         }
       })
-  }, [applyRimeResult, clearPendingStudyAutoCommit, currentTargetCodes, isStudyMode, resetRimeSession])
+  }, [applyRimeResult, clearPendingStudyAutoCommit, completeCurrentItem, currentTargetCodes, isStudyMode, resetRimeSession, shouldUsePureDoublePinyinDetection])
 
   const submitRimeKey = useCallback((key: string) => {
     if (!currentItem || isFinished) return false
@@ -1811,9 +1894,17 @@ export default function KeyTaoPracticePage() {
   const handlePracticeModeChange = useCallback((enabled: boolean) => {
     clearPendingStudyAutoCommit()
     setStoredPracticeMode(enabled ? 'study' : 'follow')
+    if (!enabled) setPureDoublePinyinPractice(false)
     setFeedback(null)
     focusPracticeSurface()
-  }, [clearPendingStudyAutoCommit, focusPracticeSurface, setStoredPracticeMode])
+  }, [clearPendingStudyAutoCommit, focusPracticeSurface, setPureDoublePinyinPractice, setStoredPracticeMode])
+
+  const handlePureDoublePinyinPracticeChange = useCallback((enabled: boolean) => {
+    clearPendingStudyAutoCommit()
+    setPureDoublePinyinPractice(enabled)
+    setFeedback(null)
+    focusPracticeSurface()
+  }, [clearPendingStudyAutoCommit, focusPracticeSurface, setPureDoublePinyinPractice])
 
   const loadPracticeArticles = useCallback(async (forceRefresh = false) => {
     const cachedArticles = readCachedPracticeArticles()
@@ -2400,6 +2491,15 @@ export default function KeyTaoPracticePage() {
                     >
                       学习模式
                     </Switch>
+                    {isStudyMode && (
+                      <Switch
+                        size="sm"
+                        isSelected={pureDoublePinyinPractice}
+                        onValueChange={handlePureDoublePinyinPracticeChange}
+                      >
+                        纯双拼
+                      </Switch>
+                    )}
                     <Button
                       size="sm"
                       variant={practiceShuffleSeed > 0 ? 'flat' : 'light'}

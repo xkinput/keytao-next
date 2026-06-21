@@ -12,11 +12,13 @@ interface PracticeStore {
   practiceSource: PracticeSourcePreference
   selectedArticleId: string
   practiceMode: PracticeModePreference
+  pureDoublePinyinPractice: boolean
   hasHydrated: boolean
   setSelectedSchemeKey: (schemeKey: PracticeSchemeKey) => void
   setPracticeSource: (source: PracticeSourcePreference) => void
   setSelectedArticleId: (articleId: string) => void
   setPracticeMode: (mode: PracticeModePreference) => void
+  setPureDoublePinyinPractice: (enabled: boolean) => void
   upsertCachedSchemeVersion: (version: CachedPracticeSchemeVersion) => void
   removeCachedSchemeVersion: (schemeKey: PracticeSchemeKey, version: string) => void
   setHasHydrated: (state: boolean) => void
@@ -41,11 +43,13 @@ export const usePracticeStore = create<PracticeStore>()(
       practiceSource: 'common500',
       selectedArticleId: 'builtin:default-longform',
       practiceMode: 'follow',
+      pureDoublePinyinPractice: false,
       hasHydrated: false,
       setSelectedSchemeKey: (schemeKey) => set({ selectedSchemeKey: schemeKey }),
       setPracticeSource: (practiceSource) => set({ practiceSource }),
       setSelectedArticleId: (selectedArticleId) => set({ selectedArticleId }),
       setPracticeMode: (practiceMode) => set({ practiceMode }),
+      setPureDoublePinyinPractice: (pureDoublePinyinPractice) => set({ pureDoublePinyinPractice }),
       upsertCachedSchemeVersion: (version) => set((state) => {
         const currentVersions = state.cachedSchemeVersions[version.schemeKey] ?? []
         const nextVersions = sortCachedVersions([
@@ -76,6 +80,7 @@ export const usePracticeStore = create<PracticeStore>()(
         practiceSource: state.practiceSource,
         selectedArticleId: state.selectedArticleId,
         practiceMode: state.practiceMode,
+        pureDoublePinyinPractice: state.pureDoublePinyinPractice,
       }),
       onRehydrateStorage: () => (state) => {
         state?.setHasHydrated(true)
