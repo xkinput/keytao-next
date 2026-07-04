@@ -7,9 +7,10 @@ import {
     Chip,
     Button,
 } from '@heroui/react'
-import { AlertTriangle } from 'lucide-react'
+import { AlertTriangle, Bot, CheckCircle2 } from 'lucide-react'
 import CodePhrasesPopover from './CodePhrasesPopover'
 import { getPhraseTypeLabel, type PhraseType } from '@/lib/constants/phraseTypes'
+import type { BatchAiReviewItem, BatchAiReviewStatus } from '@/lib/types/batchAiReview'
 
 interface PullRequest {
     id: number
@@ -36,6 +37,7 @@ interface PullRequest {
         word: string
         code: string
     }
+    aiReview?: BatchAiReviewItem
     conflicts: Array<{
         code: string
         currentWord: string | null
@@ -86,6 +88,24 @@ export default function BatchPRList({
             Delete: 'danger'
         }
         return map[action] || 'default'
+    }
+
+    const getAiStatusColor = (status: BatchAiReviewStatus): "success" | "warning" | "danger" => {
+        const map: Record<BatchAiReviewStatus, "success" | "warning" | "danger"> = {
+            pass: 'success',
+            attention: 'warning',
+            manual_review: 'danger'
+        }
+        return map[status]
+    }
+
+    const getAiStatusText = (status: BatchAiReviewStatus) => {
+        const map: Record<BatchAiReviewStatus, string> = {
+            pass: '建议通过',
+            attention: '需关注',
+            manual_review: '人工确认'
+        }
+        return map[status]
     }
 
     if (pullRequests.length === 0) {
@@ -164,6 +184,16 @@ export default function BatchPRList({
                             ) : null}
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
+                            {pr.aiReview?.reviewRecord && (
+                                <Chip color="primary" size="sm" variant="flat" startContent={<Bot className="w-3 h-3" />}>
+                                    喵喵已审
+                                </Chip>
+                            )}
+                            {pr.aiReview && pr.aiReview.status !== 'pass' && (
+                                <Chip color={getAiStatusColor(pr.aiReview.status)} size="sm" variant="flat">
+                                    {getAiStatusText(pr.aiReview.status)}
+                                </Chip>
+                            )}
                             {(pr.conflictInfo?.hasConflict ?? pr.hasConflict) && (
                                 <Chip color="warning" size="sm" variant="flat" startContent={<AlertTriangle className="w-3 h-3" />}>
                                     冲突
@@ -172,9 +202,51 @@ export default function BatchPRList({
                         </div>
                     </CardHeader>
                     <CardBody>
-                        {pr.remark && (
+                        {pr.aiReview?.reviewRecord ? (
+                            <div className="mb-3 rounded-lg bg-primary-50 dark:bg-primary-100/10 p-3">
+                                <div className="flex items-center gap-2 mb-2">
+                                    <Bot className="w-4 h-4 text-primary" />
+                                    <p className="text-small font-medium text-primary">喵喵审核记录</p>
+                                </div>
+                                <p className="text-small text-default-600 mb-2">{pr.aiReview.reviewRecord.summary}</p>
+                                {pr.aiReview.reviewRecord.evidence.length > 0 && (
+                                    <div className="flex flex-wrap gap-2">
+                                        {pr.aiReview.reviewRecord.evidence.map((evidence, index) => (
+                                            <Chip key={index} size="sm" variant="flat" color="primary">
+                                                {evidence}
+                                            </Chip>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        ) : pr.remark && (
                             <div className="mb-3">
                                 <p className="text-small text-default-500">备注: {pr.remark}</p>
+                            </div>
+                        )}
+
+                        {pr.aiReview && (
+                            <div className="mb-3 rounded-lg bg-default-50 dark:bg-default-100/10 p-3">
+                                <div className="flex items-center gap-2 mb-2">
+                                    {pr.aiReview.status === 'pass' ? (
+                                        <CheckCircle2 className="w-4 h-4 text-success" />
+                                    ) : (
+                                        <AlertTriangle className={`w-4 h-4 ${pr.aiReview.status === 'manual_review' ? 'text-danger' : 'text-warning'}`} />
+                                    )}
+                                    <p className="text-small font-medium">{pr.aiReview.title}</p>
+                                </div>
+                                <div className="space-y-1">
+                                    {pr.aiReview.reasons.map((reason, index) => (
+                                        <p key={`reason-${index}`} className="text-small text-default-600">
+                                            {reason}
+                                        </p>
+                                    ))}
+                                    {pr.aiReview.suggestions.map((suggestion, index) => (
+                                        <p key={`suggestion-${index}`} className="text-small text-default-500">
+                                            建议：{suggestion}
+                                        </p>
+                                    ))}
+                                </div>
                             </div>
                         )}
 

@@ -192,7 +192,7 @@ export async function approveSubmittedBatch({
       where: { id: batchId },
       data: {
         status: 'Approved',
-        reviewNote: reviewNote || (mode === 'bot-auto' ? 'Bot 自动审词通过' : null),
+        reviewNote: reviewNote || (mode === 'bot-auto' ? '本喵自动审词通过' : null),
       },
     })
   })

@@ -108,7 +108,9 @@ vi.mock('@/lib/prisma', () => ({
     },
     syncTask: {
       findUnique: vi.fn(),
+      findFirst: vi.fn(),
       findMany: vi.fn(),
+      create: vi.fn(),
       update: vi.fn(),
       count: vi.fn(),
     },
@@ -161,6 +163,8 @@ beforeEach(() => {
   mockPrisma.phrase.count.mockResolvedValue(0)
   mockPrisma.phrase.groupBy.mockResolvedValue([])
   mockPrisma.syncTask.findMany.mockResolvedValue([])
+  mockPrisma.syncTask.findFirst.mockResolvedValue(null)
+  mockPrisma.syncTask.create.mockResolvedValue({ id: 'sync-task-1' })
   mockPrisma.syncTask.count.mockResolvedValue(0)
   vi.stubGlobal('fetch', vi.fn(async () => ({
     status: 200,
@@ -266,6 +270,35 @@ describe('API abuse guards', () => {
     expect(await withoutIdentity.json()).toEqual({ success: false, message: '未授权' })
     expect(mockPrisma.user.findFirst).not.toHaveBeenCalled()
     expect(mockPrisma.batch.findFirst).not.toHaveBeenCalled()
+  })
+
+  it('requires bot token for scheduled GitHub auto sync', async () => {
+    mockVerifyBotToken.mockResolvedValue(false)
+    const { POST } = await import('./bot/sync-to-github/auto/route')
+
+    const res = await POST(jsonRequest('http://localhost/api/bot/sync-to-github/auto', { threshold: 10 }))
+
+    expect(res.status).toBe(401)
+    expect(mockPrisma.batch.count).not.toHaveBeenCalled()
+    expect(mockCreateGithubSyncService).not.toHaveBeenCalled()
+  })
+
+  it('skips scheduled GitHub auto sync below threshold', async () => {
+    mockPrisma.batch.count.mockResolvedValue(10)
+    const { POST } = await import('./bot/sync-to-github/auto/route')
+
+    const res = await POST(jsonRequest('http://localhost/api/bot/sync-to-github/auto', { threshold: 10 }))
+    const data = await res.json()
+
+    expect(res.status).toBe(200)
+    expect(data).toMatchObject({
+      success: true,
+      triggered: false,
+      pendingSyncBatches: 10,
+      skippedReason: 'below_threshold',
+    })
+    expect(mockPrisma.syncTask.findFirst).not.toHaveBeenCalled()
+    expect(mockCreateGithubSyncService).not.toHaveBeenCalled()
   })
 
   it('rate limits logged-in bot chat proxy requests', async () => {

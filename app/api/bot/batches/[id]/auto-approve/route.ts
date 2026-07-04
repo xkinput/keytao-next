@@ -59,14 +59,14 @@ export async function POST(
 
     const result = await approveSubmittedBatch({
       batchId: id,
-      reviewNote: reviewNote || 'Bot 自动审词通过',
+      reviewNote: reviewNote || '本喵自动审词通过',
       mode: 'bot-auto',
       allowDelete: false,
     })
 
     return NextResponse.json({
       success: true,
-      message: '批次已由 Bot 自动审核通过',
+      message: '批次已由本喵自动审核通过',
       batch: {
         id: result.batch.id,
         status: result.batch.status,

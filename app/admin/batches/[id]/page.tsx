@@ -11,12 +11,17 @@ import {
   Chip,
   Textarea
 } from '@heroui/react'
-import { AlertTriangle } from 'lucide-react'
+import { AlertTriangle, Bot, CheckCircle2, FilePenLine, ListChecks } from 'lucide-react'
 import BatchPreview from '@/app/components/BatchPreview'
 import { useAPI, apiRequest } from '@/lib/hooks/useSWR'
 import BatchPRList from '@/app/components/BatchPRList'
 import { useUIStore } from '@/lib/store/ui'
 import type { PhraseType } from '@/lib/constants/phraseTypes'
+import type {
+  BatchAiReviewItem,
+  BatchAiReviewResult,
+  BatchAiReviewVerdict,
+} from '@/lib/types/batchAiReview'
 
 interface PullRequest {
   id: number
@@ -42,6 +47,7 @@ interface PullRequest {
     word: string
     code: string
   }
+  aiReview?: BatchAiReviewItem
   conflicts: Array<{
     code: string
     currentWord: string | null
@@ -74,6 +80,7 @@ interface BatchDetail {
     title: string
   }
   pullRequests: PullRequest[]
+  aiReview?: BatchAiReviewResult
 }
 
 export default function AdminBatchDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -83,7 +90,7 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
   const [processing, setProcessing] = useState(false)
   const { openAlert, openConfirm } = useUIStore()
 
-  const { data: batch, error, isLoading, mutate } = useAPI<{ batch: BatchDetail }>(
+  const { data: batch, error, isLoading } = useAPI<{ batch: BatchDetail }>(
     `/api/admin/batches/${resolvedParams.id}`,
     { withAuth: true }
   )
@@ -175,6 +182,33 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
     return map[status] || status
   }
 
+  const getAiVerdictColor = (verdict: BatchAiReviewVerdict): 'success' | 'warning' | 'danger' => {
+    const map: Record<BatchAiReviewVerdict, 'success' | 'warning' | 'danger'> = {
+      pass: 'success',
+      needs_attention: 'warning',
+      manual_review: 'danger'
+    }
+    return map[verdict]
+  }
+
+  const getAiVerdictText = (verdict: BatchAiReviewVerdict) => {
+    const map: Record<BatchAiReviewVerdict, string> = {
+      pass: '建议可通过',
+      needs_attention: '建议复核',
+      manual_review: '需人工确认'
+    }
+    return map[verdict]
+  }
+
+  const formatChain = (entries: BatchAiReviewResult['codeChains'][number]['before']) => {
+    if (entries.length === 0) return '空'
+    return entries
+      .slice(0, 6)
+      .map(entry => `「${entry.word}」(${entry.weight ?? '?'})`)
+      .join(' > ')
+      + (entries.length > 6 ? ' > ...' : '')
+  }
+
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -205,6 +239,8 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
   const batchData = batch.batch
   const canReview = batchData.status === 'Submitted'
   const hasConflicts = batchData.pullRequests.some(pr => pr.conflictInfo?.hasConflict ?? pr.hasConflict)
+  const aiReview = batchData.aiReview
+  const aiAttentionItems = aiReview?.items.filter(item => item.status !== 'pass') ?? []
 
   return (
     <div className="min-h-screen">
@@ -290,6 +326,132 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
         </div>
 
         <div className="space-y-6 mb-6">
+          {aiReview && (
+            <Card>
+              <CardHeader>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between w-full">
+                  <div>
+                    <div className="flex items-center gap-2 mb-2">
+                      <Bot className="w-5 h-5 text-primary" />
+                      <h3 className="text-xl font-bold">喵喵审核建议</h3>
+                      <Chip color={getAiVerdictColor(aiReview.verdict)} variant="flat">
+                        {getAiVerdictText(aiReview.verdict)}
+                      </Chip>
+                    </div>
+                    <p className="text-default-600">{aiReview.headline}</p>
+                  </div>
+                  {canReview && (
+                    <Button
+                      color="primary"
+                      variant="flat"
+                      startContent={<FilePenLine className="w-4 h-4" />}
+                      onPress={() => setReviewNote(aiReview.suggestedReviewNote)}
+                    >
+                      填入审核意见
+                    </Button>
+                  )}
+                </div>
+              </CardHeader>
+              <CardBody className="space-y-5">
+                <div className="flex flex-wrap gap-2">
+                  <Chip size="sm" color="success" variant="flat">
+                    建议通过 {aiReview.riskCounts.pass}
+                  </Chip>
+                  <Chip size="sm" color="warning" variant="flat">
+                    需复核 {aiReview.riskCounts.attention}
+                  </Chip>
+                  <Chip size="sm" color="danger" variant="flat">
+                    人工确认 {aiReview.riskCounts.manualReview}
+                  </Chip>
+                  <Chip size="sm" color="primary" variant="flat">
+                    喵喵已审 {aiReview.riskCounts.botReviewed}
+                  </Chip>
+                </div>
+
+                <div className="grid gap-4 lg:grid-cols-2">
+                  <div className="rounded-lg border border-default-200 p-4">
+                    <div className="flex items-center gap-2 mb-3">
+                      <ListChecks className="w-4 h-4 text-default-500" />
+                      <p className="font-medium">审核检查</p>
+                    </div>
+                    <div className="space-y-2">
+                      {aiReview.checklist.map((item, index) => (
+                        <div key={index} className="flex gap-2 text-small text-default-600">
+                          <CheckCircle2 className="w-4 h-4 text-success shrink-0 mt-0.5" />
+                          <span>{item}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg border border-default-200 p-4">
+                    <div className="flex items-center gap-2 mb-3">
+                      <AlertTriangle className="w-4 h-4 text-warning" />
+                      <p className="font-medium">需关注条目</p>
+                    </div>
+                    {aiAttentionItems.length === 0 ? (
+                      <p className="text-small text-default-500">没有发现需要特别拎出的条目。</p>
+                    ) : (
+                      <div className="space-y-3">
+                        {aiAttentionItems.map(item => (
+                          <div key={item.prId} className="rounded-md bg-default-50 dark:bg-default-100/10 p-3">
+                            <div className="flex items-center gap-2 mb-1">
+                              <Chip size="sm" color={item.severity} variant="flat">
+                                PR#{item.prId}
+                              </Chip>
+                              <span className="text-small font-medium">{item.title}</span>
+                            </div>
+                            <div className="space-y-1">
+                              {item.reasons.slice(0, 2).map((reason, index) => (
+                                <p key={index} className="text-small text-default-500">{reason}</p>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-default-200 p-4">
+                  <div className="flex items-center gap-2 mb-3">
+                    <FilePenLine className="w-4 h-4 text-default-500" />
+                    <p className="font-medium">建议审核记录</p>
+                  </div>
+                  <pre className="whitespace-pre-wrap text-small text-default-600 font-sans leading-6">
+                    {aiReview.suggestedReviewNote}
+                  </pre>
+                </div>
+
+                {aiReview.codeChains.length > 0 && (
+                  <div className="rounded-lg border border-default-200 p-4">
+                    <p className="font-medium mb-3">编码链优先级建议</p>
+                    <div className="space-y-4">
+                      {aiReview.codeChains.map(chain => (
+                        <div key={`${chain.type}:${chain.code}`} className="border-b border-default-100 last:border-b-0 pb-4 last:pb-0">
+                          <div className="flex items-center gap-2 mb-2">
+                            <code className="text-primary">{chain.code}</code>
+                            <Chip size="sm" variant="flat">{chain.type}</Chip>
+                          </div>
+                          <div className="space-y-1 text-small text-default-500 mb-2">
+                            <p>调整前：{formatChain(chain.before)}</p>
+                            <p>调整后：{formatChain(chain.after)}</p>
+                          </div>
+                          <div className="space-y-1">
+                            {chain.recommendations.map((recommendation, index) => (
+                              <p key={index} className="text-small text-default-600">
+                                {recommendation}
+                              </p>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </CardBody>
+            </Card>
+          )}
           <BatchPreview batchId={resolvedParams.id} />
           <BatchPRList pullRequests={batchData.pullRequests} />
         </div>
@@ -302,7 +464,7 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
             <CardBody>
               <Textarea
                 label="审核意见"
-                placeholder={hasConflicts ? "批次包含冲突，拒绝时必须填写原因" : "可选，说明审核决定"}
+                placeholder={hasConflicts ? "批次包含冲突，拒绝时必须填写原因" : "可填入喵喵建议，或手写审核决定"}
                 value={reviewNote}
                 onValueChange={setReviewNote}
                 minRows={3}
