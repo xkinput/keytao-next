@@ -5,6 +5,7 @@ import {
   createE2EUser,
   ensureE2ERoles,
   E2E_PREFIX,
+  getE2EPrisma,
   suppressIntroModal,
 } from './helpers/e2e-data'
 
@@ -117,5 +118,55 @@ test.describe('认证与账号功能 e2e 覆盖', () => {
 
     await expect(page).toHaveURL(/\/batch\/[0-9a-f-]+/)
     await expect(page.getByText(/修改批次|批次/).first()).toBeVisible()
+  })
+
+  test('批次功能: 编辑草稿修改提议时词条输入保持可见', async ({ page }) => {
+    const user = await createE2EUser({ role: 'normal' })
+    const prisma = await getE2EPrisma()
+    const suffix = Date.now().toString(36)
+    const batch = await prisma.batch.create({
+      data: {
+        description: `${E2E_PREFIX} draft modal layout ${suffix}`,
+        status: 'Draft',
+        creatorId: user.id,
+      },
+    })
+    await prisma.pullRequest.create({
+      data: {
+        action: 'Change',
+        word: '端测新词',
+        oldWord: '端测旧词',
+        code: `e${suffix.slice(-5)}`,
+        type: 'Phrase',
+        weight: 100,
+        userId: user.id,
+        batchId: batch.id,
+      },
+    })
+    await authenticatePage(page, user)
+    await page.setViewportSize({ width: 1280, height: 720 })
+
+    await page.goto(`/batch/${batch.id}`)
+    await page.getByRole('button', { name: '编辑修改' }).click()
+
+    const dialog = page.getByRole('dialog').filter({ hasText: '编辑修改提议' })
+    await expect(dialog).toBeVisible()
+
+    const expectFieldInViewport = async (label: RegExp, minWidth = 80) => {
+      const field = dialog.getByLabel(label)
+      await expect(field).toBeVisible()
+      const box = await field.boundingBox()
+      const viewport = page.viewportSize()
+      expect(box, `${label} should have layout bounds`).not.toBeNull()
+      expect(viewport, 'viewport should be available').not.toBeNull()
+      expect(box!.width, `${label} should not be squeezed closed`).toBeGreaterThan(minWidth)
+      expect(box!.x, `${label} should stay inside the viewport`).toBeGreaterThanOrEqual(0)
+      expect(box!.x + box!.width, `${label} should stay inside the viewport`).toBeLessThanOrEqual(viewport!.width)
+    }
+
+    await expectFieldInViewport(/旧词/)
+    await expectFieldInViewport(/新词/)
+    await expectFieldInViewport(/编码/)
+    await expectFieldInViewport(/权重/, 48)
   })
 })

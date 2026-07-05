@@ -48,7 +48,10 @@ function flatClassNames(classNames: ClassNames) {
 
 function hasClassToken(className: string | undefined, pattern: RegExp) {
   if (!className) return false
-  return className.split(/\s+/).some((token) => pattern.test(token))
+  return className.split(/\s+/).some((token) => {
+    const coreToken = token.split(':').pop() ?? token
+    return pattern.test(token) || pattern.test(coreToken)
+  })
 }
 
 function sectionPadding(defaultX: string, defaultY: string, className: string | undefined) {
@@ -59,6 +62,27 @@ function sectionPadding(defaultX: string, defaultY: string, className: string | 
 
 function sectionGap(defaultGap: string, className: string | undefined) {
   return hasClassToken(className, /^!?-?gap[xy]?-|^!?-?space-[xy]-/) ? undefined : defaultGap
+}
+
+function hasFieldSizingIntent(className: string | undefined) {
+  if (!className) return false
+
+  return className.split(/\s+/).some((token) => {
+    const coreToken = token.split(':').pop() ?? token
+    if (/^!?min-w-0$/.test(coreToken)) return false
+    return /^!?(?:w|min-w|max-w|basis|grow|shrink)(?:-|$)/.test(coreToken) ||
+      /^!?flex(?:$|-(?:1|auto|initial|none|\[))/.test(coreToken)
+  })
+}
+
+function fieldRootClass(className: string | undefined, classNames: ClassNames) {
+  const rootClass = cn(slotClass(classNames), className)
+  return cn('flex min-w-0 flex-col gap-1.5', !hasFieldSizingIntent(rootClass) && 'w-full', rootClass)
+}
+
+function selectRootClass(className: string | undefined, classNames: ClassNames) {
+  const rootClass = cn(slotClass(classNames), className)
+  return cn('min-w-0', !hasFieldSizingIntent(rootClass) && 'w-full', rootClass)
 }
 
 function firstSelectedKey(selectedKeys: unknown): React.Key | undefined {
@@ -141,7 +165,7 @@ function fieldAriaLabel(label: React.ReactNode, ariaLabel: unknown, placeholder:
 }
 
 const buttonBaseClass = 'inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md text-sm font-medium tracking-normal transition-[background-color,border-color,color,box-shadow,transform] duration-200 ease-[cubic-bezier(0.32,0.72,0,1)] active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-primary/30 focus-visible:ring-offset-2 focus-visible:ring-offset-background'
-const fieldWrapperClass = 'flex min-h-10 items-center gap-2 rounded-md border border-default-200 bg-field px-3 text-sm text-field-foreground shadow-[0_1px_0_hsl(var(--shadow-color)/0.04)] transition-[border-color,box-shadow,background-color,transform] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] focus-within:border-default-300 focus-within:shadow-[0_0_0_3px_color-mix(in_oklab,var(--foreground)_8%,transparent)]'
+const fieldWrapperClass = 'flex min-h-10 min-w-0 items-center gap-2 rounded-md border border-default-200 bg-field px-3 text-sm text-field-foreground shadow-[0_1px_0_hsl(var(--shadow-color)/0.04)] transition-[border-color,box-shadow,background-color,transform] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] focus-within:border-default-300 focus-within:shadow-[0_0_0_3px_color-mix(in_oklab,var(--foreground)_8%,transparent)]'
 const fieldInputClass = 'min-w-0 flex-1 bg-transparent outline-none placeholder:text-field-placeholder disabled:opacity-60'
 const cardBaseClass = 'gap-0 rounded-xl border border-default-200 bg-content1/94 p-0 shadow-[0_1px_1px_hsl(var(--shadow-color)/0.05),0_18px_42px_hsl(var(--shadow-color)/0.045)]'
 
@@ -460,7 +484,7 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(function Inp
   const resolvedAriaLabel = fieldAriaLabel(label, ariaLabel, props.placeholder, isRequired)
 
   return (
-    <label className={cn('flex w-full flex-col gap-1.5', slotClass(classNames), className)}>
+    <label className={fieldRootClass(className, classNames)}>
       {label ? <span className="text-sm font-medium text-foreground">{label}{isRequired ? ' *' : ''}</span> : null}
       <div className={cn(fieldWrapperClass, slotClass(classNames, 'inputWrapper'))}>
         {startContent}
@@ -544,11 +568,11 @@ export const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(fun
   const resolvedAriaLabel = fieldAriaLabel(label, ariaLabel, props.placeholder, isRequired)
 
   return (
-    <label className={cn('flex w-full flex-col gap-1.5', slotClass(classNames), className)}>
+    <label className={fieldRootClass(className, classNames)}>
       {label ? <span className="text-sm font-medium text-foreground">{label}{isRequired ? ' *' : ''}</span> : null}
       <textarea
         ref={ref}
-        className={cn('min-h-20 w-full resize-y rounded-md border border-default-200 bg-field px-3 py-2 text-sm text-field-foreground shadow-[0_1px_0_hsl(var(--shadow-color)/0.04)] outline-none transition-[border-color,box-shadow,background-color] duration-200 ease-[cubic-bezier(0.32,0.72,0,1)] placeholder:text-field-placeholder focus:border-default-300 focus:shadow-[0_0_0_3px_color-mix(in_oklab,var(--foreground)_8%,transparent)] disabled:opacity-60', slotClass(classNames, 'inputWrapper'), slotClass(classNames, 'input'))}
+        className={cn('min-h-20 min-w-0 w-full resize-y rounded-md border border-default-200 bg-field px-3 py-2 text-sm text-field-foreground shadow-[0_1px_0_hsl(var(--shadow-color)/0.04)] outline-none transition-[border-color,box-shadow,background-color] duration-200 ease-[cubic-bezier(0.32,0.72,0,1)] placeholder:text-field-placeholder focus:border-default-300 focus:shadow-[0_0_0_3px_color-mix(in_oklab,var(--foreground)_8%,transparent)] disabled:opacity-60', slotClass(classNames, 'inputWrapper'), slotClass(classNames, 'input'))}
         rows={minRows}
         value={value ?? ''}
         aria-label={resolvedAriaLabel}
@@ -591,7 +615,7 @@ export function Select({ children, label, placeholder, className, classNames, se
           onChange({ target: { value: String(key) } } as React.ChangeEvent<HTMLSelectElement>)
         }
       }}
-      className={cn('w-full', slotClass(classNames), className)}
+      className={selectRootClass(className, classNames)}
       {...props}
     >
       {label ? <H.Label className="mb-1.5 block text-sm font-medium text-foreground">{label}</H.Label> : null}

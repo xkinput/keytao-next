@@ -1142,14 +1142,13 @@ export default function CreatePRModal({
                                   <>
                                     {act === 'Change' ? (
                                       <>
-                                        <div className="flex flex-wrap gap-2">
-                                          {/* Group 1: 类型 + 旧词 + 新词 */}
-                                          <div className="flex gap-2 flex-1 min-w-52">
+                                        <div className="grid gap-2 xl:grid-cols-[minmax(0,1fr)_minmax(14rem,24rem)]">
+                                          <div className="grid min-w-0 gap-2 md:grid-cols-[7rem_minmax(0,1fr)_minmax(0,1fr)]">
                                             <Controller
                                               name={`items.${index}.type`}
                                               control={control}
                                               render={({ field: f }) => (
-                                                <Select label="类型" selectedKeys={[f.value]} onSelectionChange={keys => f.onChange(Array.from(keys)[0] as string)} disallowEmptySelection size="sm" className="w-24 shrink-0">
+                                                <Select label="类型" selectedKeys={[f.value]} onSelectionChange={keys => f.onChange(Array.from(keys)[0] as string)} disallowEmptySelection size="sm" className="w-full min-w-0">
                                                   {getPhraseTypeOptions().map(o => <SelectItem key={o.value}>{o.label}</SelectItem>)}
                                                 </Select>
                                               )}
@@ -1162,7 +1161,7 @@ export default function CreatePRModal({
                                                 <Input
                                                   value={f.value} label="旧词" placeholder="当前编码对应的词"
                                                   isRequired isInvalid={!!fieldState.error} errorMessage={fieldState.error?.message}
-                                                  size="sm" className="flex-1"
+                                                  size="sm" className="w-full min-w-0"
                                                   onValueChange={(v: string) => { f.onChange(v); updateMeta(field.id, { hasChecked: false, conflict: null }) }}
                                                   onBlur={() => autoCheckConflictForItem(index, field.id)}
                                                   endContent={f.value && <WordCodesPopover word={f.value}><Button size="sm" variant="light" isIconOnly className="min-w-unit-6 w-6 h-6"><Eye className="w-4 h-4" /></Button></WordCodesPopover>}
@@ -1179,7 +1178,7 @@ export default function CreatePRModal({
                                                   <Input
                                                     value={f.value} label="新词" placeholder="请输入新词"
                                                     isRequired isInvalid={!!fieldState.error} errorMessage={fieldState.error?.message}
-                                                    size="sm" className="flex-1"
+                                                    size="sm" className="w-full min-w-0"
                                                     onValueChange={(v: string) => { f.onChange(v); updateMeta(field.id, { hasChecked: false, conflict: null }) }}
                                                     endContent={
                                                       <div className="flex items-center gap-1">
@@ -1192,8 +1191,7 @@ export default function CreatePRModal({
                                               }}
                                             />
                                           </div>
-                                          {/* Group 2: 编码 + 权重 */}
-                                          <div className="flex gap-2">
+                                          <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(0,1fr)_5rem]">
                                             <Controller
                                               name={`items.${index}.code`}
                                               control={control}
@@ -1202,7 +1200,7 @@ export default function CreatePRModal({
                                                 <Input
                                                   value={f.value} label="编码" placeholder="请输入编码"
                                                   isRequired isInvalid={!!fieldState.error} errorMessage={fieldState.error?.message}
-                                                  size="sm" className="flex-1"
+                                                  size="sm" className="w-full min-w-0"
                                                   onValueChange={(v: string) => { f.onChange(v); updateMeta(field.id, { hasChecked: false, conflict: null }) }}
                                                   onBlur={() => autoCheckConflictForItem(index, field.id)}
                                                   endContent={f.value && <CodePhrasesPopover code={f.value}><Button size="sm" variant="light" isIconOnly className="min-w-unit-6 w-6 h-6"><Eye className="w-4 h-4" /></Button></CodePhrasesPopover>}
@@ -1214,20 +1212,20 @@ export default function CreatePRModal({
                                               control={control}
                                               render={({ field: f }) => {
                                                 const t = watch(`items.${index}.type`) as PhraseType
-                                                return <Input value={f.value} label="权重" type="number" placeholder={`${getDefaultWeight(t)}`} size="sm" className="w-16 shrink-0" onValueChange={(v: string) => f.onChange(v)} />
+                                                return <Input value={f.value} label="权重" type="number" placeholder={`${getDefaultWeight(t)}`} size="sm" className="w-full min-w-0" onValueChange={(v: string) => f.onChange(v)} />
                                               }}
                                             />
                                           </div>
                                         </div>
                                       </>
                                     ) : act === 'Delete' ? (
-                                      <div className="flex flex-wrap gap-2">
-                                        <div className="flex gap-2 flex-1 min-w-44">
+                                      <div className="grid gap-2 lg:grid-cols-[minmax(0,1fr)_12rem]">
+                                        <div className="grid min-w-0 gap-2 md:grid-cols-[7rem_minmax(0,1fr)]">
                                           <Controller
                                             name={`items.${index}.type`}
                                             control={control}
                                             render={({ field: f }) => (
-                                              <Select label="类型" selectedKeys={[f.value]} onSelectionChange={keys => f.onChange(Array.from(keys)[0] as string)} disallowEmptySelection size="sm" className="w-24 shrink-0">
+                                              <Select label="类型" selectedKeys={[f.value]} onSelectionChange={keys => f.onChange(Array.from(keys)[0] as string)} disallowEmptySelection size="sm" className="w-full min-w-0">
                                                 {getPhraseTypeOptions().map(o => <SelectItem key={o.value}>{o.label}</SelectItem>)}
                                               </Select>
                                             )}
@@ -1240,7 +1238,7 @@ export default function CreatePRModal({
                                               <Input
                                                 value={f.value} label="词" placeholder="请输入词"
                                                 isRequired isInvalid={!!fieldState.error} errorMessage={fieldState.error?.message}
-                                                size="sm" className="flex-1"
+                                                size="sm" className="w-full min-w-0"
                                                 onValueChange={(v: string) => { f.onChange(v); updateMeta(field.id, { hasChecked: false, conflict: null }) }}
                                               />
                                             )}
@@ -1254,7 +1252,7 @@ export default function CreatePRModal({
                                             <Input
                                               value={f.value} label="编码" placeholder="请输入编码"
                                               isRequired isInvalid={!!fieldState.error} errorMessage={fieldState.error?.message}
-                                              size="sm" className="w-28 shrink-0"
+                                              size="sm" className="w-full min-w-0"
                                               onValueChange={(v: string) => { f.onChange(v); updateMeta(field.id, { hasChecked: false, conflict: null }) }}
                                             />
                                           )}
@@ -1262,14 +1260,13 @@ export default function CreatePRModal({
                                       </div>
                                     ) : (
                                       /* Create */
-                                      <div className="flex flex-wrap gap-2">
-                                        {/* Group 1: 类型 + 词 */}
-                                        <div className="flex gap-2 flex-1 min-w-44">
+                                      <div className="grid gap-2 xl:grid-cols-[minmax(0,1fr)_minmax(14rem,24rem)]">
+                                        <div className="grid min-w-0 gap-2 md:grid-cols-[7rem_minmax(0,1fr)]">
                                           <Controller
                                             name={`items.${index}.type`}
                                             control={control}
                                             render={({ field: f }) => (
-                                              <Select label="类型" selectedKeys={[f.value]} onSelectionChange={keys => f.onChange(Array.from(keys)[0] as string)} disallowEmptySelection size="sm" className="w-24 shrink-0">
+                                              <Select label="类型" selectedKeys={[f.value]} onSelectionChange={keys => f.onChange(Array.from(keys)[0] as string)} disallowEmptySelection size="sm" className="w-full min-w-0">
                                                 {getPhraseTypeOptions().map(o => <SelectItem key={o.value}>{o.label}</SelectItem>)}
                                               </Select>
                                             )}
@@ -1284,7 +1281,7 @@ export default function CreatePRModal({
                                                 <Input
                                                   value={f.value} label="词" placeholder="请输入词"
                                                   isRequired isInvalid={!!fieldState.error} errorMessage={fieldState.error?.message}
-                                                  size="sm" className="flex-1"
+                                                  size="sm" className="w-full min-w-0"
                                                   onValueChange={(v: string) => { f.onChange(v); updateMeta(field.id, { hasChecked: false, conflict: null }) }}
                                                   endContent={
                                                     <div className="flex items-center gap-1">
@@ -1297,8 +1294,7 @@ export default function CreatePRModal({
                                             }}
                                           />
                                         </div>
-                                        {/* Group 2: 编码 + 权重 */}
-                                        <div className="flex gap-2">
+                                        <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(0,1fr)_5rem]">
                                           <Controller
                                             name={`items.${index}.code`}
                                             control={control}
@@ -1308,7 +1304,7 @@ export default function CreatePRModal({
                                                 value={f.value} label="编码" placeholder="请输入编码"
                                                 isRequired isInvalid={!!fieldState.error} errorMessage={fieldState.error?.message}
                                                 color={fieldState.error ? 'danger' : 'default'}
-                                                size="sm" className="flex-1"
+                                                size="sm" className="w-full min-w-0"
                                                 onValueChange={(v: string) => { f.onChange(v); updateMeta(field.id, { hasChecked: false, conflict: null }); autoFilledRef.current.delete(field.id) }}
                                                 endContent={
                                                   encodingFields.has(field.id) ? (
@@ -1336,7 +1332,7 @@ export default function CreatePRModal({
                                             control={control}
                                             render={({ field: f }) => {
                                               const t = watch(`items.${index}.type`) as PhraseType
-                                              return <Input value={f.value} label="权重" type="number" placeholder={`${getDefaultWeight(t)}`} size="sm" className="w-16 shrink-0" onValueChange={(v: string) => f.onChange(v)} />
+                                              return <Input value={f.value} label="权重" type="number" placeholder={`${getDefaultWeight(t)}`} size="sm" className="w-full min-w-0" onValueChange={(v: string) => f.onChange(v)} />
                                             }}
                                           />
                                         </div>
