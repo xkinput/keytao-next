@@ -153,15 +153,14 @@ export default function BatchesPage() {
 
   return (
     <div className="min-h-screen">
-      <main className="app-container py-7">
-        <div className="mb-6 flex flex-col gap-4 border-b border-default-200 pb-5 md:flex-row md:items-end md:justify-between">
-          <div>
-            <div className="mb-2 inline-flex items-center gap-2 rounded-md bg-primary-50 px-2.5 py-1 text-xs font-semibold text-primary">
-              <FilePlus2 className="h-3.5 w-3.5" />
-              词库协作
-            </div>
-            <h1 className="text-3xl font-semibold tracking-tight text-foreground">改词批次</h1>
-            <p className="mt-1 text-sm text-default-500">
+      <main className="app-container py-8 md:py-10">
+        <section className="mb-7 flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
+          <div className="max-w-3xl">
+            <p className="text-sm font-medium text-default-500">词库协作</p>
+            <h1 className="mt-2 text-[clamp(2.15rem,4vw,4.25rem)] font-semibold leading-[0.96] tracking-[-0.055em] text-foreground">
+              改词批次
+            </h1>
+            <p className="mt-3 text-base text-default-500">
               {search ? (
                 <>搜索 &ldquo;{search}&rdquo; 的结果：{data?.pagination?.total || 0} 个</>
               ) : onlyMine ? (
@@ -171,13 +170,14 @@ export default function BatchesPage() {
               )}
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 md:pb-1">
             <Button
               isIconOnly
               variant="flat"
               size="sm"
               onPress={() => mutate()}
               aria-label="刷新批次"
+              className="h-10 w-10"
             >
               <RefreshCw className="w-4 h-4" />
             </Button>
@@ -186,24 +186,26 @@ export default function BatchesPage() {
               onPress={handleCreateBatch}
               isLoading={isCreating}
               startContent={<FilePlus2 className="h-4 w-4" />}
+              className="h-10 px-4"
             >
-              新建
+              新建批次
             </Button>
           </div>
-        </div>
+        </section>
 
         {/* Filters and Search */}
-        <div className="workbench-toolbar mb-6 flex flex-col gap-4 rounded-lg p-3 lg:flex-row lg:items-center lg:justify-between">
+        <div className="workbench-toolbar mb-5 flex flex-col gap-3 rounded-xl p-2.5 lg:flex-row lg:items-center lg:justify-between">
           <Tabs
             selectedKey={status}
             onSelectionChange={(key) => handleStatusChange(key as string)}
             color="primary"
             variant="underlined"
+            className="w-full overflow-x-auto lg:w-auto"
             classNames={{
-              tabList: "gap-1 w-full relative rounded-lg p-1 bg-content2/60 border border-default-200",
+              tabList: "min-w-max gap-0.5 relative rounded-lg p-1 bg-content2/70",
               cursor: "hidden",
-              tab: "max-w-fit h-9 rounded-md px-3 data-[selected=true]:bg-content1 data-[selected=true]:shadow-sm",
-              tabContent: "group-data-[selected=true]:text-primary"
+              tab: "max-w-fit h-9 rounded-md px-3 data-[selected=true]:bg-content1 data-[selected=true]:shadow-[0_1px_1px_hsl(var(--shadow-color)/0.08)]",
+              tabContent: "text-default-500 group-data-[selected=true]:text-foreground"
             }}
           >
             <Tab key="all" title="全部" />
@@ -221,7 +223,7 @@ export default function BatchesPage() {
                 onValueChange={setSearchInput}
                 onKeyDown={handleSearchKeyPress}
                 size="sm"
-                className="w-full sm:w-72"
+                className="w-full sm:w-80"
                 startContent={<Search className="h-4 w-4 text-default-400" />}
                 isClearable
                 onClear={handleClearSearch}

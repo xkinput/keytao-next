@@ -118,10 +118,10 @@ function selectedClass(isSelected: boolean, selected: string, idle: string) {
   return isSelected ? selected : idle
 }
 
-const buttonBaseClass = 'inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-lg font-medium transition-[background-color,border-color,color,box-shadow,transform] duration-200 ease-out active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-primary/35 focus-visible:ring-offset-2 focus-visible:ring-offset-background'
-const fieldWrapperClass = 'flex min-h-10 items-center gap-2 rounded-lg border border-default-200 bg-field px-3 text-sm text-field-foreground shadow-[0_1px_0_hsl(var(--shadow-color)/0.04)] transition-[border-color,box-shadow,background-color] duration-200 focus-within:border-primary/60 focus-within:shadow-[0_0_0_3px_color-mix(in_oklab,var(--accent)_16%,transparent)]'
+const buttonBaseClass = 'inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md text-sm font-medium tracking-[-0.01em] transition-[background-color,border-color,color,box-shadow,transform] duration-200 ease-[cubic-bezier(0.32,0.72,0,1)] active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-primary/30 focus-visible:ring-offset-2 focus-visible:ring-offset-background'
+const fieldWrapperClass = 'flex min-h-10 items-center gap-2 rounded-md border border-default-200 bg-field px-3 text-sm text-field-foreground shadow-[0_1px_0_hsl(var(--shadow-color)/0.04)] transition-[border-color,box-shadow,background-color] duration-200 ease-[cubic-bezier(0.32,0.72,0,1)] focus-within:border-default-300 focus-within:shadow-[0_0_0_3px_color-mix(in_oklab,var(--foreground)_8%,transparent)]'
 const fieldInputClass = 'min-w-0 flex-1 bg-transparent outline-none placeholder:text-field-placeholder disabled:opacity-60'
-const cardBaseClass = 'rounded-lg border border-default-200 bg-content1/90 shadow-[0_12px_34px_hsl(var(--shadow-color)/0.07)]'
+const cardBaseClass = 'rounded-xl border border-default-200 bg-content1/94 shadow-[0_1px_1px_hsl(var(--shadow-color)/0.05),0_18px_42px_hsl(var(--shadow-color)/0.045)]'
 
 export function useDisclosure(options: AnyProps = {}) {
   const [isOpen, setIsOpen] = useState(Boolean(options.defaultOpen ?? options.isOpen))
@@ -472,7 +472,7 @@ export const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(fun
       {label ? <span className="text-sm font-medium text-foreground">{label}{isRequired ? ' *' : ''}</span> : null}
       <H.TextArea
         ref={ref}
-        className={cn('min-h-20 w-full resize-y rounded-lg border border-default-200 bg-field px-3 py-2 text-sm text-field-foreground shadow-[0_1px_0_hsl(var(--shadow-color)/0.04)] outline-none transition-[border-color,box-shadow,background-color] duration-200 placeholder:text-field-placeholder focus:border-primary/60 focus:shadow-[0_0_0_3px_color-mix(in_oklab,var(--accent)_16%,transparent)] disabled:opacity-60', slotClass(classNames, 'input'))}
+        className={cn('min-h-20 w-full resize-y rounded-md border border-default-200 bg-field px-3 py-2 text-sm text-field-foreground shadow-[0_1px_0_hsl(var(--shadow-color)/0.04)] outline-none transition-[border-color,box-shadow,background-color] duration-200 ease-[cubic-bezier(0.32,0.72,0,1)] placeholder:text-field-placeholder focus:border-default-300 focus:shadow-[0_0_0_3px_color-mix(in_oklab,var(--foreground)_8%,transparent)] disabled:opacity-60', slotClass(classNames, 'input'))}
         rows={minRows}
         value={value ?? ''}
         onChange={(event: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -521,7 +521,7 @@ export function Select({ children, label, placeholder, className, classNames, se
       <H.Select.Trigger className={cn(fieldWrapperClass, 'justify-between', slotClass(classNames, 'trigger'))}>
         <H.Select.Value>{({ selectedText }: AnyProps) => selectedText || placeholder}</H.Select.Value>
       </H.Select.Trigger>
-      <H.Select.Popover className="rounded-lg border border-default-200 bg-content1 shadow-[0_18px_48px_hsl(var(--shadow-color)/0.14)]">
+      <H.Select.Popover className="rounded-xl border border-default-200 bg-content1 shadow-[0_18px_48px_hsl(var(--shadow-color)/0.12)]">
         <H.ListBox className="p-1">{keyedChildren(children)}</H.ListBox>
       </H.Select.Popover>
     </H.Select>
@@ -614,7 +614,7 @@ export function Modal({ children, className, classNames, size, scrollBehavior, p
       <H.Modal isOpen={isOpen} onOpenChange={setOpen}>
         <H.Modal.Backdrop variant={backdrop === 'blur' ? 'blur' : 'opaque'} className={slotClass(classNames, 'backdrop')}>
           <H.Modal.Container
-            size={size === '2xl' || size === '3xl' || size === '4xl' || size === '5xl' || size === 'full' ? 'lg' : size}
+            size={size}
             scroll={scrollBehavior}
             placement={placement}
             className={cn(slotClass(classNames, 'wrapper'), className)}
@@ -707,7 +707,7 @@ export function Table({ children, className, ...props }: AnyProps) {
 
   return (
     <TableColumnCountContext.Provider value={columnCount}>
-      <H.Table className={cn('overflow-hidden rounded-lg border border-default-200 bg-content1/90 shadow-[0_12px_34px_hsl(var(--shadow-color)/0.06)]', className)}>
+      <H.Table className={cn('overflow-hidden rounded-xl border border-default-200 bg-content1/94 shadow-[0_1px_1px_hsl(var(--shadow-color)/0.05),0_18px_42px_hsl(var(--shadow-color)/0.04)]', className)}>
         <H.Table.ScrollContainer className="bg-transparent">
           <H.Table.Content {...props}>{children}</H.Table.Content>
         </H.Table.ScrollContainer>
@@ -733,7 +733,7 @@ export function TableHeader({ children, ...props }: AnyProps) {
     })
   })
 
-  return <H.Table.Header className="bg-content2/80 text-xs font-semibold text-default-600" {...props}>{columns}</H.Table.Header>
+  return <H.Table.Header className="bg-content2/70 text-xs font-semibold text-default-600" {...props}>{columns}</H.Table.Header>
 }
 
 export function TableColumn({ children, ...props }: AnyProps) {
@@ -759,7 +759,7 @@ export function TableBody({ emptyContent, children, ...props }: AnyProps) {
 }
 export function TableRow({ children, className, ...props }: AnyProps) {
   return (
-    <H.Table.Row className={cn('border-b border-default-100 transition-colors hover:bg-content2/55 last:border-b-0', className)} {...props}>
+    <H.Table.Row className={cn('border-b border-default-100 transition-colors duration-200 hover:bg-content2/45 last:border-b-0', className)} {...props}>
       {children}
     </H.Table.Row>
   )

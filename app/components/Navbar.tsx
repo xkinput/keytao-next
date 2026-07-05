@@ -206,6 +206,13 @@ function Navbar() {
     }, 200)
   }, [])
 
+  const navItemClass = (active: boolean) => [
+    'inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md px-2.5 text-[13px] font-medium leading-none tracking-[-0.01em] whitespace-nowrap transition-[background-color,color,box-shadow,transform] duration-200 ease-[cubic-bezier(0.32,0.72,0,1)] active:scale-[0.98]',
+    active
+      ? 'bg-foreground text-background shadow-[0_1px_1px_hsl(var(--shadow-color)/0.12)]'
+      : 'text-default-600 hover:bg-content1 hover:text-foreground'
+  ].join(' ')
+
   return (
     <>
       <Drawer
@@ -259,13 +266,13 @@ function Navbar() {
           )}
         </DrawerContent>
       </Drawer>
-      <nav className="sticky top-0 z-60 border-b border-default-200/80 bg-content1/86 shadow-[0_8px_24px_hsl(var(--shadow-color)/0.06)] backdrop-blur-xl">
+      <nav className="sticky top-0 z-60 border-b border-default-200/70 bg-background/82 backdrop-blur-xl">
         <div className="app-container">
-          <div className="flex h-14 items-center justify-between">
-            <div className="flex min-w-0 items-center gap-3 md:gap-5">
-              <Logo size={34} />
+          <div className="flex h-16 items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-3 nav:gap-4">
+              <Logo size={32} />
               {/* Desktop Navigation */}
-              <div className="hidden nav:flex items-center gap-1 rounded-lg border border-default-200 bg-content2/55 p-1">
+              <div className="hidden nav:flex h-10 items-center gap-0.5 rounded-xl border border-default-200/80 bg-content2/65 p-1 shadow-[inset_0_1px_0_color-mix(in_oklab,var(--surface)_70%,transparent)]">
                 {visibleMenuCategories.map((category) => {
                   const IconComponent = category.icon
                   const firstItem = category.items[0]
@@ -276,15 +283,11 @@ function Navbar() {
                   // Single item category - render as direct button
                   if (isSingleItem) {
                     return (
-                      <Button
+                      <button
                         key={category.key}
-                        variant="light"
-                        size="sm"
-                        startContent={<IconComponent className="w-4 h-4" />}
-                        className={categoryActive
-                          ? 'h-9 bg-primary text-primary-foreground shadow-[0_8px_18px_hsl(var(--shadow-color)/0.12)] hover:bg-primary-600'
-                          : 'h-9 text-default-700 hover:bg-content1 hover:text-default-900'}
-                        onPress={() => {
+                        type="button"
+                        className={navItemClass(categoryActive)}
+                        onClick={() => {
                           if (firstHref) {
                             if (firstItem?.isExternal) {
                               window.open(firstHref, '_blank', 'noopener,noreferrer')
@@ -294,8 +297,9 @@ function Navbar() {
                           }
                         }}
                       >
+                        <IconComponent className="h-3.5 w-3.5 shrink-0 opacity-75" />
                         {category.label}
-                      </Button>
+                      </button>
                     )
                   }
 
@@ -319,27 +323,24 @@ function Navbar() {
                           }
                         }
                       }}
-                      className="cursor-pointer rounded-lg transition-colors hover:bg-content1"
+                      className="cursor-pointer rounded-md"
                     >
                       <Dropdown
                         isOpen={openDropdown === category.key}
                       >
                         <DropdownTrigger>
-                          <Button
-                            variant="light"
-                            size="sm"
-                            startContent={<IconComponent className="w-4 h-4" />}
-                            endContent={<ChevronDown className="w-3.5 h-3.5 opacity-70" />}
-                            className={categoryActive
-                              ? 'h-9 bg-primary text-primary-foreground shadow-[0_8px_18px_hsl(var(--shadow-color)/0.12)] pointer-events-none'
-                              : 'h-9 text-default-700 hover:bg-content1 hover:text-default-900 pointer-events-none'}
-                            as="div"
+                          <button
+                            type="button"
+                            className={navItemClass(categoryActive)}
                           >
+                            <IconComponent className="h-3.5 w-3.5 shrink-0 opacity-75" />
                             {category.label}
-                          </Button>
+                            <ChevronDown className="h-3 w-3 shrink-0 opacity-55" />
+                          </button>
                         </DropdownTrigger>
                         <DropdownMenu
                           aria-label={`${category.label} menu`}
+                          className="min-w-36 rounded-xl border border-default-200 bg-content1 p-1 shadow-[0_18px_48px_hsl(var(--shadow-color)/0.12)]"
                           onAction={(key) => {
                             if (closeTimeoutRef.current) {
                               clearTimeout(closeTimeoutRef.current)
@@ -358,7 +359,7 @@ function Navbar() {
                           {category.items.map((item) => (
                             <DropdownItem
                               key={item.href}
-                              className={isItemActive(item.href) ? 'bg-primary text-primary-foreground' : ''}
+                              className={isItemActive(item.href) ? 'rounded-lg bg-content2 text-foreground' : 'rounded-lg text-default-700'}
                             >
                               {item.label}
                             </DropdownItem>
@@ -377,14 +378,15 @@ function Navbar() {
                   isIconOnly
                   aria-label="Toggle menu"
                   onPress={() => setIsMobileMenuOpen(true)}
+                  className="h-9 w-9"
                 >
-                  <Menu className="w-6 h-6" />
+                  <Menu className="h-5 w-5" />
                 </Button>
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
-              <div className="hidden sm:block">
+            <div className="flex shrink-0 items-center gap-1.5">
+              <div className="hidden md:block">
                 <Button
                   variant="flat"
                   size="sm"
@@ -392,12 +394,12 @@ function Navbar() {
                   aria-label="赞助键道开发"
                   as={Link}
                   href="/sponsor"
-                  className="h-9 border border-pink-200/70 bg-pink-50 text-pink-700 hover:bg-pink-100 dark:border-pink-400/20 dark:bg-pink-400/10 dark:text-pink-200"
+                  className="h-9 border border-default-200 bg-content1 px-3 text-default-700 hover:bg-content2"
                 >
                   赞助
                 </Button>
               </div>
-              <div className="sm:hidden">
+              <div className="md:hidden">
                 <Button
                   variant="flat"
                   size="sm"
@@ -405,7 +407,7 @@ function Navbar() {
                   aria-label="赞助键道开发"
                   as={Link}
                   href="/sponsor"
-                  className="h-9 w-9 border border-pink-200/70 bg-pink-50 text-pink-700 dark:border-pink-400/20 dark:bg-pink-400/10 dark:text-pink-200"
+                  className="h-9 w-9 border border-default-200 bg-content1 text-default-700"
                 >
                   <Coffee className="w-5 h-5" />
                 </Button>
@@ -431,8 +433,9 @@ function Navbar() {
                       variant="light"
                       size="sm"
                       onPress={() => router.push('/profile')}
+                      className="h-9 max-w-36 px-3"
                     >
-                      {user?.nickname || user?.name}
+                      <span className="truncate">{user?.nickname || user?.name}</span>
                     </Button>
                   </div>
                   <div className="sm:hidden">
@@ -462,6 +465,7 @@ function Navbar() {
                       variant="light"
                       size="sm"
                       onPress={handleLogout}
+                      className="h-9 px-3"
                     >
                       退出登录
                     </Button>

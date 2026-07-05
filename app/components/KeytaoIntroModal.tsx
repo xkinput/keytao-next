@@ -5,7 +5,7 @@ import Image from 'next/image'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { Button, Modal, ModalBody, ModalContent, ModalFooter } from '@/lib/heroui-compat'
-import { BookOpen, Download, Edit3, ExternalLink, Keyboard, Sparkles, X } from 'lucide-react'
+import { Download, Edit3, ExternalLink, Keyboard, Sparkles, X } from 'lucide-react'
 import { useKeytaoIntroStore } from '@/lib/store/keytaoIntro'
 import { KEYTAO_QQ_GROUP_URL } from '@/lib/constants/community'
 
@@ -70,117 +70,79 @@ export default function KeytaoIntroModal() {
       backdrop="blur"
       isDismissable={false}
       hideCloseButton
-      classNames={{
-        base: 'border border-primary/20 bg-[#0c1018] text-white shadow-[0_40px_120px_rgba(59,130,246,0.18)]',
-      }}
+      className="w-[min(calc(100vw-1rem),960px)] max-w-none"
     >
-      <ModalContent className="mx-0 h-[100dvh] max-h-[100dvh] rounded-none sm:mx-4 sm:h-auto sm:max-h-[90dvh] sm:rounded-3xl">
-        <div className="relative grid h-20 grid-cols-[1fr_auto_1fr] items-center gap-2 overflow-hidden border-b border-white/10 bg-[radial-gradient(circle_at_top_left,_rgba(168,85,247,0.22),_transparent_30%),radial-gradient(circle_at_top_right,_rgba(59,130,246,0.2),_transparent_34%),linear-gradient(135deg,_#101828,_#16213a)] px-4 sm:hidden">
-          <div className="absolute inset-x-0 top-0 h-px bg-white/10" />
-          <div className="absolute h-24 w-24 rounded-full bg-sky-400/20 blur-3xl" />
-          <div className="absolute h-28 w-28 rounded-full bg-fuchsia-500/20 blur-3xl" />
-          <div className="relative z-10 flex items-center">
-            <div className="inline-flex w-fit items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[10px] uppercase tracking-[0.22em] text-cyan-200/90">
-              <Sparkles className="h-3.5 w-3.5" />
-              初次见面
-            </div>
-          </div>
-          <div className="relative z-10 rounded-[22px] border border-white/10 bg-white/8 p-2.5 backdrop-blur-xl">
+      <ModalContent className="mx-auto w-[min(calc(100vw-1rem),960px)] max-w-none max-h-[calc(100dvh-1rem)] overflow-hidden rounded-2xl border border-default-200 bg-content1 text-foreground shadow-[0_40px_120px_hsl(var(--shadow-color)/0.18)]">
+        <div className="flex items-center justify-between border-b border-default-200 px-4 py-3 sm:px-6">
+          <div className="flex items-center gap-2.5">
             <Image
               src="/logo.png"
               alt="KeyTao logo"
-              width={72}
-              height={72}
-              className="h-[52px] w-[52px] drop-shadow-[0_0_22px_rgba(96,165,250,0.55)]"
+              width={34}
+              height={34}
+              className="rounded-md"
             />
+            <div className="leading-none">
+              <p className="text-sm font-semibold text-foreground">键道</p>
+              <p className="mt-1 text-[10px] font-medium uppercase tracking-[0.18em] text-default-500">KeyTao</p>
+            </div>
           </div>
           <Button
             isIconOnly
             variant="light"
-            radius="full"
-            className="relative z-10 ml-auto h-9 w-9 min-w-9 border border-white/10 bg-white/8 text-white/75 backdrop-blur hover:bg-white/14 hover:text-white"
+            className="h-9 w-9 text-default-500 hover:bg-content2 hover:text-foreground"
             aria-label="关闭键道介绍弹窗"
             onPress={acknowledgeIntroModal}
           >
             <X className="h-4 w-4" />
           </Button>
         </div>
-        <ModalBody className="overflow-y-auto px-0 py-0 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          <div className="border-b border-white/10 bg-[radial-gradient(circle_at_top_right,_rgba(56,189,248,0.18),_transparent_32%),radial-gradient(circle_at_bottom_left,_rgba(217,70,239,0.16),_transparent_28%),linear-gradient(135deg,_#0b1220,_#111827_58%,_#120f1f)] px-4 py-4 sm:hidden">
-            <div className="space-y-2.5">
-              <h2 className="text-[1.7rem] font-semibold leading-tight tracking-tight text-white">
-                键道不是一堆规则，
-                <span className="bg-gradient-to-r from-sky-300 via-fuchsia-300 to-cyan-200 bg-clip-text text-transparent">而是一条从输入到词库协作的完整路径</span>
+
+        <ModalBody className="max-h-[calc(100dvh-11rem)] overflow-y-auto px-4 py-5 sm:px-7 sm:py-7">
+          <div className="grid gap-6 md:grid-cols-[1.12fr_0.88fr] md:items-center">
+            <div className="min-w-0">
+              <div className="mb-4 inline-flex items-center gap-2 rounded-md border border-default-200 bg-content2 px-2.5 py-1 text-xs font-medium text-default-600">
+                <Sparkles className="h-3.5 w-3.5" />
+                初次见面
+              </div>
+              <h2 className="max-w-[12em] text-[clamp(2rem,4vw,3.75rem)] font-semibold leading-[0.98] tracking-[-0.055em] text-foreground">
+                键道，把输入和词库协作连成一条路径。
               </h2>
-              <p className="text-sm leading-6 text-white/72">
-                你可以先装方案、再上手练习、然后开始加词。这里把文档、安装与词库协作流程串成同一套入口，避免第一次接触键道时四处找信息。
+              <p className="mt-4 max-w-[34rem] text-sm leading-6 text-default-500 sm:text-base sm:leading-7">
+                你可以先安装方案，再进入练习，最后参与加词。这里把文档、安装与词库协作串成同一套入口。
               </p>
             </div>
-          </div>
-
-          <div className="relative hidden overflow-hidden border-b border-white/10 bg-[radial-gradient(circle_at_top_right,_rgba(56,189,248,0.28),_transparent_32%),radial-gradient(circle_at_bottom_left,_rgba(217,70,239,0.24),_transparent_28%),linear-gradient(135deg,_#0b1220,_#111827_58%,_#120f1f)] px-4 py-5 pr-14 sm:block sm:rounded-t-3xl sm:px-8 sm:py-8 sm:pr-16">
-            <Button
-              isIconOnly
-              variant="light"
-              radius="full"
-              className="absolute right-3 top-3 z-10 hidden h-9 w-9 min-w-9 border border-white/10 bg-white/8 text-white/75 backdrop-blur hover:bg-white/14 hover:text-white sm:flex sm:right-4 sm:top-4"
-              aria-label="关闭键道介绍弹窗"
-              onPress={acknowledgeIntroModal}
-            >
-              <X className="h-4 w-4" />
-            </Button>
-            <div className="absolute -right-10 top-3 h-28 w-28 rounded-full bg-fuchsia-500/20 blur-3xl sm:-right-12 sm:top-6 sm:h-36 sm:w-36" />
-            <div className="absolute left-2 top-4 h-20 w-20 rounded-full bg-cyan-400/20 blur-3xl sm:left-8 sm:top-10 sm:h-24 sm:w-24" />
-            <div className="relative flex flex-col items-center gap-5 text-center lg:flex-row lg:items-center lg:justify-between lg:text-left">
-              <div className="order-1 relative hidden items-center justify-center sm:flex lg:order-2 lg:min-w-64">
-                <div className="absolute h-28 w-28 rounded-full bg-sky-400/20 blur-3xl sm:h-40 sm:w-40" />
-                <div className="absolute h-32 w-32 rounded-full bg-fuchsia-500/20 blur-3xl sm:h-44 sm:w-44" />
-                <div className="relative rounded-[24px] border border-white/10 bg-white/5 p-3 backdrop-blur-xl sm:rounded-[28px] sm:p-5">
-                  <Image
-                    src="/logo.png"
-                    alt="KeyTao logo"
-                    width={132}
-                    height={132}
-                    className="h-[88px] w-[88px] drop-shadow-[0_0_28px_rgba(96,165,250,0.55)] sm:h-[132px] sm:w-[132px]"
-                  />
-                </div>
-              </div>
-
-              <div className="order-2 max-w-2xl space-y-3 sm:space-y-4 lg:order-1">
-                <div className="hidden w-fit items-center gap-2 self-center rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[10px] uppercase tracking-[0.22em] text-cyan-200/90 sm:inline-flex sm:text-xs lg:self-start">
-                  <Sparkles className="h-3.5 w-3.5" />
-                  初次见面
-                </div>
-                <div className="space-y-2.5 sm:space-y-3">
-                  <h2 className="text-2xl font-semibold leading-tight tracking-tight text-white sm:text-4xl">
-                    键道不是一堆规则，
-                    <span className="bg-gradient-to-r from-sky-300 via-fuchsia-300 to-cyan-200 bg-clip-text text-transparent">而是一条从输入到词库协作的完整路径</span>
-                  </h2>
-                  <p className="max-w-xl text-sm leading-6 text-white/70 sm:text-base sm:leading-7">
-                    你可以先装方案、再上手练习、然后开始加词。这里把文档、安装与词库协作流程串成同一套入口，避免第一次接触键道时四处找信息。
-                  </p>
-                </div>
+            <div className="relative flex min-h-52 items-center justify-center overflow-hidden rounded-xl border border-default-200 bg-content2/65">
+              <div className="absolute inset-x-6 top-6 h-px bg-default-200" />
+              <div className="absolute inset-y-6 left-6 w-px bg-default-200" />
+              <div className="rounded-2xl border border-default-200 bg-content1 p-5 shadow-[0_18px_48px_hsl(var(--shadow-color)/0.08)]">
+                <Image
+                  src="/logo.png"
+                  alt="KeyTao logo"
+                  width={118}
+                  height={118}
+                  className="h-[92px] w-[92px] sm:h-[118px] sm:w-[118px]"
+                />
               </div>
             </div>
           </div>
 
-          <div className="grid gap-3 px-4 py-4 sm:px-8 sm:py-7 lg:grid-cols-3 lg:gap-4">
+          <div className="mt-6 grid gap-3 lg:grid-cols-3">
             {introCards.map((item) => {
               const Icon = item.icon
               const href = item.useDocsUrl ? docsUrl : item.href
               return (
                 <div
                   key={item.title}
-                  className="relative overflow-hidden rounded-2xl border border-white/10 bg-white/4.5 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]"
+                  className="relative overflow-hidden rounded-xl border border-default-200 bg-content2/45 p-4"
                 >
-                  <div className={`absolute inset-0 bg-linear-to-br ${item.accent}`} />
                   <div className="relative space-y-3">
-                    <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-white/10 text-sky-200 sm:h-10 sm:w-10 sm:rounded-2xl">
+                    <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-default-200 bg-content1 text-default-700">
                       <Icon className="h-5 w-5" />
                     </div>
                     <div>
-                      <h3 className="text-[15px] font-semibold text-white sm:text-base">{item.title}</h3>
-                      <p className="mt-2 text-sm leading-6 text-white/65">{item.description}</p>
+                      <h3 className="text-[15px] font-semibold text-foreground sm:text-base">{item.title}</h3>
+                      <p className="mt-2 text-sm leading-6 text-default-500">{item.description}</p>
                     </div>
                     {href && item.hrefLabel && (
                       <Button
@@ -188,7 +150,7 @@ export default function KeytaoIntroModal() {
                         href={href}
                         size="sm"
                         variant="light"
-                        className="-ml-1 w-fit px-1 text-sm text-cyan-200"
+                        className="-ml-1 w-fit px-1 text-sm text-foreground"
                         target={item.useDocsUrl ? '_blank' : undefined}
                         rel={item.useDocsUrl ? 'noopener noreferrer' : undefined}
                         onPress={closeIntroModal}
@@ -203,8 +165,8 @@ export default function KeytaoIntroModal() {
             })}
           </div>
         </ModalBody>
-        <ModalFooter className="flex flex-col items-stretch gap-3 border-t border-white/10 bg-white/3 px-4 py-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] sm:flex-row sm:items-center sm:justify-between sm:px-8 sm:pb-4">
-          <p className="text-xs leading-5 text-white/55 sm:max-w-xs">
+        <ModalFooter className="flex flex-col items-stretch gap-3 border-t border-default-200 bg-content2/45 px-4 py-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] sm:flex-row sm:items-center sm:justify-between sm:px-7 sm:pb-4">
+          <p className="text-xs leading-5 text-default-500 sm:max-w-xs">
             之后仍可从关于页随时重新打开。
           </p>
           <div className="flex flex-col gap-2 sm:flex-row">
@@ -214,7 +176,7 @@ export default function KeytaoIntroModal() {
               target="_blank"
               rel="noopener noreferrer"
               variant="bordered"
-              className="w-full border-cyan-300/25 bg-cyan-400/8 text-cyan-50 sm:w-auto"
+              className="w-full border-default-200 bg-content1 text-foreground sm:w-auto"
               endContent={<ExternalLink className="h-3.5 w-3.5" />}
             >
               加入 QQ 群
@@ -224,7 +186,7 @@ export default function KeytaoIntroModal() {
               href="/practice"
               color="secondary"
               variant="flat"
-              className="w-full bg-white/8 text-white sm:w-auto"
+              className="w-full bg-content1 text-foreground sm:w-auto"
               startContent={<Keyboard className="h-4 w-4" />}
               onPress={acknowledgeIntroModal}
             >
@@ -232,7 +194,7 @@ export default function KeytaoIntroModal() {
             </Button>
             <Button
               color="primary"
-              className="w-full border border-cyan-500/30 bg-cyan-100 text-slate-950 shadow-lg shadow-cyan-950/20 transition-colors hover:bg-white sm:w-auto"
+              className="w-full sm:w-auto"
               onPress={acknowledgeIntroModal}
             >
               开始探索

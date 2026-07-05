@@ -15,7 +15,7 @@ import {
   SelectItem,
   Button
 } from '@/lib/heroui-compat'
-import { Database, Download, RefreshCw, Search } from 'lucide-react'
+import { Download, RefreshCw, Search } from 'lucide-react'
 import { useAPI, apiDownload } from '@/lib/hooks/useSWR'
 import { useIsAdmin } from '@/lib/hooks/useAuth'
 import { getPhraseTypeLabel, getPhraseTypeOptions, type PhraseType } from '@/lib/constants/phraseTypes'
@@ -119,17 +119,14 @@ export default function PhrasesPage() {
 
   return (
     <div className="min-h-screen">
-      <main className="app-container py-7">
-        <div className="mb-6 flex flex-col gap-4 border-b border-default-200 pb-5 md:flex-row md:items-end md:justify-between">
-          <div>
-            <div className="mb-2 inline-flex items-center gap-2 rounded-md bg-primary-50 px-2.5 py-1 text-xs font-semibold text-primary">
-              <Database className="h-3.5 w-3.5" />
-              公开词库
-            </div>
-            <h1 className="text-3xl font-semibold tracking-tight">词库管理</h1>
-            <p className="mt-1 text-sm text-default-500">共 {total} 条词条</p>
+      <main className="app-container py-8 md:py-10">
+        <div className="mb-7 flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
+          <div className="max-w-3xl">
+            <p className="text-sm font-medium text-default-500">公开词库</p>
+            <h1 className="mt-2 text-[clamp(2.15rem,4vw,4.25rem)] font-semibold leading-[0.96] tracking-[-0.055em] text-foreground">词库管理</h1>
+            <p className="mt-3 text-base text-default-500">共 {total} 条词条</p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 md:pb-1">
             {isAdmin && (
               <Button
                 isIconOnly
@@ -138,6 +135,7 @@ export default function PhrasesPage() {
                 onPress={handleExport}
                 isLoading={isExporting}
                 title="导出为Rime词典（仅管理员）"
+                className="h-10 w-10"
               >
                 <Download className="w-4 h-4" />
               </Button>
@@ -150,20 +148,21 @@ export default function PhrasesPage() {
               isLoading={isValidating}
               title="刷新"
               aria-label="刷新词库"
+              className="h-10 w-10"
             >
               <RefreshCw className="w-4 h-4" />
             </Button>
           </div>
         </div>
 
-        <div className="workbench-toolbar mb-5 flex flex-col gap-3 rounded-lg p-3 md:flex-row md:items-start">
+        <div className="workbench-toolbar mb-5 flex flex-col gap-3 rounded-xl p-2.5 md:flex-row md:items-start">
           <Input
             placeholder="搜索词条或编码..."
             value={search}
             onValueChange={setSearch}
             onClear={() => setSearch('')}
             isClearable
-            className="max-w-md"
+            className="w-full md:max-w-md"
             startContent={<Search className="h-4 w-4 text-default-400" />}
             description={isSearching ? "正在输入..." : debouncedSearch ? `搜索: ${debouncedSearch}` : undefined}
           />

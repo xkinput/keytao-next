@@ -9,16 +9,16 @@ import { useAuthStore } from '@/lib/store/auth'
 
 const Live2DCanvas = dynamic(() => import('./Live2DCanvas'), { ssr: false })
 
-const CANVAS_W = 132
-const CANVAS_H = 146
+const CANVAS_W = 96
+const CANVAS_H = 106
 const CANVAS_W_MOBILE = 86
 const CANVAS_H_MOBILE = 94
 
 // Idle messages that rotate in the speech bubble
 const IDLE_MESSAGES = [
-  '点击我来聊天吧～',
-  '有什么想问的吗？',
-  '我是键道助手喵喵 owo',
+  '需要帮助时点这里',
+  '可以问我键道相关问题',
+  '键道助手在这里',
   '需要帮助吗？',
 ]
 

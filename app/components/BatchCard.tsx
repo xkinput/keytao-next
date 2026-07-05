@@ -77,11 +77,11 @@ function BatchCard({ batch, refresh }: BatchCardProps) {
     (batch._count.pullRequests > 0 && batch.pullRequests.some(pr => pr.conflictInfo?.hasConflict))
 
   return (
-    <Card className="group interactive-lift overflow-hidden hover:border-primary/35 hover:shadow-[0_18px_42px_hsl(var(--shadow-color)/0.10)]">
-      <CardHeader className="flex flex-col gap-3 p-4 md:flex-row md:items-start md:justify-between">
-        <Link href={`/batch/${batch.id}`} className="min-w-0 flex-1">
+    <Card className="group interactive-lift overflow-hidden border-default-200/80 bg-content1/90 shadow-none hover:border-default-300 hover:bg-content1 hover:shadow-[0_18px_42px_hsl(var(--shadow-color)/0.06)]">
+      <CardHeader className="flex flex-col gap-3 p-4 md:flex-row md:items-start md:justify-between md:p-5">
+        <Link href={`/batch/${batch.id}`} className="min-w-0 flex-1 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-primary/30">
           <div className="flex min-w-0 items-center gap-2">
-            <h3 className="truncate text-base font-semibold tracking-tight text-foreground group-hover:text-primary" title={batch.description || '未命名批次'}>
+            <h3 className="truncate text-[15px] font-semibold tracking-[-0.02em] text-foreground group-hover:underline group-hover:decoration-default-400 group-hover:underline-offset-4" title={batch.description || '未命名批次'}>
               {batch.description || '未命名批次'}
             </h3>
             {hasConflicts && (
@@ -107,15 +107,15 @@ function BatchCard({ batch, refresh }: BatchCardProps) {
             >
               {BATCH_STATUS_MAP[batch.status] || batch.status}
             </Chip>
-            <div className="flex items-center gap-1 rounded-md bg-content2 px-2 py-1" title="修改数量">
+            <div className="flex items-center gap-1 rounded-md bg-content2/75 px-2 py-1" title="修改数量">
               <FileEdit size={14} />
               <span>{batch._count.pullRequests}</span>
             </div>
-            <div className="flex items-center gap-1 rounded-md bg-content2 px-2 py-1" title="创建者">
+            <div className="flex items-center gap-1 rounded-md bg-content2/75 px-2 py-1" title="创建者">
               <User size={14} />
               <span className="max-w-20 truncate">{batch.creator.nickname || batch.creator.name}</span>
             </div>
-            <div className="flex items-center gap-1 rounded-md bg-content2 px-2 py-1" title="创建时间">
+            <div className="flex items-center gap-1 rounded-md bg-content2/75 px-2 py-1" title="创建时间">
               <CalendarClock size={14} />
               <span>{new Date(batch.createAt).toLocaleDateString()}</span>
             </div>
@@ -130,18 +130,18 @@ function BatchCard({ batch, refresh }: BatchCardProps) {
         </div>
       </CardHeader>
 
-      <Divider className="opacity-70" />
+      <Divider className="opacity-55" />
 
       <Link href={`/batch/${batch.id}`}>
-        <CardBody className="cursor-pointer px-4 py-3">
+        <CardBody className="cursor-pointer px-4 py-3 md:px-5">
           {batch.pullRequests.length > 0 ? (
-            <div className="space-y-2 mb-3">
+            <div className="space-y-1.5">
               {batch.pullRequests.slice(0, 3).map((pr) => (
-                <div key={pr.id} className="flex items-center gap-2 rounded-md bg-content2/65 px-2.5 py-2 text-sm">
+                <div key={pr.id} className="flex min-h-9 items-center gap-2 rounded-md bg-content2/55 px-2.5 py-1.5 text-sm transition-colors group-hover:bg-content2/75">
                   <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md ${getActionStyle(pr.action)}`}>
                     {getActionIcon(pr.action)}
                   </span>
-                  <span className="min-w-15 max-w-20 truncate font-mono text-default-600" title={pr.code || ''}>{pr.code}</span>
+                  <span className="min-w-15 max-w-20 truncate font-mono text-[13px] text-default-600" title={pr.code || ''}>{pr.code}</span>
                   <div className="flex-1 min-w-0 truncate">
                     {pr.action === 'Delete' ? (
                       <span className="text-danger line-through opacity-70">{pr.word}</span>
@@ -164,7 +164,7 @@ function BatchCard({ batch, refresh }: BatchCardProps) {
               ))}
             </div>
           ) : (
-            <div className="rounded-md border border-dashed border-default-200 bg-content2/50 px-3 py-3 text-sm text-default-500">
+            <div className="rounded-md border border-dashed border-default-200 bg-content2/40 px-3 py-3 text-sm text-default-500">
               暂无修改内容
             </div>
           )}
