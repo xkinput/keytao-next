@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { checkAdminPermission } from '@/lib/adminAuth'
 import { getAdminBatchReviewDetail } from '@/lib/services/adminBatchReviewDetailService'
+import { requestMiaomiaoBatchReview, writeMiaomiaoBatchReview } from '@/lib/services/batchBotReviewService'
 
 export async function POST(
   request: NextRequest,
@@ -21,14 +22,25 @@ export async function POST(
       return NextResponse.json({ error: '批次不存在' }, { status: 404 })
     }
 
+    const aiReview = await requestMiaomiaoBatchReview({
+      batch,
+      localReview: batch.aiReview,
+      focusPrId: Number.isInteger(prId) ? prId : undefined,
+    })
+
+    await writeMiaomiaoBatchReview({
+      batch,
+      aiReview,
+    })
+
     const focusItem = Number.isInteger(prId)
-      ? batch.aiReview.items.find(item => item.prId === prId)
+      ? aiReview.items.find(item => item.prId === prId)
       : undefined
 
     return NextResponse.json({
-      aiReview: batch.aiReview,
+      aiReview,
       focusItem,
-      reviewedAt: batch.aiReview.generatedAt,
+      reviewedAt: aiReview.generatedAt,
     })
   } catch (error) {
     console.error('Manual admin AI review error:', error)

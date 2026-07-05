@@ -6,7 +6,7 @@ export type BatchAiReviewSeverity = 'success' | 'warning' | 'danger' | 'default'
 
 export interface BatchAiReviewRecord {
   reviewedBy: 'Miaomiao'
-  source: 'bot-remark' | 'system'
+  source: 'bot-remark' | 'bot-llm' | 'system'
   summary: string
   pronunciation?: string
   sources: string[]

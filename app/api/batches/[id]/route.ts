@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { checkIsAdmin } from '@/lib/adminAuth'
+import { buildBatchAiReview } from '@/lib/services/batchAiReviewService'
 
 // GET /api/batches/:id - Get batch details
 export async function GET(
@@ -121,10 +122,27 @@ export async function GET(
       }
     })
 
+    const shouldExposeAiReview = batch.status !== 'Draft' && enrichedPRs.length > 0
+    const aiReview = shouldExposeAiReview
+      ? await buildBatchAiReview({
+        id: batch.id,
+        status: batch.status,
+        pullRequests: enrichedPRs,
+      })
+      : undefined
+    const aiItemsByPrId = new Map(aiReview?.items.map(item => [item.prId, item]) ?? [])
+    const reviewedPRs = aiReview
+      ? enrichedPRs.map(pr => ({
+        ...pr,
+        aiReview: aiItemsByPrId.get(pr.id),
+      }))
+      : enrichedPRs
+
     return NextResponse.json({
       batch: {
         ...batch,
-        pullRequests: enrichedPRs
+        pullRequests: reviewedPRs,
+        aiReview,
       }
     })
   } catch (error) {

@@ -1,6 +1,6 @@
 'use client'
 
-import { use, useState, useEffect } from 'react'
+import { use, useMemo, useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   Card,
@@ -23,7 +23,12 @@ import { useUIStore } from '@/lib/store/ui'
 import { BATCH_STATUS_MAP, STATUS_COLOR_MAP } from '@/lib/constants/status'
 import type { PhraseType } from '@/lib/constants/phraseTypes'
 import { formatBatchSubmitWarnings, type BatchSubmitWarning } from '@/lib/services/batchSubmitWarnings'
-import { Edit, AlertTriangle, Lightbulb } from 'lucide-react'
+import { Edit, AlertTriangle, Lightbulb, Bot, CheckCircle2 } from 'lucide-react'
+import type {
+  BatchAiReviewItem,
+  BatchAiReviewResult,
+  BatchAiReviewVerdict,
+} from '@/lib/types/batchAiReview'
 
 interface PullRequest {
   id: number
@@ -37,11 +42,21 @@ interface PullRequest {
   remark: string | null
   hasConflict: boolean
   conflictReason: string | null
+  conflictInfo?: {
+    hasConflict: boolean
+    impact?: string
+    suggestions?: Array<{
+      action: string
+      word?: string
+      reason: string
+    }>
+  }
   phrase?: {
     id: number
     word: string
     code: string
   }
+  aiReview?: BatchAiReviewItem
   dependencies: Array<{
     dependsOn: {
       id: number
@@ -85,6 +100,32 @@ interface BatchDetail {
     content: string
   }
   pullRequests: PullRequest[]
+  aiReview?: BatchAiReviewResult
+}
+
+function getAiVerdictColor(verdict: BatchAiReviewVerdict): 'success' | 'warning' | 'danger' {
+  const map: Record<BatchAiReviewVerdict, 'success' | 'warning' | 'danger'> = {
+    pass: 'success',
+    needs_attention: 'warning',
+    manual_review: 'danger'
+  }
+  return map[verdict]
+}
+
+function getAiVerdictText(verdict: BatchAiReviewVerdict) {
+  const map: Record<BatchAiReviewVerdict, string> = {
+    pass: '本喵建议可通过',
+    needs_attention: '本喵建议复核',
+    manual_review: '需要人工确认'
+  }
+  return map[verdict]
+}
+
+function getAiAlertClass(item: BatchAiReviewItem) {
+  if (item.status === 'manual_review') {
+    return 'border-danger-200 bg-danger-50/70 dark:bg-danger-100/10'
+  }
+  return 'border-warning-200 bg-warning-50/70 dark:bg-warning-100/10'
 }
 
 export default function BatchDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -103,6 +144,30 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
   )
 
   const batchStatus = batch?.batch.status
+  const aiReview = batch?.batch.aiReview
+  const pullRequestById = useMemo(() => {
+    return new Map((batch?.batch.pullRequests ?? []).map(pr => [pr.id, pr]))
+  }, [batch?.batch.pullRequests])
+  const humanReviewItems = useMemo(() => {
+    return (aiReview?.items ?? []).filter(item => item.status !== 'pass')
+  }, [aiReview?.items])
+  const compactChainNotes = useMemo(() => {
+    return (aiReview?.codeChains ?? [])
+      .flatMap(chain => chain.recommendations.map(recommendation => ({
+        key: `${chain.type}:${chain.code}:${recommendation}`,
+        code: chain.code,
+        recommendation,
+      })))
+      .filter(note =>
+        note.recommendation.includes('首位')
+        || note.recommendation.includes('提频')
+        || note.recommendation.includes('移除')
+        || note.recommendation.includes('移入')
+        || note.recommendation.includes('移出')
+      )
+      .slice(0, 3)
+  }, [aiReview?.codeChains])
+
   const isPrivateStatus = batchStatus === 'Draft' || batchStatus === 'Rejected'
   const { data: batchList } = useAPI<{ batches: Array<{ id: string }> }>(
     batchStatus ? `/api/batches?status=${batchStatus}&pageSize=500${isPrivateStatus ? '&onlyMine=true' : ''}` : null,
@@ -256,6 +321,12 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
     ? ['Draft', 'Rejected', 'Submitted']
     : ['Draft', 'Rejected']
   const canEdit = (isOwner || isAdmin) && editableStatuses.includes(batchData.status)
+  const getReviewTargetLabel = (item: BatchAiReviewItem) => {
+    const pr = pullRequestById.get(item.prId)
+    const word = pr?.word || pr?.phrase?.word || '未命名词条'
+    const code = pr?.code || pr?.phrase?.code || '无编码'
+    return `「${word}」@${code}`
+  }
 
   return (
     <div className="min-h-screen">
@@ -425,6 +496,85 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
               </CardHeader>
               <CardBody>
                 <p className="text-default-600">{batchData.reviewNote}</p>
+              </CardBody>
+            </Card>
+          )}
+
+          {aiReview && batchData.status !== 'Draft' && (
+            <Card className="mt-4">
+              <CardBody className="space-y-4">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="flex gap-3">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary-50 text-primary dark:bg-primary-100/10">
+                      <Bot className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <div className="mb-2 flex flex-wrap items-center gap-2">
+                        <h3 className="text-lg font-semibold">喵喵审核意见</h3>
+                        <Chip color={getAiVerdictColor(aiReview.verdict)} variant="flat" size="sm">
+                          {getAiVerdictText(aiReview.verdict)}
+                        </Chip>
+                      </div>
+                      <p className="max-w-3xl text-small text-default-600">{aiReview.headline}</p>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+                    <Chip size="sm" color="success" variant="flat">
+                      通过 {aiReview.riskCounts.pass}
+                    </Chip>
+                    <Chip size="sm" color={humanReviewItems.length > 0 ? 'warning' : 'success'} variant="flat">
+                      人看 {humanReviewItems.length}
+                    </Chip>
+                    <Chip size="sm" color="primary" variant="flat">
+                      喵审 {aiReview.riskCounts.botReviewed}/{aiReview.items.length}
+                    </Chip>
+                  </div>
+                </div>
+
+                {humanReviewItems.length === 0 ? (
+                  <div className="flex items-center gap-2 rounded-md bg-success-50 px-3 py-2 text-small text-success-700 dark:bg-success-100/10">
+                    <CheckCircle2 className="h-4 w-4" />
+                    本喵没有发现需要单独复核的条目。
+                  </div>
+                ) : (
+                  <section className="rounded-lg border border-default-200 p-4">
+                    <div className="mb-3 flex items-center gap-2">
+                      <AlertTriangle className="h-4 w-4 text-warning" />
+                      <p className="font-medium">需要再看的条目</p>
+                    </div>
+                    <div className="space-y-2">
+                      {humanReviewItems.map(item => (
+                        <article key={item.prId} className={`rounded-md border px-3 py-2 ${getAiAlertClass(item)}`}>
+                          <div className="mb-1 flex flex-wrap items-center gap-2">
+                            <Chip size="sm" color={item.severity} variant="flat">
+                              PR#{item.prId}
+                            </Chip>
+                            <span className="text-small font-medium">{getReviewTargetLabel(item)}</span>
+                            <span className="text-small text-default-500">{item.title}</span>
+                          </div>
+                          <p className="text-small text-default-700">{item.reasons[0]}</p>
+                          {item.suggestions[0] && (
+                            <p className="mt-1 text-small text-default-500">建议：{item.suggestions[0]}</p>
+                          )}
+                        </article>
+                      ))}
+                    </div>
+                  </section>
+                )}
+
+                {compactChainNotes.length > 0 && (
+                  <div className="rounded-lg border border-default-200 bg-default-50/60 p-4 dark:bg-default-100/5">
+                    <p className="mb-2 text-small font-medium">编码链提示</p>
+                    <div className="space-y-2">
+                      {compactChainNotes.map(note => (
+                        <p key={note.key} className="text-small text-default-500">
+                          <code className="text-primary">{note.code}</code>：{note.recommendation}
+                        </p>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </CardBody>
             </Card>
           )}

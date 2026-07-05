@@ -96,7 +96,7 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
   } | null>(null)
   const { openAlert, openConfirm } = useUIStore()
 
-  const { data: batch, error, isLoading } = useAPI<{ batch: BatchDetail }>(
+  const { data: batch, error, isLoading, mutate } = useAPI<{ batch: BatchDetail }>(
     `/api/admin/batches/${resolvedParams.id}`,
     { withAuth: true }
   )
@@ -214,6 +214,8 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
         batchId: resolvedParams.id,
         aiReview: result.aiReview,
       })
+      setReviewNote(result.aiReview.suggestedReviewNote)
+      await mutate()
       if (prId) {
         setExpandedReviewIds(current => current.includes(prId) ? current : [...current, prId])
       }
@@ -440,7 +442,7 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
                       isLoading={checkingTarget === 'all'}
                       onPress={() => handleAskMiaoAgain()}
                     >
-                      重新检查
+                      请喵复审
                     </Button>
                   </div>
                 </div>
@@ -500,7 +502,7 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
                                   isLoading={checkingTarget === item.prId}
                                   onPress={() => handleAskMiaoAgain(item.prId)}
                                 >
-                                  让喵再看
+                                  让喵再审
                                 </Button>
                               </div>
                             </article>

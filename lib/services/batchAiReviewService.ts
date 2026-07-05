@@ -49,6 +49,15 @@ interface MovePair {
   createPrId: number
 }
 
+interface ParsedMiaomiaoReview {
+  status: BatchAiReviewStatus
+  severity: BatchAiReviewSeverity
+  title: string
+  reasons: string[]
+  suggestions: string[]
+  reviewRecord: BatchAiReviewRecord
+}
+
 const AUTHORITY_SOURCE_NAMES = [
   '汉典',
   '萌典',
@@ -63,6 +72,7 @@ const AUTHORITY_SOURCE_NAMES = [
 ]
 
 const BOT_REVIEW_PATTERN = /(Bot审词|Bot 自动审词|喵喵审词|本喵|自动审词|喵喵|Miaomiao|Miao)/i
+const MIAOMIAO_REVIEW_BLOCK_PATTERN = /--- miao-review:start ---([\s\S]*?)--- miao-review:end ---/g
 const CHINESE_PATTERN = /[\u3400-\u9fff]/
 const URL_PATTERN = /^https?:\/\//i
 const ENGLISH_PATTERN = /^[A-Za-z][A-Za-z0-9 ._+\-'/]*$/
@@ -128,6 +138,68 @@ function extractReviewRecord(remark: string | null): BatchAiReviewRecord | undef
     pronunciation: pronunciationMatch?.[1]?.trim(),
     sources: sourceNames,
     evidence,
+  }
+}
+
+function getLineValue(text: string, label: string): string | undefined {
+  const match = text.match(new RegExp(`^${label}[：:]\\s*(.+)$`, 'm'))
+  return match?.[1]?.trim()
+}
+
+function parseMiaomiaoReviewStatus(value: string | undefined): BatchAiReviewStatus {
+  const normalized = value || ''
+  if (normalized.includes('通过')) return 'pass'
+  if (normalized.includes('人工') || normalized.includes('不通过')) return 'manual_review'
+  return 'attention'
+}
+
+function severityForStatus(status: BatchAiReviewStatus): BatchAiReviewSeverity {
+  if (status === 'pass') return 'success'
+  if (status === 'manual_review') return 'danger'
+  return 'warning'
+}
+
+function parseMiaomiaoReviewRemark(remark: string | null): ParsedMiaomiaoReview | undefined {
+  if (!remark) return undefined
+
+  const blocks = Array.from(remark.matchAll(MIAOMIAO_REVIEW_BLOCK_PATTERN))
+  const latestBlock = blocks.length > 0 ? blocks[blocks.length - 1]?.[1] : undefined
+  if (!latestBlock) return undefined
+
+  const status = parseMiaomiaoReviewStatus(getLineValue(latestBlock, '本喵复审'))
+  const title = getLineValue(latestBlock, '结论') || (status === 'pass' ? '本喵建议通过' : '本喵建议复核')
+  const reason = getLineValue(latestBlock, '理由')
+  const suggestion = getLineValue(latestBlock, '建议')
+  const pronunciation = getLineValue(latestBlock, '读音')
+  const sources = (getLineValue(latestBlock, '来源') || '')
+    .split(/[、,，]/)
+    .map(source => source.trim())
+    .filter(Boolean)
+  const evidence = Array.from(latestBlock.matchAll(/^证据[：:]\s*(.+)$/gm))
+    .map(match => match[1].trim())
+    .filter(Boolean)
+
+  if (pronunciation) {
+    evidence.unshift(`读音：${pronunciation}`)
+  }
+  if (sources.length > 0) {
+    evidence.push(`来源：${sources.join('、')}`)
+  }
+
+  return {
+    status,
+    severity: severityForStatus(status),
+    title,
+    reasons: reason ? [reason] : [title],
+    suggestions: suggestion ? [suggestion] : ['按本喵复审结论处理；如有歧义，保留给管理员确认。'],
+    reviewRecord: {
+      reviewedBy: 'Miaomiao',
+      source: 'bot-llm',
+      summary: compactText(title),
+      pronunciation,
+      sources,
+      evidence: evidence.length > 0 ? evidence : ['本喵已调用 LLM 完成复审。'],
+    },
   }
 }
 
@@ -253,7 +325,8 @@ function buildReviewItem(
 ): BatchAiReviewItem {
   const word = getWord(pr)
   const code = getCode(pr)
-  const reviewRecord = extractReviewRecord(pr.remark)
+  const structuredReview = parseMiaomiaoReviewRemark(pr.remark)
+  let reviewRecord = structuredReview?.reviewRecord ?? extractReviewRecord(pr.remark)
   const state = {
     status: 'pass' as BatchAiReviewStatus,
     severity: 'success' as BatchAiReviewSeverity,
@@ -324,7 +397,28 @@ function buildReviewItem(
     addUnique(suggestions, '补充读音，避免把多音词按错误读音编码。')
   }
 
+  if (structuredReview) {
+    state.status = structuredReview.status
+    state.severity = structuredReview.severity
+    reviewRecord = structuredReview.reviewRecord
+    reasons.splice(0, reasons.length, ...structuredReview.reasons)
+    suggestions.splice(0, suggestions.length, ...structuredReview.suggestions)
+
+    const moveAfterStructuredReview = findMoveForPr(moves, pr)
+    if (pr.action === 'Delete' && !moveAfterStructuredReview) {
+      raiseStatus(state, 'manual_review', 'danger')
+      addUnique(reasons, '这是纯删除操作，需要管理员确认。')
+      addUnique(suggestions, '确认该词确实不应存在；若是改码，请补齐新增侧。')
+    }
+    if (pr.conflictInfo?.hasConflict || pr.hasConflict) {
+      raiseStatus(state, 'manual_review', 'danger')
+      addUnique(reasons, pr.conflictInfo?.impact || pr.conflictReason || '冲突检测发现该条目需要人工确认。')
+      addUnique(suggestions, '先处理冲突，再决定是否批准该批次。')
+    }
+  }
+
   const title = (() => {
+    if (structuredReview) return structuredReview.title
     if (!reviewRecord && pr.action !== 'Delete') return '缺少喵备注'
     if (state.status === 'manual_review') return '需要管理员确认'
     if (state.status === 'attention' && reviewRecord) return '喵备注需补证据'

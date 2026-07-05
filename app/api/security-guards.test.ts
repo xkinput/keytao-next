@@ -68,6 +68,7 @@ vi.mock('@/lib/prisma', () => ({
       findMany: vi.fn(),
       create: vi.fn(),
       findFirst: vi.fn(),
+      update: vi.fn(),
       count: vi.fn(),
     },
     pullRequest: {
@@ -152,6 +153,7 @@ beforeEach(() => {
   mockBuildBatchSubmitWarnings.mockReturnValue([])
   mockCreateGithubSyncService.mockReturnValue({})
   mockPrisma.batch.create.mockResolvedValue({ id: 'batch-new' })
+  mockPrisma.batch.update.mockResolvedValue({ id: 'batch-1' })
   mockPrisma.batch.findMany.mockResolvedValue([])
   mockPrisma.pullRequest.create.mockResolvedValue({ id: 1 })
   mockPrisma.pullRequest.findMany.mockResolvedValue([])
@@ -339,6 +341,38 @@ describe('API abuse guards', () => {
     expect(res.status).toBe(200)
   })
 
+  it('shows public AI review details after a batch is submitted', async () => {
+    mockGetSession.mockResolvedValue(null)
+    mockPrisma.batch.findUnique.mockResolvedValue({
+      id: 'batch-1',
+      creatorId: 2,
+      status: 'Submitted',
+      pullRequests: [{
+        id: 1,
+        action: 'Create',
+        word: '安泊',
+        oldWord: null,
+        code: 'xfblo',
+        type: 'Phrase',
+        weight: 100,
+        remark: '喵喵审词：读音 an bo；来源 汉典',
+        phrase: null,
+        conflicts: [],
+        dependencies: [],
+        dependedBy: [],
+      }],
+    })
+    const { GET } = await import('./batches/[id]/route')
+
+    const res = await GET(new NextRequest('http://localhost/api/batches/batch-1'), { params: Promise.resolve({ id: 'batch-1' }) })
+    const data = await res.json()
+
+    expect(res.status).toBe(200)
+    expect(data.batch.aiReview.riskCounts.botReviewed).toBe(1)
+    expect(data.batch.pullRequests[0].aiReview.reviewRecord.summary).toContain('喵喵审词')
+    expect(mockCheckAdminPermission).not.toHaveBeenCalled()
+  })
+
   it('does not hide draft or rejected batches from the public list', async () => {
     mockPrisma.batch.findMany.mockResolvedValue([])
     mockPrisma.batch.count.mockResolvedValue(0)
@@ -403,6 +437,42 @@ describe('API abuse guards', () => {
   })
 
   it('lets admins manually rerun AI batch review', async () => {
+    const botAiReview = {
+      reviewer: 'Miaomiao',
+      generatedAt: '2026-07-05T05:00:00.000Z',
+      verdict: 'pass',
+      headline: '本喵已通过 LLM 完整复审。',
+      suggestedReviewNote: '本喵复审：可通过。',
+      riskCounts: {
+        pass: 1,
+        attention: 0,
+        manualReview: 0,
+        botReviewed: 1,
+      },
+      checklist: ['已调用 keytao-bot LLM 完整复审。'],
+      items: [{
+        prId: 1,
+        status: 'pass',
+        severity: 'success',
+        title: '本喵建议通过',
+        reasons: ['权威读音和编码一致。'],
+        suggestions: ['可以批准。'],
+        reviewRecord: {
+          reviewedBy: 'Miaomiao',
+          source: 'bot-llm',
+          summary: '本喵建议通过',
+          pronunciation: 'an bo',
+          sources: ['汉典'],
+          evidence: ['读音：an bo', '来源：汉典'],
+        },
+      }],
+      codeChains: [],
+    }
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ success: true, aiReview: botAiReview }),
+    } as Response)
     mockPrisma.batch.findUnique.mockResolvedValue({
       id: 'batch-1',
       status: 'Submitted',
@@ -433,6 +503,20 @@ describe('API abuse guards', () => {
     expect(res?.status).toBe(200)
     expect(data?.aiReview.riskCounts.botReviewed).toBe(1)
     expect(data?.focusItem).toMatchObject({ prId: 1 })
+    expect(fetch).toHaveBeenCalledWith(
+      'http://localhost:8080/api/keytao/batches/review',
+      expect.objectContaining({ method: 'POST' })
+    )
+    expect(mockPrisma.pullRequest.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 1 },
+      data: expect.objectContaining({
+        remark: expect.stringContaining('本喵复审：通过'),
+      }),
+    }))
+    expect(mockPrisma.batch.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'batch-1' },
+      data: { reviewNote: '本喵复审：可通过。' },
+    }))
     expect(mockCheckBatchConflictsWithWeight).toHaveBeenCalled()
   })
 
