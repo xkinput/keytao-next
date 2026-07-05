@@ -20,6 +20,9 @@ importers:
 
   .:
     dependencies:
+      '@gsap/react':
+        specifier: ^2.1.2
+        version: 2.1.2(gsap@3.15.0)(react@19.2.7)
       '@heroui/react':
         specifier: ^3.2.1
         version: 3.2.1(@react-spectrum/provider@3.11.1(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(tailwindcss@4.3.2)
@@ -65,6 +68,9 @@ importers:
       fflate:
         specifier: ^0.8.3
         version: 0.8.3
+      gsap:
+        specifier: ^3.15.0
+        version: 3.15.0
       jose:
         specifier: ^6.2.3
         version: 6.2.3
@@ -522,6 +528,12 @@ packages:
 
   '@formatjs/intl-localematcher@0.6.2':
     resolution: {integrity: sha512-XOMO2Hupl0wdd172Y06h6kLpBz6Dv+J4okPLl4LPtzbr8f66WbIoy4ev98EBuZ6ZK4h5ydTN6XneT4QVpD7cdA==}
+
+  '@gsap/react@2.1.2':
+    resolution: {integrity: sha512-JqliybO1837UcgH2hVOM4VO+38APk3ECNrsuSM4MuXp+rbf+/2IG2K1YJiqfTcXQHH7XlA0m3ykniFYstfq0Iw==}
+    peerDependencies:
+      gsap: ^3.12.5
+      react: '>=17'
 
   '@heroui/react@3.2.1':
     resolution: {integrity: sha512-dEwOFHd2I199dm6nXynK96xeqeQZH2zcFlY8BaoqAjNNvVg24X4/dFua8GuayD2KS6FNX65/2BQhlxiV3ByFrQ==}
@@ -2752,6 +2764,9 @@ packages:
   graphmatch@1.1.0:
     resolution: {integrity: sha512-0E62MaTW5rPZVRLyIJZG/YejmdA/Xr1QydHEw3Vt+qOKkMIOE8WDLc9ZX2bmAjtJFZcId4lEdrdmASsEy7D1QA==}
 
+  gsap@3.15.0:
+    resolution: {integrity: sha512-dMW4CWBTUK1AEEDeZc1g4xpPGIrSf9fJF960qbTZmN/QwZIWY5wgliS6JWl9/25fpTGJrMRtSjGtOmPnfjZB+A==}
+
   happy-dom@20.10.6:
     resolution: {integrity: sha512-6QD0ilzDDt93tX44y8tbmZdAcdTRYDhUP+Asgi6pC8Pp5IA3cvaZGyoVN/EGtlq9ziT65iPuBBn3ASLr6hCgVw==}
     engines: {node: '>=20.0.0'}
@@ -4598,6 +4613,11 @@ snapshots:
   '@formatjs/intl-localematcher@0.6.2':
     dependencies:
       tslib: 2.8.1
+
+  '@gsap/react@2.1.2(gsap@3.15.0)(react@19.2.7)':
+    dependencies:
+      gsap: 3.15.0
+      react: 19.2.7
 
   '@heroui/react@3.2.1(@react-spectrum/provider@3.11.1(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(tailwindcss@4.3.2)':
     dependencies:
@@ -6918,6 +6938,8 @@ snapshots:
   grammex@3.1.12: {}
 
   graphmatch@1.1.0: {}
+
+  gsap@3.15.0: {}
 
   happy-dom@20.10.6:
     dependencies:

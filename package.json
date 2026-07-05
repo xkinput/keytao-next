@@ -29,6 +29,7 @@
     "init:all": "pnpm run init:permission && pnpm run init:role && pnpm run init:user"
   },
   "dependencies": {
+    "@gsap/react": "^2.1.2",
     "@heroui/react": "^3.2.1",
     "@heroui/styles": "^3.2.1",
     "@icons-pack/react-simple-icons": "^13.13.0",
@@ -44,6 +45,7 @@
     "diff": "^9.0.0",
     "dotenv": "^17.4.2",
     "fflate": "^0.8.3",
+    "gsap": "^3.15.0",
     "jose": "^6.2.3",
     "jsonwebtoken": "^9.0.3",
     "jszip": "^3.10.1",

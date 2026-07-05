@@ -6,6 +6,7 @@ import { Providers } from './providers'
 import Navbar from '@/app/components/Navbar'
 import ChatWidget from '@/app/components/ChatWidget'
 import KeytaoIntroModal from '@/app/components/KeytaoIntroModal'
+import MotionEffects from '@/app/components/MotionEffects'
 
 const APP_NAME = 'KeyTao'
 const APP_TITLE = 'KeyTao 星空键道6词库管理系统'
@@ -80,6 +81,7 @@ export default function RootLayout({
           strategy="beforeInteractive"
         />
         <Providers>
+          <MotionEffects />
           <Navbar />
           {children}
           <KeytaoIntroModal />

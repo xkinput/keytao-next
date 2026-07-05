@@ -91,6 +91,8 @@
     --accent: oklch(0.245 0.025 250);
     --accent-foreground: oklch(0.985 0.003 248);
     --accent-soft: oklch(0.935 0.01 248);
+    --neon-cyan: oklch(0.72 0.13 205);
+    --neon-violet: oklch(0.62 0.16 288);
     --success: oklch(0.58 0.13 155);
     --success-soft: oklch(0.94 0.04 155);
     --warning: oklch(0.68 0.15 78);
@@ -118,6 +120,8 @@
     --accent: oklch(0.82 0.028 248);
     --accent-foreground: oklch(0.16 0.012 252);
     --accent-soft: oklch(0.285 0.018 252);
+    --neon-cyan: oklch(0.78 0.14 205);
+    --neon-violet: oklch(0.73 0.15 288);
     --success: oklch(0.7 0.12 155);
     --success-soft: oklch(0.29 0.04 155);
     --warning: oklch(0.78 0.13 78);
@@ -139,9 +143,11 @@
   body {
     min-height: 100dvh;
     background:
-      radial-gradient(circle at 18% -12rem, color-mix(in oklab, var(--foreground) 7%, transparent) 0, transparent 28rem),
-      radial-gradient(circle at 82% -18rem, color-mix(in oklab, var(--accent) 8%, transparent) 0, transparent 30rem),
-      linear-gradient(180deg, color-mix(in oklab, var(--background) 86%, var(--surface) 14%) 0%, var(--background) 30rem);
+      linear-gradient(90deg, color-mix(in oklab, var(--separator) 20%, transparent) 1px, transparent 1px),
+      linear-gradient(180deg, color-mix(in oklab, var(--separator) 16%, transparent) 1px, transparent 1px),
+      linear-gradient(115deg, color-mix(in oklab, var(--neon-cyan) 11%, transparent) 0%, transparent 24%, transparent 70%, color-mix(in oklab, var(--neon-violet) 9%, transparent) 100%),
+      linear-gradient(180deg, color-mix(in oklab, var(--background) 82%, var(--surface) 18%) 0%, var(--background) 32rem);
+    background-size: 48px 48px, 48px 48px, 100% 100%, 100% 100%;
     color: var(--foreground);
     font-variant-numeric: tabular-nums;
     text-rendering: geometricPrecision;
@@ -175,8 +181,79 @@
 
   .workbench-toolbar {
     border: 1px solid color-mix(in oklab, var(--separator) 88%, transparent);
-    background: color-mix(in oklab, var(--surface) 94%, transparent);
-    box-shadow: 0 1px 0 hsl(var(--shadow-color) / 0.05);
+    background:
+      linear-gradient(135deg, color-mix(in oklab, var(--neon-cyan) 8%, transparent), transparent 34%),
+      color-mix(in oklab, var(--surface) 92%, transparent);
+    box-shadow: 0 1px 0 hsl(var(--shadow-color) / 0.05), inset 0 1px 0 color-mix(in oklab, white 22%, transparent);
+  }
+
+  .page-kicker {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.75rem;
+    font-weight: 650;
+    letter-spacing: 0;
+    color: color-mix(in oklab, var(--muted) 82%, var(--neon-cyan) 18%);
+  }
+
+  .page-kicker::before {
+    content: "";
+    width: 1.75rem;
+    height: 1px;
+    background: linear-gradient(90deg, var(--neon-cyan), color-mix(in oklab, var(--neon-violet) 80%, transparent));
+  }
+
+  .page-title {
+    margin-top: 0.5rem;
+    font-size: clamp(1.85rem, 2.8vw, 2.9rem);
+    font-weight: 680;
+    line-height: 1.02;
+    letter-spacing: 0;
+    color: var(--foreground);
+  }
+
+  .control-island {
+    position: relative;
+    overflow: hidden;
+    border: 1px solid color-mix(in oklab, var(--separator) 82%, var(--neon-cyan) 18%);
+    background:
+      linear-gradient(120deg, color-mix(in oklab, var(--neon-cyan) 9%, transparent), transparent 30%),
+      color-mix(in oklab, var(--surface) 92%, transparent);
+    box-shadow: 0 1px 0 hsl(var(--shadow-color) / 0.06), 0 20px 56px hsl(var(--shadow-color) / 0.07);
+  }
+
+  .control-island::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background:
+      linear-gradient(90deg, transparent, color-mix(in oklab, var(--neon-cyan) 28%, transparent), transparent) 0 0 / 46% 1px no-repeat,
+      linear-gradient(180deg, transparent, color-mix(in oklab, var(--neon-violet) 16%, transparent), transparent) 100% 0 / 1px 64% no-repeat;
+  }
+
+  .kinetic-line {
+    height: 1px;
+    width: 8rem;
+    background: linear-gradient(90deg, transparent, var(--neon-cyan), color-mix(in oklab, var(--neon-violet) 70%, var(--neon-cyan) 30%), transparent);
+    opacity: 0.62;
+  }
+
+  .select-trigger-future {
+    border-color: color-mix(in oklab, var(--separator) 72%, var(--neon-cyan) 28%);
+    background:
+      linear-gradient(135deg, color-mix(in oklab, var(--neon-cyan) 8%, transparent), transparent 48%),
+      color-mix(in oklab, var(--field) 94%, transparent);
+  }
+
+  .select-trigger-future:hover {
+    border-color: color-mix(in oklab, var(--neon-cyan) 44%, var(--separator) 56%);
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--neon-cyan) 10%, transparent);
+  }
+
+  .motion-safe {
+    transform: translateZ(0);
   }
 
   .empty-state {

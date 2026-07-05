@@ -81,7 +81,7 @@ function BatchCard({ batch, refresh }: BatchCardProps) {
       <CardHeader className="flex flex-col gap-3 p-4 md:flex-row md:items-start md:justify-between md:p-5">
         <Link href={`/batch/${batch.id}`} className="min-w-0 flex-1 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-primary/30">
           <div className="flex min-w-0 items-center gap-2">
-            <h3 className="truncate text-[15px] font-semibold tracking-[-0.02em] text-foreground group-hover:underline group-hover:decoration-default-400 group-hover:underline-offset-4" title={batch.description || '未命名批次'}>
+            <h3 className="truncate text-[15px] font-semibold tracking-normal text-foreground group-hover:underline group-hover:decoration-default-400 group-hover:underline-offset-4" title={batch.description || '未命名批次'}>
               {batch.description || '未命名批次'}
             </h3>
             {hasConflicts && (

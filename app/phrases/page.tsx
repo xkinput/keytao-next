@@ -120,10 +120,10 @@ export default function PhrasesPage() {
   return (
     <div className="min-h-screen">
       <main className="app-container py-8 md:py-10">
-        <div className="mb-7 flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
+        <div className="mb-7 flex flex-col gap-5 md:flex-row md:items-end md:justify-between" data-motion="fade-up">
           <div className="max-w-3xl">
-            <p className="text-sm font-medium text-default-500">公开词库</p>
-            <h1 className="mt-2 text-[clamp(2.15rem,4vw,4.25rem)] font-semibold leading-[0.96] tracking-[-0.055em] text-foreground">词库管理</h1>
+            <p className="page-kicker">公开词库</p>
+            <h1 className="page-title">词库管理</h1>
             <p className="mt-3 text-base text-default-500">共 {total} 条词条</p>
           </div>
           <div className="flex items-center gap-2 md:pb-1">
@@ -155,7 +155,7 @@ export default function PhrasesPage() {
           </div>
         </div>
 
-        <div className="workbench-toolbar mb-5 flex flex-col gap-3 rounded-xl p-2.5 md:flex-row md:items-start">
+        <div className="workbench-toolbar mb-5 flex flex-col gap-3 rounded-xl p-2.5 md:flex-row md:items-start" data-motion="fade-up">
           <Input
             placeholder="搜索词条或编码..."
             value={search}

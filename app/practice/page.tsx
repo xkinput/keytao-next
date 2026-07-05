@@ -2170,19 +2170,20 @@ export default function KeyTaoPracticePage() {
   }, [currentIndex, focusPracticeSurface, schemeStatus])
 
   return (
-    <div className="min-h-screen bg-default-50/60">
-      <main className="mx-auto flex max-w-375 flex-col gap-4 px-4 pt-3 pb-6 sm:px-6 lg:px-8">
+    <div className="min-h-screen">
+      <main className="mx-auto flex max-w-375 flex-col gap-4 px-4 pt-4 pb-6 sm:px-6 lg:px-8">
         <div className="flex flex-col gap-1.5">
-          <div className="rounded-small border border-default-200 bg-content1 px-4 py-3 shadow-sm">
+          <div className="control-island rounded-2xl px-4 py-3" data-motion="fade-up">
             <div className="flex flex-col gap-3 lg:grid lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center lg:gap-4">
               <div className="flex min-w-0 items-center gap-3">
-                <div className="hidden rounded-small border border-primary-200 bg-primary-50 p-2.5 text-primary sm:block dark:bg-primary-50/10">
+                <div className="hidden rounded-xl border border-primary-200 bg-primary-50 p-2.5 text-primary shadow-[inset_0_1px_0_color-mix(in_oklab,white_35%,transparent)] sm:block dark:bg-primary-50/10">
                   <Keyboard className="h-5 w-5" />
                 </div>
                 <div className="min-w-0">
                   <div className="flex min-w-0 flex-wrap items-end gap-x-3 gap-y-1">
-                    <h1 className="shrink-0 text-2xl font-bold leading-none tracking-normal sm:text-[2rem]">键道练习</h1>
-                    <span className="text-sm font-medium text-default-500 sm:text-base">天地立心，以键为道！</span>
+                    <h1 className="shrink-0 text-xl font-semibold leading-none tracking-normal text-foreground sm:text-2xl">键道练习</h1>
+                    <span className="text-sm font-medium text-default-500">天地立心，以键为道！</span>
+                    <span data-motion="ambient-line" className="kinetic-line hidden sm:block" />
                     <Button
                       size="sm"
                       variant="flat"
@@ -2199,7 +2200,7 @@ export default function KeyTaoPracticePage() {
               </div>
               <div className="flex flex-col gap-2 lg:items-end">
                 <div className="flex flex-wrap items-center gap-2 md:justify-end lg:flex-nowrap">
-                  <div className="w-42 min-w-42">
+                  <div className="w-full min-w-0 sm:w-52 sm:min-w-52">
                     <Select
                       aria-label="载入文章"
                       placeholder="载入文章"
@@ -2212,17 +2213,22 @@ export default function KeyTaoPracticePage() {
                         setPracticeSource(nextSource as PracticeSource)
                       }}
                       classNames={{
-                        trigger: 'h-9 min-h-9',
-                        value: 'text-small font-medium',
+                        trigger: 'h-11 min-h-11 rounded-xl px-3',
+                        value: 'text-small font-semibold',
                       }}
                     >
                       {PRACTICE_SOURCE_OPTIONS.map((option) => (
-                        <SelectItem key={option.key} textValue={option.label}>{option.label}</SelectItem>
+                        <SelectItem key={option.key} textValue={option.label}>
+                          <span className="flex min-w-0 flex-col">
+                            <span className="truncate font-semibold">{option.label}</span>
+                            <span className="truncate text-xs text-default-500">{option.detail}</span>
+                          </span>
+                        </SelectItem>
                       ))}
                     </Select>
                   </div>
                   {practiceSource === 'article' && (
-                    <div className="w-42 min-w-42">
+                    <div className="w-full min-w-0 sm:w-52 sm:min-w-52">
                       <Select
                         aria-label="文章内容"
                         placeholder="选择文章"
@@ -2235,8 +2241,8 @@ export default function KeyTaoPracticePage() {
                           setSelectedArticleId(nextArticleId)
                         }}
                         classNames={{
-                          trigger: 'h-9 min-h-9',
-                          value: 'text-small font-medium',
+                          trigger: 'h-11 min-h-11 rounded-xl px-3',
+                          value: 'text-small font-semibold',
                         }}
                       >
                         {articleOptions.map((article) => (
@@ -2247,7 +2253,7 @@ export default function KeyTaoPracticePage() {
                       </Select>
                     </div>
                   )}
-                  <div className="w-38 min-w-38">
+                  <div className="w-full min-w-0 sm:w-44 sm:min-w-44">
                     <Select
                       aria-label="方案"
                       placeholder="选择方案"
@@ -2256,12 +2262,17 @@ export default function KeyTaoPracticePage() {
                       selectedKeys={[selectedSchemeKey]}
                       onSelectionChange={handlePracticeSchemeChange}
                       classNames={{
-                        trigger: 'h-9 min-h-9',
-                        value: 'text-small font-medium',
+                        trigger: 'h-11 min-h-11 rounded-xl px-3',
+                        value: 'text-small font-semibold',
                       }}
                     >
                       {PRACTICE_SCHEME_OPTIONS.map((scheme) => (
-                        <SelectItem key={scheme.key} textValue={scheme.label}>{scheme.label}</SelectItem>
+                        <SelectItem key={scheme.key} textValue={scheme.label}>
+                          <span className="flex min-w-0 flex-col">
+                            <span className="truncate font-semibold">{scheme.label}</span>
+                            <span className="truncate text-xs text-default-500">{scheme.asset}</span>
+                          </span>
+                        </SelectItem>
                       ))}
                     </Select>
                   </div>
@@ -2330,7 +2341,7 @@ export default function KeyTaoPracticePage() {
           <input ref={textUploadRef} type="file" accept=".txt,text/plain" className="hidden" onChange={handleTextUpload} />
           <input ref={schemeUploadRef} type="file" accept=".zip,application/zip" className="hidden" onChange={handleSchemeUpload} />
 
-          <div className="grid min-w-0 gap-1.5 md:grid-cols-2">
+          <div className="grid min-w-0 gap-1.5 md:grid-cols-2" data-motion="fade-up">
             <Alert
               hideIcon
               color={schemeStatus === 'error' ? 'danger' : schemeStatus === 'ready' ? 'success' : 'primary'}
@@ -2444,7 +2455,7 @@ export default function KeyTaoPracticePage() {
           </div>
         </div>
 
-        <section className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+        <section className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_360px]" data-motion="fade-up">
           <div className="flex flex-col gap-4">
             <Card
               radius="sm"
@@ -2454,7 +2465,7 @@ export default function KeyTaoPracticePage() {
                 if (target.closest('button,[role="tab"],select,textarea,input')) return
                 focusPracticeSurface()
               }}
-              className={`border transition-colors ${isPracticeFocused ? 'border-primary bg-content1' : 'border-default-200 bg-content1'}`}
+              className={`border transition-[border-color,box-shadow,transform] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] ${isPracticeFocused ? 'border-primary bg-content1 shadow-[0_0_0_3px_color-mix(in_oklab,var(--neon-cyan)_11%,transparent)]' : 'border-default-200 bg-content1'}`}
               style={{ height: 'min(42rem, calc(100vh - 16rem))' }}
             >
               <CardBody ref={cardBodyRef} className="relative flex h-full flex-col overflow-hidden p-0">

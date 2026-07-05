@@ -118,8 +118,15 @@ function selectedClass(isSelected: boolean, selected: string, idle: string) {
   return isSelected ? selected : idle
 }
 
-const buttonBaseClass = 'inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md text-sm font-medium tracking-[-0.01em] transition-[background-color,border-color,color,box-shadow,transform] duration-200 ease-[cubic-bezier(0.32,0.72,0,1)] active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-primary/30 focus-visible:ring-offset-2 focus-visible:ring-offset-background'
-const fieldWrapperClass = 'flex min-h-10 items-center gap-2 rounded-md border border-default-200 bg-field px-3 text-sm text-field-foreground shadow-[0_1px_0_hsl(var(--shadow-color)/0.04)] transition-[border-color,box-shadow,background-color] duration-200 ease-[cubic-bezier(0.32,0.72,0,1)] focus-within:border-default-300 focus-within:shadow-[0_0_0_3px_color-mix(in_oklab,var(--foreground)_8%,transparent)]'
+function fieldAriaLabel(label: React.ReactNode, ariaLabel: unknown, placeholder: unknown, isRequired?: boolean) {
+  if (typeof ariaLabel === 'string') return ariaLabel
+  if (typeof label === 'string') return `${label}${isRequired ? ' *' : ''}`
+  if (!label && typeof placeholder === 'string') return placeholder
+  return undefined
+}
+
+const buttonBaseClass = 'inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md text-sm font-medium tracking-normal transition-[background-color,border-color,color,box-shadow,transform] duration-200 ease-[cubic-bezier(0.32,0.72,0,1)] active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-primary/30 focus-visible:ring-offset-2 focus-visible:ring-offset-background'
+const fieldWrapperClass = 'flex min-h-10 items-center gap-2 rounded-md border border-default-200 bg-field px-3 text-sm text-field-foreground shadow-[0_1px_0_hsl(var(--shadow-color)/0.04)] transition-[border-color,box-shadow,background-color,transform] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] focus-within:border-default-300 focus-within:shadow-[0_0_0_3px_color-mix(in_oklab,var(--foreground)_8%,transparent)]'
 const fieldInputClass = 'min-w-0 flex-1 bg-transparent outline-none placeholder:text-field-placeholder disabled:opacity-60'
 const cardBaseClass = 'rounded-xl border border-default-200 bg-content1/94 shadow-[0_1px_1px_hsl(var(--shadow-color)/0.05),0_18px_42px_hsl(var(--shadow-color)/0.045)]'
 
@@ -393,7 +400,7 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(function Inp
   ref,
 ) {
   const stringValue = value == null ? '' : String(value)
-  const resolvedAriaLabel = ariaLabel ?? (!label && typeof props.placeholder === 'string' ? props.placeholder : undefined)
+  const resolvedAriaLabel = fieldAriaLabel(label, ariaLabel, props.placeholder, isRequired)
 
   return (
     <label className={cn('flex w-full flex-col gap-1.5', slotClass(classNames), className)}>
@@ -461,11 +468,13 @@ export const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(fun
     isDisabled,
     disabled,
     style,
+    'aria-label': ariaLabel,
     ...props
   },
   ref,
 ) {
   const maxHeight = typeof maxRows === 'number' ? `${maxRows * 1.5 + 1}rem` : undefined
+  const resolvedAriaLabel = fieldAriaLabel(label, ariaLabel, props.placeholder, isRequired)
 
   return (
     <label className={cn('flex w-full flex-col gap-1.5', slotClass(classNames), className)}>
@@ -475,6 +484,7 @@ export const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(fun
         className={cn('min-h-20 w-full resize-y rounded-md border border-default-200 bg-field px-3 py-2 text-sm text-field-foreground shadow-[0_1px_0_hsl(var(--shadow-color)/0.04)] outline-none transition-[border-color,box-shadow,background-color] duration-200 ease-[cubic-bezier(0.32,0.72,0,1)] placeholder:text-field-placeholder focus:border-default-300 focus:shadow-[0_0_0_3px_color-mix(in_oklab,var(--foreground)_8%,transparent)] disabled:opacity-60', slotClass(classNames, 'input'))}
         rows={minRows}
         value={value ?? ''}
+        aria-label={resolvedAriaLabel}
         onChange={(event: React.ChangeEvent<HTMLTextAreaElement>) => {
           onChange?.(event)
           onValueChange?.(event.target.value)
@@ -518,20 +528,28 @@ export function Select({ children, label, placeholder, className, classNames, se
       {...props}
     >
       {label ? <H.Label className="mb-1.5 block text-sm font-medium text-foreground">{label}</H.Label> : null}
-      <H.Select.Trigger className={cn(fieldWrapperClass, 'justify-between', slotClass(classNames, 'trigger'))}>
-        <H.Select.Value>{({ selectedText }: AnyProps) => selectedText || placeholder}</H.Select.Value>
+      <H.Select.Trigger className={cn(fieldWrapperClass, 'select-trigger-future justify-between hover:-translate-y-px', slotClass(classNames, 'trigger'))}>
+        <H.Select.Value className={cn('min-w-0 flex-1 truncate text-left', slotClass(classNames, 'value'))}>
+          {({ selectedText }: AnyProps) => selectedText || placeholder}
+        </H.Select.Value>
+        <H.Select.Indicator className={cn('h-4 w-4 shrink-0 text-default-500 transition-[color,transform] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] data-[open=true]:rotate-180 data-[open=true]:text-primary', slotClass(classNames, 'indicator'))} />
       </H.Select.Trigger>
-      <H.Select.Popover className="rounded-xl border border-default-200 bg-content1 shadow-[0_18px_48px_hsl(var(--shadow-color)/0.12)]">
-        <H.ListBox className="p-1">{keyedChildren(children)}</H.ListBox>
+      <H.Select.Popover className={cn('rounded-xl border border-default-200 bg-content1 p-1 shadow-[0_18px_48px_hsl(var(--shadow-color)/0.12)]', slotClass(classNames, 'popover'))}>
+        <H.ListBox className={cn('max-h-80 overflow-auto p-1', slotClass(classNames, 'listbox'))}>{keyedChildren(children)}</H.ListBox>
       </H.Select.Popover>
     </H.Select>
   )
 }
 
-export function SelectItem({ children, textValue, ...props }: AnyProps) {
+export function SelectItem({ children, textValue, className, ...props }: AnyProps) {
   return (
-    <H.ListBoxItem textValue={textValue ?? (typeof children === 'string' ? children : undefined)} {...props}>
-      {children}
+    <H.ListBoxItem
+      textValue={textValue ?? (typeof children === 'string' ? children : undefined)}
+      className={cn('flex min-h-10 cursor-pointer items-center justify-between gap-3 rounded-lg px-3 py-2 text-sm text-foreground outline-none transition-[background-color,color,transform] duration-200 ease-[cubic-bezier(0.32,0.72,0,1)] hover:bg-content2 data-[focused=true]:bg-content2 data-[selected=true]:bg-primary-50 data-[selected=true]:text-foreground', className)}
+      {...props}
+    >
+      <span className="min-w-0 truncate">{children as React.ReactNode}</span>
+      <H.ListBox.ItemIndicator className="grid h-5 w-5 shrink-0 place-items-center rounded-full text-primary opacity-0 transition-opacity duration-200 data-[visible=true]:opacity-100" />
     </H.ListBoxItem>
   )
 }
@@ -589,17 +607,22 @@ type DropdownMenuProps = Omit<UnknownBaseProps, 'children'> & {
 
 export function DropdownMenu({ children, className, classNames, onAction, ...props }: DropdownMenuProps) {
   return (
-    <H.Dropdown.Popover>
-      <H.Dropdown.Menu className={cn(flatClassNames(classNames), className)} onAction={onAction} {...props}>
+    <H.Dropdown.Popover className={cn('rounded-xl border border-default-200 bg-content1 p-1 shadow-[0_18px_48px_hsl(var(--shadow-color)/0.12)]', slotClass(classNames, 'popover'))}>
+      <H.Dropdown.Menu className={cn('min-w-36 p-1', flatClassNames(classNames), className)} onAction={onAction} {...props}>
         {keyedChildren(children)}
       </H.Dropdown.Menu>
     </H.Dropdown.Popover>
   )
 }
 
-export function DropdownItem({ children, onPress, textValue, ...props }: AnyProps) {
+export function DropdownItem({ children, onPress, textValue, className, ...props }: AnyProps) {
   return (
-    <H.Dropdown.Item onAction={onPress} textValue={textValue ?? (typeof children === 'string' ? children : undefined)} {...props}>
+    <H.Dropdown.Item
+      onAction={onPress}
+      textValue={textValue ?? (typeof children === 'string' ? children : undefined)}
+      className={cn('flex min-h-9 cursor-pointer items-center rounded-lg px-3 py-2 text-sm text-default-700 outline-none transition-[background-color,color,transform] duration-200 ease-[cubic-bezier(0.32,0.72,0,1)] hover:bg-content2 hover:text-foreground data-[focused=true]:bg-content2 data-[focused=true]:text-foreground', className)}
+      {...props}
+    >
       {children}
     </H.Dropdown.Item>
   )

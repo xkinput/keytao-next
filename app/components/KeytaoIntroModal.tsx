@@ -84,7 +84,7 @@ export default function KeytaoIntroModal() {
             />
             <div className="leading-none">
               <p className="text-sm font-semibold text-foreground">键道</p>
-              <p className="mt-1 text-[10px] font-medium uppercase tracking-[0.18em] text-default-500">KeyTao</p>
+              <p className="mt-1 text-[10px] font-medium uppercase tracking-normal text-default-500">KeyTao</p>
             </div>
           </div>
           <Button
@@ -105,7 +105,7 @@ export default function KeytaoIntroModal() {
                 <Sparkles className="h-3.5 w-3.5" />
                 初次见面
               </div>
-              <h2 className="max-w-[12em] text-[clamp(2rem,4vw,3.75rem)] font-semibold leading-[0.98] tracking-[-0.055em] text-foreground">
+              <h2 className="max-w-[14em] text-[clamp(1.85rem,3.2vw,3.1rem)] font-semibold leading-[1.04] tracking-normal text-foreground">
                 键道，把输入和词库协作连成一条路径。
               </h2>
               <p className="mt-4 max-w-[34rem] text-sm leading-6 text-default-500 sm:text-base sm:leading-7">

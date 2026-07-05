@@ -254,10 +254,10 @@ export default function SyncPage() {
     <div className="min-h-screen">
       <div>
         <main className="app-container py-8 md:py-10">
-          <div className="mb-7 flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
+          <div className="mb-7 flex flex-col gap-5 md:flex-row md:items-end md:justify-between" data-motion="fade-up">
             <div className="max-w-3xl">
-              <p className="text-sm font-medium text-default-500">同步发布</p>
-              <h1 className="mt-2 text-[clamp(2.15rem,4vw,4.25rem)] font-semibold leading-[0.96] tracking-[-0.055em] text-foreground">GitHub 同步管理</h1>
+              <p className="page-kicker">同步发布</p>
+              <h1 className="page-title">GitHub 同步管理</h1>
               <p className="mt-3 text-base text-default-500">查看公开发布记录，管理员可发起同步和发布 tag。</p>
             </div>
             <div className="flex flex-wrap items-center gap-2 md:pb-1">

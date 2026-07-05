@@ -154,10 +154,10 @@ export default function BatchesPage() {
   return (
     <div className="min-h-screen">
       <main className="app-container py-8 md:py-10">
-        <section className="mb-7 flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
+        <section className="mb-7 flex flex-col gap-5 md:flex-row md:items-end md:justify-between" data-motion="fade-up">
           <div className="max-w-3xl">
-            <p className="text-sm font-medium text-default-500">词库协作</p>
-            <h1 className="mt-2 text-[clamp(2.15rem,4vw,4.25rem)] font-semibold leading-[0.96] tracking-[-0.055em] text-foreground">
+            <p className="page-kicker">词库协作</p>
+            <h1 className="page-title">
               改词批次
             </h1>
             <p className="mt-3 text-base text-default-500">
@@ -194,7 +194,7 @@ export default function BatchesPage() {
         </section>
 
         {/* Filters and Search */}
-        <div className="workbench-toolbar mb-5 flex flex-col gap-3 rounded-xl p-2.5 lg:flex-row lg:items-center lg:justify-between">
+        <div className="workbench-toolbar mb-5 flex flex-col gap-3 rounded-xl p-2.5 lg:flex-row lg:items-center lg:justify-between" data-motion="fade-up">
           <Tabs
             selectedKey={status}
             onSelectionChange={(key) => handleStatusChange(key as string)}

@@ -207,10 +207,10 @@ function Navbar() {
   }, [])
 
   const navItemClass = (active: boolean) => [
-    'inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md px-2.5 text-[13px] font-medium leading-none tracking-[-0.01em] whitespace-nowrap transition-[background-color,color,box-shadow,transform] duration-200 ease-[cubic-bezier(0.32,0.72,0,1)] active:scale-[0.98]',
+    'group inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md px-2.5 text-[13px] font-medium leading-none tracking-normal whitespace-nowrap transition-[background-color,color,box-shadow,transform] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] active:scale-[0.98]',
     active
-      ? 'bg-foreground text-background shadow-[0_1px_1px_hsl(var(--shadow-color)/0.12)]'
-      : 'text-default-600 hover:bg-content1 hover:text-foreground'
+      ? 'bg-foreground text-background shadow-[0_1px_1px_hsl(var(--shadow-color)/0.12),0_0_0_1px_color-mix(in_oklab,var(--neon-cyan)_26%,transparent)]'
+      : 'text-default-600 hover:bg-content1 hover:text-foreground hover:shadow-[0_0_0_1px_color-mix(in_oklab,var(--neon-cyan)_18%,transparent)]'
   ].join(' ')
 
   return (
@@ -272,7 +272,7 @@ function Navbar() {
             <div className="flex min-w-0 items-center gap-3 nav:gap-4">
               <Logo size={32} />
               {/* Desktop Navigation */}
-              <div className="hidden nav:flex h-10 items-center gap-0.5 rounded-xl border border-default-200/80 bg-content2/65 p-1 shadow-[inset_0_1px_0_color-mix(in_oklab,var(--surface)_70%,transparent)]">
+              <div className="hidden nav:flex h-10 items-center gap-0.5 rounded-xl border border-default-200/80 bg-content2/70 p-1 shadow-[inset_0_1px_0_color-mix(in_oklab,var(--surface)_70%,transparent),0_0_0_1px_color-mix(in_oklab,var(--neon-cyan)_8%,transparent)]">
                 {visibleMenuCategories.map((category) => {
                   const IconComponent = category.icon
                   const firstItem = category.items[0]
@@ -335,12 +335,14 @@ function Navbar() {
                           >
                             <IconComponent className="h-3.5 w-3.5 shrink-0 opacity-75" />
                             {category.label}
-                            <ChevronDown className="h-3 w-3 shrink-0 opacity-55" />
+                            <span className="grid h-4 w-4 shrink-0 place-items-center rounded-full bg-content2 text-default-500 ring-1 ring-default-200 transition-[background-color,color,transform] duration-300 group-hover:bg-primary-50 group-hover:text-primary group-hover:translate-y-0.5">
+                              <ChevronDown className="h-3 w-3" />
+                            </span>
                           </button>
                         </DropdownTrigger>
                         <DropdownMenu
                           aria-label={`${category.label} menu`}
-                          className="min-w-36 rounded-xl border border-default-200 bg-content1 p-1 shadow-[0_18px_48px_hsl(var(--shadow-color)/0.12)]"
+                          className="min-w-36"
                           onAction={(key) => {
                             if (closeTimeoutRef.current) {
                               clearTimeout(closeTimeoutRef.current)
