@@ -19,9 +19,11 @@ export interface BatchSubmitWarning {
   code: string
   weight?: number
   impact?: string
-  warningType?: 'duplicate_code' | 'multiple_code' | 'skipped_candidate_slot'
+  warningType?: 'duplicate_code' | 'multiple_code' | 'skipped_candidate_slot' | 'code_chain_priority'
   skippedCode?: string
   skippedCodes?: string[]
+  comparedWord?: string
+  previousWord?: string
 }
 
 export function buildBatchSubmitWarnings(
@@ -68,6 +70,17 @@ export function formatBatchSubmitWarnings(
         requested +
         `   ${detail}\n` +
         `   ! 请确认是否要跳过编码 ${skippedCode} 直接继续。`
+    }
+
+    if (warning.warningType === 'code_chain_priority') {
+      const requested = item ? `   请求词条: ${item.word} @ ${item.code}\n` : ''
+      const detail = warning.impact ||
+        `「${warning.word}」将占用编码 "${warning.code}" 的更前位置，请确认它是否比当前同码链词条更适合。`
+
+      return `▶ 项目 #${displayIndex} - 同码链优先级确认:\n` +
+        requested +
+        `   ${detail}\n` +
+        `   ! 确认后才会提交审核。`
     }
 
     const title = item?.action === 'Change' ? '修改重码/多编码警告' : '创建重码/多编码警告'

@@ -102,4 +102,26 @@ describe('buildBatchSubmitWarnings', () => {
       '   ! 请确认是否要跳过编码 fmzla 直接继续。',
     ])
   })
+
+  it('formats code chain priority warnings', () => {
+    const items: BatchPRItem[] = [
+      { id: '1', action: 'Change', word: '大盘鸡', oldWord: '单片机', code: 'dpj', type: 'Phrase', weight: 100 },
+    ]
+    const warnings = [{
+      id: '1',
+      word: '大盘鸡',
+      code: 'dpj',
+      weight: 100,
+      warningType: 'code_chain_priority' as const,
+      comparedWord: '单片机',
+      impact: '提交后「大盘鸡」会排在「单片机」前；请确认这符合日常使用优先级。',
+    }]
+
+    expect(formatBatchSubmitWarnings(warnings, items)).toEqual([
+      '▶ 项目 #1 - 同码链优先级确认:\n' +
+      '   请求词条: 大盘鸡 @ dpj\n' +
+      '   提交后「大盘鸡」会排在「单片机」前；请确认这符合日常使用优先级。\n' +
+      '   ! 确认后才会提交审核。',
+    ])
+  })
 })

@@ -3,6 +3,7 @@ import { getSession } from '@/lib/auth'
 import { checkBatchConflictsWithWeight } from '@/lib/services/batchConflictService'
 import { buildBatchSubmitWarnings } from '@/lib/services/batchSubmitWarnings'
 import { buildSkippedCandidateSlotWarnings } from '@/lib/services/batchSkippedCodeWarnings'
+import { buildPriorityOrderWarnings } from '@/lib/services/batchPriorityOrderWarnings'
 import { PhraseType } from '@/lib/constants/phraseTypes'
 
 interface PRItemInput {
@@ -54,13 +55,15 @@ export async function POST(request: NextRequest) {
     }
 
     // Use unified batch conflict detection service
-    const [results, skippedSlotWarnings] = await Promise.all([
+    const [results, skippedSlotWarnings, priorityWarnings] = await Promise.all([
       checkBatchConflictsWithWeight(items),
       buildSkippedCandidateSlotWarnings(items),
+      buildPriorityOrderWarnings(items),
     ])
     const warnings = [
       ...buildBatchSubmitWarnings(items, results),
       ...skippedSlotWarnings,
+      ...priorityWarnings,
     ]
 
     return NextResponse.json({ results, warnings })

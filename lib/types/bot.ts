@@ -31,7 +31,7 @@ export interface BotConflictInfo {
 export interface BotWarningInfo {
   index: number
   item: BotPRItem
-  warningType: 'duplicate_code' | 'multiple_code' | 'skipped_candidate_slot'
+  warningType: 'duplicate_code' | 'multiple_code' | 'skipped_candidate_slot' | 'code_chain_priority'
   message: string
   existing?: {
     word: string
@@ -40,6 +40,8 @@ export interface BotWarningInfo {
   }
   skippedCode?: string
   skippedCodes?: string[]
+  comparedWord?: string
+  previousWord?: string
   // For Delete action with multiple_code warning, list all codes for this word
   allCodes?: Array<{
     code: string
