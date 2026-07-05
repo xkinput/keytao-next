@@ -185,7 +185,7 @@ describe('API abuse guards', () => {
       batchId: 'batch-1',
     }))
 
-    expect(res.status).toBe(403)
+    expect(res?.status).toBe(403)
     expect(mockPrisma.pullRequest.create).not.toHaveBeenCalled()
   })
 
@@ -382,8 +382,58 @@ describe('API abuse guards', () => {
 
     const res = await GET(new NextRequest('http://localhost/api/admin/sync-to-github/tasks'))
 
-    expect(res.status).toBe(403)
+    expect(res?.status).toBe(403)
     expect(mockPrisma.syncTask.findMany).not.toHaveBeenCalled()
+  })
+
+  it('requires admin for manual AI batch review', async () => {
+    mockCheckAdminPermission.mockResolvedValue({
+      authorized: false,
+      response: NextResponse.json({ error: '权限不足' }, { status: 403 }),
+    })
+    const { POST } = await import('./admin/batches/[id]/ai-review/route')
+
+    const res = await POST(
+      jsonRequest('http://localhost/api/admin/batches/batch-1/ai-review', { prId: 1 }),
+      { params: Promise.resolve({ id: 'batch-1' }) }
+    )
+
+    expect(res?.status).toBe(403)
+    expect(mockPrisma.batch.findUnique).not.toHaveBeenCalled()
+  })
+
+  it('lets admins manually rerun AI batch review', async () => {
+    mockPrisma.batch.findUnique.mockResolvedValue({
+      id: 'batch-1',
+      status: 'Submitted',
+      creator: { id: 1, name: 'rea', nickname: 'Rea' },
+      sourceIssue: null,
+      pullRequests: [{
+        id: 1,
+        action: 'Create',
+        word: '安泊',
+        oldWord: null,
+        code: 'xfblo',
+        type: 'Phrase',
+        weight: 100,
+        remark: '喵喵审词：读音 an bo；来源 汉典',
+        phrase: null,
+        conflicts: [],
+        dependencies: [],
+      }],
+    })
+    const { POST } = await import('./admin/batches/[id]/ai-review/route')
+
+    const res = await POST(
+      jsonRequest('http://localhost/api/admin/batches/batch-1/ai-review', { prId: 1 }),
+      { params: Promise.resolve({ id: 'batch-1' }) }
+    )
+    const data = await res?.json()
+
+    expect(res?.status).toBe(200)
+    expect(data?.aiReview.riskCounts.botReviewed).toBe(1)
+    expect(data?.focusItem).toMatchObject({ prId: 1 })
+    expect(mockCheckBatchConflictsWithWeight).toHaveBeenCalled()
   })
 
   it('keeps sync task history publicly readable', async () => {

@@ -2,8 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { checkAdminPermission } from '@/lib/adminAuth'
 import { getAdminBatchReviewDetail } from '@/lib/services/adminBatchReviewDetailService'
 
-// GET /api/admin/batches/:id - Get batch detail for admin review
-export async function GET(
+export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
@@ -14,18 +13,25 @@ export async function GET(
     }
 
     const { id } = await params
-
+    const body = await request.json().catch(() => ({}))
+    const prId = Number(body?.prId)
     const batch = await getAdminBatchReviewDetail(id)
 
     if (!batch) {
       return NextResponse.json({ error: '批次不存在' }, { status: 404 })
     }
 
+    const focusItem = Number.isInteger(prId)
+      ? batch.aiReview.items.find(item => item.prId === prId)
+      : undefined
+
     return NextResponse.json({
-      batch
+      aiReview: batch.aiReview,
+      focusItem,
+      reviewedAt: batch.aiReview.generatedAt,
     })
   } catch (error) {
-    console.error('Get admin batch detail error:', error)
-    return NextResponse.json({ error: '获取批次详情失败' }, { status: 500 })
+    console.error('Manual admin AI review error:', error)
+    return NextResponse.json({ error: '喵喵复查失败' }, { status: 500 })
   }
 }

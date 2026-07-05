@@ -6,8 +6,9 @@ import {
     CardHeader,
     Chip,
     Button,
+    Tooltip,
 } from '@heroui/react'
-import { AlertTriangle, Bot, CheckCircle2 } from 'lucide-react'
+import { AlertTriangle, Bot } from 'lucide-react'
 import CodePhrasesPopover from './CodePhrasesPopover'
 import { getPhraseTypeLabel, type PhraseType } from '@/lib/constants/phraseTypes'
 import type { BatchAiReviewItem, BatchAiReviewStatus } from '@/lib/types/batchAiReview'
@@ -101,11 +102,18 @@ export default function BatchPRList({
 
     const getAiStatusText = (status: BatchAiReviewStatus) => {
         const map: Record<BatchAiReviewStatus, string> = {
-            pass: '建议通过',
-            attention: '需关注',
-            manual_review: '人工确认'
+            pass: '通过',
+            attention: '待看',
+            manual_review: '人工'
         }
         return map[status]
+    }
+
+    const getAiNoticeClass = (status: BatchAiReviewStatus) => {
+        if (status === 'manual_review') {
+            return 'border-danger-200 bg-danger-50/70 dark:bg-danger-100/10'
+        }
+        return 'border-warning-200 bg-warning-50/70 dark:bg-warning-100/10'
     }
 
     if (pullRequests.length === 0) {
@@ -185,9 +193,11 @@ export default function BatchPRList({
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
                             {pr.aiReview?.reviewRecord && (
-                                <Chip color="primary" size="sm" variant="flat" startContent={<Bot className="w-3 h-3" />}>
-                                    喵喵已审
-                                </Chip>
+                                <Tooltip content={pr.aiReview.reviewRecord.summary}>
+                                    <Chip color="primary" size="sm" variant="flat" startContent={<Bot className="w-3 h-3" />}>
+                                        喵审
+                                    </Chip>
+                                </Tooltip>
                             )}
                             {pr.aiReview && pr.aiReview.status !== 'pass' && (
                                 <Chip color={getAiStatusColor(pr.aiReview.status)} size="sm" variant="flat">
@@ -203,21 +213,16 @@ export default function BatchPRList({
                     </CardHeader>
                     <CardBody>
                         {pr.aiReview?.reviewRecord ? (
-                            <div className="mb-3 rounded-lg bg-primary-50 dark:bg-primary-100/10 p-3">
-                                <div className="flex items-center gap-2 mb-2">
-                                    <Bot className="w-4 h-4 text-primary" />
-                                    <p className="text-small font-medium text-primary">喵喵审核记录</p>
-                                </div>
-                                <p className="text-small text-default-600 mb-2">{pr.aiReview.reviewRecord.summary}</p>
-                                {pr.aiReview.reviewRecord.evidence.length > 0 && (
-                                    <div className="flex flex-wrap gap-2">
-                                        {pr.aiReview.reviewRecord.evidence.map((evidence, index) => (
-                                            <Chip key={index} size="sm" variant="flat" color="primary">
-                                                {evidence}
-                                            </Chip>
-                                        ))}
-                                    </div>
-                                )}
+                            <div className="mb-2 flex flex-wrap items-center gap-1 text-tiny text-default-500">
+                                <span className="inline-flex items-center gap-1 rounded-md bg-primary-50 px-2 py-1 text-primary dark:bg-primary-100/10">
+                                    <Bot className="h-3 w-3" />
+                                    喵备注
+                                </span>
+                                {pr.aiReview.reviewRecord.evidence.slice(0, 2).map((evidence, index) => (
+                                    <span key={index} className="rounded-md bg-default-100 px-2 py-1 dark:bg-default-100/10">
+                                        {evidence}
+                                    </span>
+                                ))}
                             </div>
                         ) : pr.remark && (
                             <div className="mb-3">
@@ -225,24 +230,20 @@ export default function BatchPRList({
                             </div>
                         )}
 
-                        {pr.aiReview && (
-                            <div className="mb-3 rounded-lg bg-default-50 dark:bg-default-100/10 p-3">
+                        {pr.aiReview && pr.aiReview.status !== 'pass' && (
+                            <div className={`mb-3 rounded-md border px-3 py-2 ${getAiNoticeClass(pr.aiReview.status)}`}>
                                 <div className="flex items-center gap-2 mb-2">
-                                    {pr.aiReview.status === 'pass' ? (
-                                        <CheckCircle2 className="w-4 h-4 text-success" />
-                                    ) : (
-                                        <AlertTriangle className={`w-4 h-4 ${pr.aiReview.status === 'manual_review' ? 'text-danger' : 'text-warning'}`} />
-                                    )}
+                                    <AlertTriangle className={`w-4 h-4 ${pr.aiReview.status === 'manual_review' ? 'text-danger' : 'text-warning'}`} />
                                     <p className="text-small font-medium">{pr.aiReview.title}</p>
                                 </div>
                                 <div className="space-y-1">
-                                    {pr.aiReview.reasons.map((reason, index) => (
+                                    {pr.aiReview.reasons.slice(0, 2).map((reason, index) => (
                                         <p key={`reason-${index}`} className="text-small text-default-600">
                                             {reason}
                                         </p>
                                     ))}
-                                    {pr.aiReview.suggestions.map((suggestion, index) => (
-                                        <p key={`suggestion-${index}`} className="text-small text-default-500">
+                                    {pr.aiReview.suggestions.slice(0, 1).map((suggestion, index) => (
+                                        <p key={`suggestion-${index}`} className="text-tiny text-default-500">
                                             建议：{suggestion}
                                         </p>
                                     ))}

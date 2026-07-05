@@ -1,6 +1,6 @@
 'use client'
 
-import { use, useState } from 'react'
+import { use, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   Card,
@@ -11,7 +11,7 @@ import {
   Chip,
   Textarea
 } from '@heroui/react'
-import { AlertTriangle, Bot, CheckCircle2, FilePenLine, ListChecks } from 'lucide-react'
+import { AlertTriangle, Bot, CheckCircle2, RefreshCw, Search } from 'lucide-react'
 import BatchPreview from '@/app/components/BatchPreview'
 import { useAPI, apiRequest } from '@/lib/hooks/useSWR'
 import BatchPRList from '@/app/components/BatchPRList'
@@ -88,12 +88,54 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
   const router = useRouter()
   const [reviewNote, setReviewNote] = useState('')
   const [processing, setProcessing] = useState(false)
+  const [checkingTarget, setCheckingTarget] = useState<number | 'all' | null>(null)
+  const [expandedReviewIds, setExpandedReviewIds] = useState<number[]>([])
+  const [manualReviewResult, setManualReviewResult] = useState<{
+    batchId: string
+    aiReview: BatchAiReviewResult
+  } | null>(null)
   const { openAlert, openConfirm } = useUIStore()
 
   const { data: batch, error, isLoading } = useAPI<{ batch: BatchDetail }>(
     `/api/admin/batches/${resolvedParams.id}`,
     { withAuth: true }
   )
+
+  const batchDataForReview = batch?.batch
+  const serverAiReview = batchDataForReview?.aiReview
+  const manualAiReview = manualReviewResult && manualReviewResult.batchId === batchDataForReview?.id
+    ? manualReviewResult.aiReview
+    : undefined
+  const aiReview = manualAiReview ?? serverAiReview
+  const pullRequestById = useMemo(() => {
+    return new Map((batchDataForReview?.pullRequests ?? []).map(pr => [pr.id, pr]))
+  }, [batchDataForReview?.pullRequests])
+  const humanReviewItems = useMemo(() => {
+    return (aiReview?.items ?? []).filter(item => item.status !== 'pass')
+  }, [aiReview?.items])
+  const missingMiaoItems = useMemo(() => {
+    return humanReviewItems.filter(item => {
+      const pr = pullRequestById.get(item.prId)
+      return !item.reviewRecord && pr?.action !== 'Delete'
+    })
+  }, [humanReviewItems, pullRequestById])
+  const compactChainNotes = useMemo(() => {
+    return (aiReview?.codeChains ?? [])
+      .flatMap(chain => chain.recommendations.map(recommendation => ({
+        key: `${chain.type}:${chain.code}:${recommendation}`,
+        code: chain.code,
+        type: chain.type,
+        recommendation,
+      })))
+      .filter(note =>
+        note.recommendation.includes('首位')
+        || note.recommendation.includes('提频')
+        || note.recommendation.includes('移除')
+        || note.recommendation.includes('移入')
+        || note.recommendation.includes('移出')
+      )
+      .slice(0, 4)
+  }, [aiReview?.codeChains])
 
   const batchStatus = batch?.batch.status
   const { data: batchList } = useAPI<{ batches: Array<{ id: string }> }>(
@@ -157,7 +199,31 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
     }, '确认拒绝', '拒绝', '取消')
   }
 
-
+  const handleAskMiaoAgain = async (prId?: number) => {
+    setCheckingTarget(prId ?? 'all')
+    try {
+      const result = await apiRequest<{
+        aiReview: BatchAiReviewResult
+        focusItem?: BatchAiReviewItem
+      }>(`/api/admin/batches/${resolvedParams.id}/ai-review`, {
+        method: 'POST',
+        body: prId ? { prId } : {},
+        withAuth: true,
+      })
+      setManualReviewResult({
+        batchId: resolvedParams.id,
+        aiReview: result.aiReview,
+      })
+      if (prId) {
+        setExpandedReviewIds(current => current.includes(prId) ? current : [...current, prId])
+      }
+    } catch (err) {
+      const error = err as Error
+      openAlert(error.message || '喵喵复查失败', '操作失败')
+    } finally {
+      setCheckingTarget(null)
+    }
+  }
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -200,13 +266,18 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
     return map[verdict]
   }
 
-  const formatChain = (entries: BatchAiReviewResult['codeChains'][number]['before']) => {
-    if (entries.length === 0) return '空'
-    return entries
-      .slice(0, 6)
-      .map(entry => `「${entry.word}」(${entry.weight ?? '?'})`)
-      .join(' > ')
-      + (entries.length > 6 ? ' > ...' : '')
+  const getAiAlertClass = (item: BatchAiReviewItem) => {
+    if (item.status === 'manual_review') {
+      return 'border-danger-200 bg-danger-50/70 dark:bg-danger-100/10'
+    }
+    return 'border-warning-200 bg-warning-50/70 dark:bg-warning-100/10'
+  }
+
+  const getReviewTargetLabel = (item: BatchAiReviewItem) => {
+    const pr = pullRequestById.get(item.prId)
+    const word = pr?.word || pr?.phrase?.word || '未命名词条'
+    const code = pr?.code || pr?.phrase?.code || '无编码'
+    return `「${word}」@${code}`
   }
 
   if (isLoading) {
@@ -239,8 +310,13 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
   const batchData = batch.batch
   const canReview = batchData.status === 'Submitted'
   const hasConflicts = batchData.pullRequests.some(pr => pr.conflictInfo?.hasConflict ?? pr.hasConflict)
-  const aiReview = batchData.aiReview
-  const aiAttentionItems = aiReview?.items.filter(item => item.status !== 'pass') ?? []
+  const aiItemsByPrId = new Map((aiReview?.items ?? []).map(item => [item.prId, item]))
+  const displayedPullRequests = aiReview
+    ? batchData.pullRequests.map(pr => ({
+      ...pr,
+      aiReview: aiItemsByPrId.get(pr.id) ?? pr.aiReview,
+    }))
+    : batchData.pullRequests
 
   return (
     <div className="min-h-screen">
@@ -328,132 +404,140 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
         <div className="space-y-6 mb-6">
           {aiReview && (
             <Card>
-              <CardHeader>
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between w-full">
-                  <div>
-                    <div className="flex items-center gap-2 mb-2">
-                      <Bot className="w-5 h-5 text-primary" />
-                      <h3 className="text-xl font-bold">喵喵审核建议</h3>
-                      <Chip color={getAiVerdictColor(aiReview.verdict)} variant="flat">
-                        {getAiVerdictText(aiReview.verdict)}
+              <CardBody className="space-y-4">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="flex gap-3">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary-50 text-primary dark:bg-primary-100/10">
+                      <Bot className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <div className="mb-2 flex flex-wrap items-center gap-2">
+                        <h3 className="text-lg font-semibold">喵喵审核</h3>
+                        <Chip color={getAiVerdictColor(aiReview.verdict)} variant="flat" size="sm">
+                          {getAiVerdictText(aiReview.verdict)}
+                        </Chip>
+                      </div>
+                      <p className="max-w-3xl text-small text-default-600">{aiReview.headline}</p>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+                    <Chip size="sm" color="danger" variant="flat">
+                      人看 {humanReviewItems.length}
+                    </Chip>
+                    <Chip size="sm" color="primary" variant="flat">
+                      喵审 {aiReview.riskCounts.botReviewed}/{aiReview.items.length}
+                    </Chip>
+                    {missingMiaoItems.length > 0 && (
+                      <Chip size="sm" color="warning" variant="flat">
+                        无备注 {missingMiaoItems.length}
                       </Chip>
-                    </div>
-                    <p className="text-default-600">{aiReview.headline}</p>
-                  </div>
-                  {canReview && (
+                    )}
                     <Button
-                      color="primary"
+                      size="sm"
                       variant="flat"
-                      startContent={<FilePenLine className="w-4 h-4" />}
-                      onPress={() => setReviewNote(aiReview.suggestedReviewNote)}
+                      startContent={<RefreshCw className="h-4 w-4" />}
+                      isLoading={checkingTarget === 'all'}
+                      onPress={() => handleAskMiaoAgain()}
                     >
-                      填入审核意见
+                      重新检查
                     </Button>
-                  )}
-                </div>
-              </CardHeader>
-              <CardBody className="space-y-5">
-                <div className="flex flex-wrap gap-2">
-                  <Chip size="sm" color="success" variant="flat">
-                    建议通过 {aiReview.riskCounts.pass}
-                  </Chip>
-                  <Chip size="sm" color="warning" variant="flat">
-                    需复核 {aiReview.riskCounts.attention}
-                  </Chip>
-                  <Chip size="sm" color="danger" variant="flat">
-                    人工确认 {aiReview.riskCounts.manualReview}
-                  </Chip>
-                  <Chip size="sm" color="primary" variant="flat">
-                    喵喵已审 {aiReview.riskCounts.botReviewed}
-                  </Chip>
-                </div>
-
-                <div className="grid gap-4 lg:grid-cols-2">
-                  <div className="rounded-lg border border-default-200 p-4">
-                    <div className="flex items-center gap-2 mb-3">
-                      <ListChecks className="w-4 h-4 text-default-500" />
-                      <p className="font-medium">审核检查</p>
-                    </div>
-                    <div className="space-y-2">
-                      {aiReview.checklist.map((item, index) => (
-                        <div key={index} className="flex gap-2 text-small text-default-600">
-                          <CheckCircle2 className="w-4 h-4 text-success shrink-0 mt-0.5" />
-                          <span>{item}</span>
-                        </div>
-                      ))}
-                    </div>
                   </div>
+                </div>
 
-                  <div className="rounded-lg border border-default-200 p-4">
-                    <div className="flex items-center gap-2 mb-3">
-                      <AlertTriangle className="w-4 h-4 text-warning" />
-                      <p className="font-medium">需关注条目</p>
+                <div className="grid gap-4 lg:grid-cols-[minmax(0,1.5fr)_minmax(280px,0.8fr)]">
+                  <section className="rounded-lg border border-default-200 p-4">
+                    <div className="mb-3 flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2">
+                        <AlertTriangle className="h-4 w-4 text-warning" />
+                        <p className="font-medium">需要人再看</p>
+                      </div>
+                      <span className="text-tiny text-default-400">只列风险项和无喵备注项</span>
                     </div>
-                    {aiAttentionItems.length === 0 ? (
-                      <p className="text-small text-default-500">没有发现需要特别拎出的条目。</p>
+
+                    {humanReviewItems.length === 0 ? (
+                      <div className="flex items-center gap-2 rounded-md bg-success-50 px-3 py-2 text-small text-success-700 dark:bg-success-100/10">
+                        <CheckCircle2 className="h-4 w-4" />
+                        没有需要单独复核的条目。
+                      </div>
                     ) : (
-                      <div className="space-y-3">
-                        {aiAttentionItems.map(item => (
-                          <div key={item.prId} className="rounded-md bg-default-50 dark:bg-default-100/10 p-3">
-                            <div className="flex items-center gap-2 mb-1">
-                              <Chip size="sm" color={item.severity} variant="flat">
-                                PR#{item.prId}
-                              </Chip>
-                              <span className="text-small font-medium">{item.title}</span>
-                            </div>
-                            <div className="space-y-1">
-                              {item.reasons.slice(0, 2).map((reason, index) => (
-                                <p key={index} className="text-small text-default-500">{reason}</p>
-                              ))}
-                            </div>
-                          </div>
-                        ))}
+                      <div className="space-y-2">
+                        {humanReviewItems.map(item => {
+                          const expanded = expandedReviewIds.includes(item.prId)
+                          return (
+                            <article key={item.prId} className={`rounded-md border px-3 py-2 ${getAiAlertClass(item)}`}>
+                              <div className="mb-1 flex flex-wrap items-center gap-2">
+                                <Chip size="sm" color={item.severity} variant="flat">
+                                  PR#{item.prId}
+                                </Chip>
+                                <span className="text-small font-medium">{getReviewTargetLabel(item)}</span>
+                                {!item.reviewRecord && pullRequestById.get(item.prId)?.action !== 'Delete' && (
+                                  <Chip size="sm" color="warning" variant="flat">
+                                    无喵备注
+                                  </Chip>
+                                )}
+                              </div>
+                              <p className="text-small text-default-700">{item.reasons[0]}</p>
+                              {expanded && (
+                                <div className="mt-2 space-y-1 border-t border-default-200 pt-2">
+                                  {item.reasons.slice(1, 3).map((reason, index) => (
+                                    <p key={`reason-${item.prId}-${index}`} className="text-small text-default-600">
+                                      {reason}
+                                    </p>
+                                  ))}
+                                  {item.suggestions.slice(0, 2).map((suggestion, index) => (
+                                    <p key={`suggestion-${item.prId}-${index}`} className="text-small text-default-500">
+                                      建议：{suggestion}
+                                    </p>
+                                  ))}
+                                </div>
+                              )}
+                              <div className="mt-2 flex justify-end">
+                                <Button
+                                  size="sm"
+                                  variant="light"
+                                  startContent={<Search className="h-3.5 w-3.5" />}
+                                  isLoading={checkingTarget === item.prId}
+                                  onPress={() => handleAskMiaoAgain(item.prId)}
+                                >
+                                  让喵再看
+                                </Button>
+                              </div>
+                            </article>
+                          )
+                        })}
                       </div>
                     )}
-                  </div>
-                </div>
+                  </section>
 
-                <div className="rounded-lg border border-default-200 p-4">
-                  <div className="flex items-center gap-2 mb-3">
-                    <FilePenLine className="w-4 h-4 text-default-500" />
-                    <p className="font-medium">建议审核记录</p>
-                  </div>
-                  <pre className="whitespace-pre-wrap text-small text-default-600 font-sans leading-6">
-                    {aiReview.suggestedReviewNote}
-                  </pre>
-                </div>
-
-                {aiReview.codeChains.length > 0 && (
-                  <div className="rounded-lg border border-default-200 p-4">
-                    <p className="font-medium mb-3">编码链优先级建议</p>
-                    <div className="space-y-4">
-                      {aiReview.codeChains.map(chain => (
-                        <div key={`${chain.type}:${chain.code}`} className="border-b border-default-100 last:border-b-0 pb-4 last:pb-0">
-                          <div className="flex items-center gap-2 mb-2">
-                            <code className="text-primary">{chain.code}</code>
-                            <Chip size="sm" variant="flat">{chain.type}</Chip>
-                          </div>
-                          <div className="space-y-1 text-small text-default-500 mb-2">
-                            <p>调整前：{formatChain(chain.before)}</p>
-                            <p>调整后：{formatChain(chain.after)}</p>
-                          </div>
-                          <div className="space-y-1">
-                            {chain.recommendations.map((recommendation, index) => (
-                              <p key={index} className="text-small text-default-600">
-                                {recommendation}
-                              </p>
-                            ))}
-                          </div>
-                        </div>
-                      ))}
+                  <aside className="rounded-lg border border-default-200 bg-default-50/60 p-4 dark:bg-default-100/5">
+                    <p className="mb-3 font-medium">快速判断</p>
+                    <div className="space-y-2 text-small text-default-600">
+                      <p>通过：{aiReview.riskCounts.pass}</p>
+                      <p>需复核：{aiReview.riskCounts.attention}</p>
+                      <p>人工确认：{aiReview.riskCounts.manualReview}</p>
+                      <p>缺喵备注：{missingMiaoItems.length}</p>
                     </div>
-                  </div>
-                )}
+
+                    {compactChainNotes.length > 0 && (
+                      <div className="mt-4 border-t border-default-200 pt-3">
+                        <p className="mb-2 text-small font-medium">编码链提示</p>
+                        <div className="space-y-2">
+                          {compactChainNotes.map(note => (
+                            <p key={note.key} className="text-small text-default-500">
+                              <code className="text-primary">{note.code}</code>：{note.recommendation}
+                            </p>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </aside>
+                </div>
               </CardBody>
             </Card>
           )}
           <BatchPreview batchId={resolvedParams.id} />
-          <BatchPRList pullRequests={batchData.pullRequests} />
+          <BatchPRList pullRequests={displayedPullRequests} />
         </div>
 
         {canReview && (
@@ -464,10 +548,10 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
             <CardBody>
               <Textarea
                 label="审核意见"
-                placeholder={hasConflicts ? "批次包含冲突，拒绝时必须填写原因" : "可填入喵喵建议，或手写审核决定"}
+                placeholder={hasConflicts ? "批次包含冲突；拒绝时写明原因" : "拒绝时填写原因；批准可留空"}
                 value={reviewNote}
                 onValueChange={setReviewNote}
-                minRows={3}
+                minRows={2}
                 className="mb-4"
               />
 

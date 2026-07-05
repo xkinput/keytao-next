@@ -325,9 +325,11 @@ function buildReviewItem(
   }
 
   const title = (() => {
+    if (!reviewRecord && pr.action !== 'Delete') return '缺少喵备注'
     if (state.status === 'manual_review') return '需要管理员确认'
-    if (state.status === 'attention') return '建议复核后再批'
-    if (reviewRecord) return '喵喵已审，建议可通过'
+    if (state.status === 'attention' && reviewRecord) return '喵备注需补证据'
+    if (state.status === 'attention') return '建议复核'
+    if (reviewRecord) return '喵喵已审'
     return '系统检查未发现硬性问题'
   })()
 
@@ -594,12 +596,12 @@ function buildHeadline(items: BatchAiReviewItem[]): string {
   const passCount = items.filter(item => item.status === 'pass').length
 
   if (manualCount > 0) {
-    return `有 ${manualCount} 项需要管理员确认，暂不建议自动通过。`
+    return `${manualCount} 项必须人工确认，先看下方风险列表。`
   }
   if (attentionCount > 0) {
-    return `有 ${attentionCount} 项建议复核，其他 ${passCount} 项未见硬性问题。`
+    return `${attentionCount} 项需要复核，其他 ${passCount} 项未见硬性问题。`
   }
-  return `共 ${passCount} 项通过喵喵审核检查，可进入批准流程。`
+  return `${passCount} 项已通过喵喵检查，可进入批准流程。`
 }
 
 export async function buildBatchAiReview(batch: BuildBatchAiReviewInput): Promise<BatchAiReviewResult> {
