@@ -6,7 +6,7 @@ import Image from 'next/image'
 import Link from 'next/link'
 import { useKeytaoIntroStore } from '@/lib/store/keytaoIntro'
 import { KEYTAO_QQ_GROUP_URL } from '@/lib/constants/community'
-import { GithubLogo as Github } from '@/app/components/GithubLogo'
+import { SiGithub as Github } from '@icons-pack/react-simple-icons'
 
 const links = [
   {

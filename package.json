@@ -31,6 +31,7 @@
   "dependencies": {
     "@heroui/react": "^3.2.1",
     "@heroui/styles": "^3.2.1",
+    "@icons-pack/react-simple-icons": "^13.13.0",
     "@octokit/auth-app": "^8.2.0",
     "@octokit/rest": "^22.0.1",
     "@prisma/adapter-pg": "^7.8.0",

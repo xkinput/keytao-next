@@ -15,7 +15,7 @@ import {
   SelectItem,
   Button
 } from '@/lib/heroui-compat'
-import { RefreshCw, Download } from 'lucide-react'
+import { Database, Download, RefreshCw, Search } from 'lucide-react'
 import { useAPI, apiDownload } from '@/lib/hooks/useSWR'
 import { useIsAdmin } from '@/lib/hooks/useAuth'
 import { getPhraseTypeLabel, getPhraseTypeOptions, type PhraseType } from '@/lib/constants/phraseTypes'
@@ -119,11 +119,17 @@ export default function PhrasesPage() {
 
   return (
     <div className="min-h-screen">
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="flex justify-between items-center mb-6">
-          <h1 className="text-3xl font-bold">词库管理</h1>
+      <main className="app-container py-7">
+        <div className="mb-6 flex flex-col gap-4 border-b border-default-200 pb-5 md:flex-row md:items-end md:justify-between">
+          <div>
+            <div className="mb-2 inline-flex items-center gap-2 rounded-md bg-primary-50 px-2.5 py-1 text-xs font-semibold text-primary">
+              <Database className="h-3.5 w-3.5" />
+              公开词库
+            </div>
+            <h1 className="text-3xl font-semibold tracking-tight">词库管理</h1>
+            <p className="mt-1 text-sm text-default-500">共 {total} 条词条</p>
+          </div>
           <div className="flex items-center gap-2">
-            <p className="text-default-500">共 {total} 条词条</p>
             {isAdmin && (
               <Button
                 isIconOnly
@@ -143,13 +149,14 @@ export default function PhrasesPage() {
               onPress={() => mutate()}
               isLoading={isValidating}
               title="刷新"
+              aria-label="刷新词库"
             >
               <RefreshCw className="w-4 h-4" />
             </Button>
           </div>
         </div>
 
-        <div className="mb-4 flex gap-4">
+        <div className="workbench-toolbar mb-5 flex flex-col gap-3 rounded-lg p-3 md:flex-row md:items-start">
           <Input
             placeholder="搜索词条或编码..."
             value={search}
@@ -157,6 +164,7 @@ export default function PhrasesPage() {
             onClear={() => setSearch('')}
             isClearable
             className="max-w-md"
+            startContent={<Search className="h-4 w-4 text-default-400" />}
             description={isSearching ? "正在输入..." : debouncedSearch ? `搜索: ${debouncedSearch}` : undefined}
           />
           <div className="flex flex-col gap-1">

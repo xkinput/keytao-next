@@ -11,7 +11,7 @@ import {
   Input,
   Pagination
 } from '@/lib/heroui-compat'
-import { RefreshCw } from 'lucide-react'
+import { FilePlus2, RefreshCw, Search } from 'lucide-react'
 import { useAuthStore } from '@/lib/store/auth'
 import { useAPI, apiRequest } from '@/lib/hooks/useSWR'
 import { useClientReady } from '@/lib/hooks/useClientReady'
@@ -153,11 +153,15 @@ export default function BatchesPage() {
 
   return (
     <div className="min-h-screen">
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="flex justify-between items-center mb-6">
+      <main className="app-container py-7">
+        <div className="mb-6 flex flex-col gap-4 border-b border-default-200 pb-5 md:flex-row md:items-end md:justify-between">
           <div>
-            <h2 className="text-2xl font-bold mb-2">改词</h2>
-            <p className="text-default-500">
+            <div className="mb-2 inline-flex items-center gap-2 rounded-md bg-primary-50 px-2.5 py-1 text-xs font-semibold text-primary">
+              <FilePlus2 className="h-3.5 w-3.5" />
+              词库协作
+            </div>
+            <h1 className="text-3xl font-semibold tracking-tight text-foreground">改词批次</h1>
+            <p className="mt-1 text-sm text-default-500">
               {search ? (
                 <>搜索 &ldquo;{search}&rdquo; 的结果：{data?.pagination?.total || 0} 个</>
               ) : onlyMine ? (
@@ -173,6 +177,7 @@ export default function BatchesPage() {
               variant="flat"
               size="sm"
               onPress={() => mutate()}
+              aria-label="刷新批次"
             >
               <RefreshCw className="w-4 h-4" />
             </Button>
@@ -180,6 +185,7 @@ export default function BatchesPage() {
               color="primary"
               onPress={handleCreateBatch}
               isLoading={isCreating}
+              startContent={<FilePlus2 className="h-4 w-4" />}
             >
               新建
             </Button>
@@ -187,16 +193,16 @@ export default function BatchesPage() {
         </div>
 
         {/* Filters and Search */}
-        <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-6">
+        <div className="workbench-toolbar mb-6 flex flex-col gap-4 rounded-lg p-3 lg:flex-row lg:items-center lg:justify-between">
           <Tabs
             selectedKey={status}
             onSelectionChange={(key) => handleStatusChange(key as string)}
             color="primary"
             variant="underlined"
             classNames={{
-              tabList: "gap-4 w-full relative rounded-none p-0 border-b border-divider",
-              cursor: "w-full bg-primary",
-              tab: "max-w-fit px-0 h-12",
+              tabList: "gap-1 w-full relative rounded-lg p-1 bg-content2/60 border border-default-200",
+              cursor: "hidden",
+              tab: "max-w-fit h-9 rounded-md px-3 data-[selected=true]:bg-content1 data-[selected=true]:shadow-sm",
               tabContent: "group-data-[selected=true]:text-primary"
             }}
           >
@@ -215,7 +221,8 @@ export default function BatchesPage() {
                 onValueChange={setSearchInput}
                 onKeyDown={handleSearchKeyPress}
                 size="sm"
-                className="w-full sm:w-64"
+                className="w-full sm:w-72"
+                startContent={<Search className="h-4 w-4 text-default-400" />}
                 isClearable
                 onClear={handleClearSearch}
               />
@@ -238,7 +245,7 @@ export default function BatchesPage() {
           </div>
         </div>
 
-        <div className="grid gap-4 transition-opacity duration-300" style={{ opacity: showSkeleton ? 0.6 : 1 }}>
+        <div className="grid gap-3 transition-opacity duration-300" style={{ opacity: showSkeleton ? 0.6 : 1 }}>
           {showSkeleton ? (
             // Show skeleton loading
             Array.from({ length: 3 }).map((_, i) => (
@@ -251,11 +258,24 @@ export default function BatchesPage() {
               ))}
 
               {filteredBatches.length === 0 && (
-                <Card>
-                  <CardBody className="text-center py-12">
-                    <p className="text-default-500">
-                      {search ? '未找到匹配的批次' : onlyMine ? '你还没有创建任何批次' : '暂无批次'}
-                    </p>
+                <Card className="empty-state">
+                  <CardBody className="flex flex-col items-center justify-center gap-3 py-14 text-center">
+                    <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-primary-50 text-primary">
+                      <FilePlus2 className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <p className="font-medium text-foreground">
+                        {search ? '没有匹配的批次' : onlyMine ? '你还没有创建批次' : '暂无批次'}
+                      </p>
+                      <p className="mt-1 text-sm text-default-500">
+                        {search ? '换一个词或编码再试试。' : '登录后可以创建批次并提交词条修改。'}
+                      </p>
+                    </div>
+                    {!search && (
+                      <Button color="primary" size="sm" onPress={handleCreateBatch} startContent={<FilePlus2 className="h-4 w-4" />}>
+                        新建批次
+                      </Button>
+                    )}
                   </CardBody>
                 </Card>
               )}

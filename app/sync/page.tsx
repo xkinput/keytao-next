@@ -25,6 +25,7 @@ import {
   Input,
 } from '@/lib/heroui-compat'
 import { RefreshCw, Tag } from 'lucide-react'
+import { SiGithub } from '@icons-pack/react-simple-icons'
 import { useAPI } from '@/lib/hooks/useSWR'
 import { useAuthStore } from '@/lib/store/auth'
 import { format } from 'date-fns'
@@ -252,13 +253,20 @@ export default function SyncPage() {
 
   return (
     <div className="min-h-screen">
-      <div className="min-h-screen">
-        <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          <div className="flex justify-between items-center mb-8">
-            <h1 className="text-3xl font-bold">GitHub 同步管理</h1>
-            <div className="flex items-center gap-4">
+      <div>
+        <main className="app-container py-7">
+          <div className="mb-6 flex flex-col gap-4 border-b border-default-200 pb-5 md:flex-row md:items-end md:justify-between">
+            <div>
+              <div className="mb-2 inline-flex items-center gap-2 rounded-md bg-primary-50 px-2.5 py-1 text-xs font-semibold text-primary">
+                <SiGithub className="h-3.5 w-3.5" />
+                同步发布
+              </div>
+              <h1 className="text-3xl font-semibold tracking-tight">GitHub 同步管理</h1>
+              <p className="mt-1 text-sm text-default-500">查看公开发布记录，管理员可发起同步和发布 tag。</p>
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
               {statsData && isAdmin && (
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 rounded-lg border border-default-200 bg-content1 px-3 py-2">
                   <span className="text-sm text-default-600">待同步批次:</span>
                   <Chip
                     color={statsData.pendingSyncBatches > 0 ? "warning" : "default"}
@@ -277,6 +285,7 @@ export default function SyncPage() {
                   mutate()
                   mutateStats()
                 }}
+                aria-label="刷新同步任务"
               >
                 <RefreshCw className="w-4 h-4" />
               </Button>
@@ -368,10 +377,10 @@ export default function SyncPage() {
 
           {/* Manual sync info card */}
           {isAdmin && statsData && statsData.pendingSyncBatches === 0 && !runningTask && (
-            <Card className="mb-6 border border-primary-200 bg-primary-50/50 dark:bg-primary-900/10">
+            <Card className="mb-6 border-primary-200 bg-primary-50/50 dark:bg-primary-900/10">
               <CardBody className="py-4">
                 <p className="text-sm text-default-700">
-                  💡 当前没有待审批的批次。点击「手动完整同步」可以将词库的当前完整状态同步到 GitHub（适用于修复同步问题或更新配置）。
+                  当前没有待审批的批次。点击「手动完整同步」可以将词库的当前完整状态同步到 GitHub（适用于修复同步问题或更新配置）。
                 </p>
               </CardBody>
             </Card>

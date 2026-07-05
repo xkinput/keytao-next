@@ -9,7 +9,7 @@ import {
   Chip,
   Divider
 } from '@/lib/heroui-compat'
-import { User, FileEdit, AlertTriangle } from 'lucide-react'
+import { AlertTriangle, ArrowRight, CalendarClock, CirclePlus, FileEdit, PencilLine, Trash2, User } from 'lucide-react'
 import BatchActionsDropdown from './BatchActionsDropdown'
 import { BATCH_STATUS_MAP, STATUS_COLOR_MAP } from '@/lib/constants/status'
 
@@ -57,18 +57,18 @@ function BatchCard({ batch, refresh }: BatchCardProps) {
 
   const getActionIcon = (action: string) => {
     switch (action) {
-      case 'Create': return '+'
-      case 'Change': return '~'
-      case 'Delete': return '-'
-      default: return '?'
+      case 'Create': return <CirclePlus className="h-3.5 w-3.5" />
+      case 'Change': return <PencilLine className="h-3.5 w-3.5" />
+      case 'Delete': return <Trash2 className="h-3.5 w-3.5" />
+      default: return <FileEdit className="h-3.5 w-3.5" />
     }
   }
 
   const getActionStyle = (action: string) => {
     switch (action) {
-      case 'Create': return 'text-success font-bold'
-      case 'Change': return 'text-warning font-bold'
-      case 'Delete': return 'text-danger font-bold'
+      case 'Create': return 'bg-success-50 text-success'
+      case 'Change': return 'bg-warning-50 text-warning'
+      case 'Delete': return 'bg-danger-50 text-danger'
       default: return 'text-default-500'
     }
   }
@@ -77,38 +77,48 @@ function BatchCard({ batch, refresh }: BatchCardProps) {
     (batch._count.pullRequests > 0 && batch.pullRequests.some(pr => pr.conflictInfo?.hasConflict))
 
   return (
-    <Card className="hover:scale-[1.01] transition-transform duration-200">
-      <CardHeader className="flex flex-col md:flex-row md:justify-between md:items-center pb-3 gap-2">
-        <Link href={`/batch/${batch.id}`} className="flex items-center gap-2 overflow-hidden flex-1 min-w-0">
-          <h3 className="text-lg font-semibold truncate" title={batch.description || '未命名批次'}>
-            {batch.description || '未命名批次'}
-          </h3>
-          <Chip
-            color={STATUS_COLOR_MAP[batch.status] || 'default'}
-            size="sm"
-            variant="flat"
-            className="shrink-0"
-          >
-            {BATCH_STATUS_MAP[batch.status] || batch.status}
-          </Chip>
-          {hasConflicts && (
-            <span title="存在冲突" className="shrink-0">
-              <AlertTriangle size={16} className="text-warning" />
-            </span>
+    <Card className="group interactive-lift overflow-hidden hover:border-primary/35 hover:shadow-[0_18px_42px_hsl(var(--shadow-color)/0.10)]">
+      <CardHeader className="flex flex-col gap-3 p-4 md:flex-row md:items-start md:justify-between">
+        <Link href={`/batch/${batch.id}`} className="min-w-0 flex-1">
+          <div className="flex min-w-0 items-center gap-2">
+            <h3 className="truncate text-base font-semibold tracking-tight text-foreground group-hover:text-primary" title={batch.description || '未命名批次'}>
+              {batch.description || '未命名批次'}
+            </h3>
+            {hasConflicts && (
+              <span title="存在冲突" className="shrink-0 rounded-md bg-warning-50 p-1 text-warning">
+                <AlertTriangle size={14} />
+              </span>
+            )}
+          </div>
+          {batch.sourceIssue && (
+            <p className="mt-1 truncate text-xs text-default-500">
+              关联 #{batch.sourceIssue.id} {batch.sourceIssue.title}
+            </p>
           )}
         </Link>
 
-        <div className="flex items-center gap-2 text-xs text-default-500 shrink-0 w-full md:w-auto justify-between md:justify-end">
-          <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1" title="修改数量">
+        <div className="flex w-full shrink-0 items-center justify-between gap-2 md:w-auto md:justify-end">
+          <div className="flex flex-wrap items-center gap-2 text-xs text-default-500">
+            <Chip
+              color={STATUS_COLOR_MAP[batch.status] || 'default'}
+              size="sm"
+              variant="flat"
+              className="shrink-0"
+            >
+              {BATCH_STATUS_MAP[batch.status] || batch.status}
+            </Chip>
+            <div className="flex items-center gap-1 rounded-md bg-content2 px-2 py-1" title="修改数量">
               <FileEdit size={14} />
               <span>{batch._count.pullRequests}</span>
             </div>
-            <div className="flex items-center gap-1" title="创建者">
+            <div className="flex items-center gap-1 rounded-md bg-content2 px-2 py-1" title="创建者">
               <User size={14} />
               <span className="max-w-20 truncate">{batch.creator.nickname || batch.creator.name}</span>
             </div>
-            <span title="创建时间">{new Date(batch.createAt).toLocaleDateString()}</span>
+            <div className="flex items-center gap-1 rounded-md bg-content2 px-2 py-1" title="创建时间">
+              <CalendarClock size={14} />
+              <span>{new Date(batch.createAt).toLocaleDateString()}</span>
+            </div>
           </div>
 
           <BatchActionsDropdown
@@ -120,34 +130,25 @@ function BatchCard({ batch, refresh }: BatchCardProps) {
         </div>
       </CardHeader>
 
-      <Divider />
+      <Divider className="opacity-70" />
 
       <Link href={`/batch/${batch.id}`}>
-        <CardBody className="py-3 cursor-pointer">
-          {batch.sourceIssue && (
-            <div className="mb-3 text-xs">
-              <span className="text-default-500 mr-1">关联:</span>
-              <span className="text-primary truncate max-w-50">
-                #{batch.sourceIssue.id} {batch.sourceIssue.title}
-              </span>
-            </div>
-          )}
-
+        <CardBody className="cursor-pointer px-4 py-3">
           {batch.pullRequests.length > 0 ? (
             <div className="space-y-2 mb-3">
               {batch.pullRequests.slice(0, 3).map((pr) => (
-                <div key={pr.id} className="flex items-center text-sm gap-2 font-mono">
-                  <span className={`w-4 text-center ${getActionStyle(pr.action)}`}>
+                <div key={pr.id} className="flex items-center gap-2 rounded-md bg-content2/65 px-2.5 py-2 text-sm">
+                  <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md ${getActionStyle(pr.action)}`}>
                     {getActionIcon(pr.action)}
                   </span>
-                  <span className="text-default-600 min-w-15 max-w-20 truncate" title={pr.code || ''}>{pr.code}</span>
+                  <span className="min-w-15 max-w-20 truncate font-mono text-default-600" title={pr.code || ''}>{pr.code}</span>
                   <div className="flex-1 min-w-0 truncate">
                     {pr.action === 'Delete' ? (
                       <span className="text-danger line-through opacity-70">{pr.word}</span>
                     ) : pr.action === 'Change' ? (
                       <span className="flex items-center gap-1">
                         <span className="opacity-60">{pr.oldWord}</span>
-                        <span className="text-xs text-default-400">→</span>
+                        <ArrowRight className="h-3 w-3 text-default-400" />
                         <span className="text-warning-600 dark:text-warning">{pr.word}</span>
                       </span>
                     ) : (
@@ -163,7 +164,7 @@ function BatchCard({ batch, refresh }: BatchCardProps) {
               ))}
             </div>
           ) : (
-            <div className="text-sm text-default-400 py-2 pl-6 italic">
+            <div className="rounded-md border border-dashed border-default-200 bg-content2/50 px-3 py-3 text-sm text-default-500">
               暂无修改内容
             </div>
           )}
@@ -174,4 +175,3 @@ function BatchCard({ batch, refresh }: BatchCardProps) {
 }
 
 export default memo(BatchCard)
-

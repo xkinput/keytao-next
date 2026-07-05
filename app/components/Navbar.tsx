@@ -9,7 +9,7 @@ import { useAPI } from '@/lib/hooks/useSWR'
 import { useClientReady } from '@/lib/hooks/useClientReady'
 import Logo from './Logo'
 import ThemeSwitch from './ThemeSwitch'
-import { GithubLogo as Github } from './GithubLogo'
+import { SiGithub } from '@icons-pack/react-simple-icons'
 
 function Navbar() {
   const router = useRouter()
@@ -183,6 +183,15 @@ function Navbar() {
       .filter((c): c is MenuCategory => c !== null)
   }, [menuCategories, isAdmin, isRootAdmin])
 
+  const isItemActive = useCallback((href: string) => {
+    if (href === '/') return pathname === '/'
+    return pathname === href || pathname.startsWith(`${href}/`)
+  }, [pathname])
+
+  const isCategoryActive = useCallback((category: MenuCategory) => {
+    return category.items.some((item) => !item.isExternal && isItemActive(item.href))
+  }, [isItemActive])
+
   const handleMouseEnter = useCallback((key: string) => {
     if (closeTimeoutRef.current) {
       clearTimeout(closeTimeoutRef.current)
@@ -250,18 +259,19 @@ function Navbar() {
           )}
         </DrawerContent>
       </Drawer>
-      <nav className="bg-content1 shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center h-16">
-            <div className="flex items-center gap-4 md:gap-8">
-              <Logo />
+      <nav className="sticky top-0 z-60 border-b border-default-200/80 bg-content1/86 shadow-[0_8px_24px_hsl(var(--shadow-color)/0.06)] backdrop-blur-xl">
+        <div className="app-container">
+          <div className="flex h-14 items-center justify-between">
+            <div className="flex min-w-0 items-center gap-3 md:gap-5">
+              <Logo size={34} />
               {/* Desktop Navigation */}
-              <div className="hidden nav:flex gap-1 items-center">
+              <div className="hidden nav:flex items-center gap-1 rounded-lg border border-default-200 bg-content2/55 p-1">
                 {visibleMenuCategories.map((category) => {
                   const IconComponent = category.icon
                   const firstItem = category.items[0]
                   const firstHref = firstItem?.href
                   const isSingleItem = category.items.length === 1
+                  const categoryActive = isCategoryActive(category)
 
                   // Single item category - render as direct button
                   if (isSingleItem) {
@@ -271,9 +281,9 @@ function Navbar() {
                         variant="light"
                         size="sm"
                         startContent={<IconComponent className="w-4 h-4" />}
-                        className={pathname === firstHref
-                          ? 'bg-primary text-primary-foreground data-[hover=true]:bg-primary-600'
-                          : 'text-default-700 hover:bg-default-200 dark:hover:bg-default-100 hover:text-default-900'}
+                        className={categoryActive
+                          ? 'h-9 bg-primary text-primary-foreground shadow-[0_8px_18px_hsl(var(--shadow-color)/0.12)] hover:bg-primary-600'
+                          : 'h-9 text-default-700 hover:bg-content1 hover:text-default-900'}
                         onPress={() => {
                           if (firstHref) {
                             if (firstItem?.isExternal) {
@@ -309,7 +319,7 @@ function Navbar() {
                           }
                         }
                       }}
-                      className="cursor-pointer rounded-lg hover:bg-default-200 dark:hover:bg-default-100 transition-colors"
+                      className="cursor-pointer rounded-lg transition-colors hover:bg-content1"
                     >
                       <Dropdown
                         isOpen={openDropdown === category.key}
@@ -319,8 +329,10 @@ function Navbar() {
                             variant="light"
                             size="sm"
                             startContent={<IconComponent className="w-4 h-4" />}
-                            endContent={<ChevronDown className="w-4 h-4" />}
-                            className="text-default-700 hover:bg-default-100 hover:text-default-900 pointer-events-none"
+                            endContent={<ChevronDown className="w-3.5 h-3.5 opacity-70" />}
+                            className={categoryActive
+                              ? 'h-9 bg-primary text-primary-foreground shadow-[0_8px_18px_hsl(var(--shadow-color)/0.12)] pointer-events-none'
+                              : 'h-9 text-default-700 hover:bg-content1 hover:text-default-900 pointer-events-none'}
                             as="div"
                           >
                             {category.label}
@@ -346,7 +358,7 @@ function Navbar() {
                           {category.items.map((item) => (
                             <DropdownItem
                               key={item.href}
-                              className={pathname === item.href ? 'bg-primary text-primary-foreground' : ''}
+                              className={isItemActive(item.href) ? 'bg-primary text-primary-foreground' : ''}
                             >
                               {item.label}
                             </DropdownItem>
@@ -372,28 +384,32 @@ function Navbar() {
             </div>
 
             <div className="flex items-center gap-2">
-              <Button
-                variant="flat"
-                size="sm"
-                startContent={<Coffee className="w-4 h-4" />}
-                aria-label="赞助键道开发"
-                as={Link}
-                href="/sponsor"
-                className="hidden sm:flex text-pink-600 dark:text-pink-400"
-              >
-                赞助
-              </Button>
-              <Button
-                variant="flat"
-                size="sm"
-                isIconOnly
-                aria-label="赞助键道开发"
-                as={Link}
-                href="/sponsor"
-                className="sm:hidden text-pink-600 dark:text-pink-400"
-              >
-                <Coffee className="w-5 h-5" />
-              </Button>
+              <div className="hidden sm:block">
+                <Button
+                  variant="flat"
+                  size="sm"
+                  startContent={<Coffee className="w-4 h-4" />}
+                  aria-label="赞助键道开发"
+                  as={Link}
+                  href="/sponsor"
+                  className="h-9 border border-pink-200/70 bg-pink-50 text-pink-700 hover:bg-pink-100 dark:border-pink-400/20 dark:bg-pink-400/10 dark:text-pink-200"
+                >
+                  赞助
+                </Button>
+              </div>
+              <div className="sm:hidden">
+                <Button
+                  variant="flat"
+                  size="sm"
+                  isIconOnly
+                  aria-label="赞助键道开发"
+                  as={Link}
+                  href="/sponsor"
+                  className="h-9 w-9 border border-pink-200/70 bg-pink-50 text-pink-700 dark:border-pink-400/20 dark:bg-pink-400/10 dark:text-pink-200"
+                >
+                  <Coffee className="w-5 h-5" />
+                </Button>
+              </div>
               <Button
                 variant="light"
                 size="sm"
@@ -403,49 +419,53 @@ function Navbar() {
                 href="https://github.com/xkinput/KeyTao"
                 target="_blank"
                 rel="noopener noreferrer"
+                className="h-9 w-9 text-default-700 hover:bg-content2"
               >
-                <Github className="w-5 h-5" />
+                <SiGithub className="w-5 h-5" />
               </Button>
               <ThemeSwitch />
               {isAuthenticatedValue ? (
                 <>
-                  <Button
-                    variant="light"
-                    size="sm"
-                    onPress={() => router.push('/profile')}
-                    className="hidden sm:flex"
-                  >
-                    {user?.nickname || user?.name}
-                  </Button>
-                  <Dropdown>
-                    <DropdownTrigger>
-                      <Button
-                        variant="light"
-                        size="sm"
-                        isIconOnly
-                        className="sm:hidden"
-                        aria-label="User menu"
-                      >
-                        <User className="w-5 h-5" />
-                      </Button>
-                    </DropdownTrigger>
-                    <DropdownMenu aria-label="User actions">
-                      <DropdownItem key="profile" onPress={() => router.push('/profile')}>
-                        {user?.nickname || user?.name}
-                      </DropdownItem>
-                      <DropdownItem key="logout" onPress={handleLogout}>
-                        退出登录
-                      </DropdownItem>
-                    </DropdownMenu>
-                  </Dropdown>
-                  <Button
-                    variant="light"
-                    size="sm"
-                    onPress={handleLogout}
-                    className="hidden sm:flex"
-                  >
-                    退出登录
-                  </Button>
+                  <div className="hidden sm:block">
+                    <Button
+                      variant="light"
+                      size="sm"
+                      onPress={() => router.push('/profile')}
+                    >
+                      {user?.nickname || user?.name}
+                    </Button>
+                  </div>
+                  <div className="sm:hidden">
+                    <Dropdown>
+                      <DropdownTrigger>
+                        <Button
+                          variant="light"
+                          size="sm"
+                          isIconOnly
+                          aria-label="User menu"
+                        >
+                          <User className="w-5 h-5" />
+                        </Button>
+                      </DropdownTrigger>
+                      <DropdownMenu aria-label="User actions">
+                        <DropdownItem key="profile" onPress={() => router.push('/profile')}>
+                          {user?.nickname || user?.name}
+                        </DropdownItem>
+                        <DropdownItem key="logout" onPress={handleLogout}>
+                          退出登录
+                        </DropdownItem>
+                      </DropdownMenu>
+                    </Dropdown>
+                  </div>
+                  <div className="hidden sm:block">
+                    <Button
+                      variant="light"
+                      size="sm"
+                      onPress={handleLogout}
+                    >
+                      退出登录
+                    </Button>
+                  </div>
                 </>
               ) : (
                 <Button

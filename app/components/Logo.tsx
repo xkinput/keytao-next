@@ -8,18 +8,18 @@ interface LogoProps {
 
 export default function Logo({ className = '', size = 40 }: LogoProps) {
   return (
-    <Link href="/" className={`flex items-center gap-2 ${className}`}>
+    <Link href="/" className={`group flex items-center gap-2 rounded-lg transition-opacity hover:opacity-90 ${className}`}>
       <Image
         src="/logo.png"
         alt="KeyTao Logo"
         width={size}
         height={size}
-        className="rounded-md"
+        className="rounded-md shadow-sm"
         priority
       />
       <div className="flex flex-col leading-none">
-        <span className="text-xl font-extrabold text-primary tracking-tight">键道</span>
-        <span className="text-[11px] font-medium text-default-400 tracking-widest uppercase">KeyTao</span>
+        <span className="text-lg font-extrabold text-primary tracking-tight">键道</span>
+        <span className="text-[10px] font-semibold text-default-400 tracking-widest uppercase">KeyTao</span>
       </div>
     </Link>
   )

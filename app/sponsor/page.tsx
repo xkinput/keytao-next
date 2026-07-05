@@ -4,7 +4,7 @@ import Image from 'next/image'
 import { Button, Link, Chip, Spinner } from '@/lib/heroui-compat'
 import { Coffee, Heart, ExternalLink } from 'lucide-react'
 import { useAPI } from '@/lib/hooks/useSWR'
-import { GithubLogo as Github } from '@/app/components/GithubLogo'
+import { SiGithub as Github } from '@icons-pack/react-simple-icons'
 
 interface SponsorItem {
   id: number

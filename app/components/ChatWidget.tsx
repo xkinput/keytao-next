@@ -3,16 +3,16 @@
 import React, { useRef, useEffect, useCallback, useState } from 'react'
 import dynamic from 'next/dynamic'
 import { Button, Textarea, ScrollShadow } from '@/lib/heroui-compat'
-import { Trash2, X, Send, ChevronLeft, ChevronRight, ChevronUp, ChevronDown } from 'lucide-react'
+import { Trash2, X, Send, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, MessageCircle } from 'lucide-react'
 import { useChatStore } from '@/lib/store/chat'
 import { useAuthStore } from '@/lib/store/auth'
 
 const Live2DCanvas = dynamic(() => import('./Live2DCanvas'), { ssr: false })
 
-const CANVAS_W = 200
-const CANVAS_H = 220
-const CANVAS_W_MOBILE = 120
-const CANVAS_H_MOBILE = 132
+const CANVAS_W = 132
+const CANVAS_H = 146
+const CANVAS_W_MOBILE = 86
+const CANVAS_H_MOBILE = 94
 
 // Idle messages that rotate in the speech bubble
 const IDLE_MESSAGES = [
@@ -100,11 +100,11 @@ function SnapRestoreButton({ snap, pos, canvasW, canvasH, onRestore }: {
           justifyContent: 'center',
           width: isHorizontal ? 20 : 40,
           height: isHorizontal ? 40 : 20,
-          background: 'hsl(var(--heroui-content1))',
-          border: '1px solid hsl(var(--heroui-divider))',
+          background: 'var(--surface)',
+          border: '1px solid var(--separator)',
           borderRadius,
           cursor: 'pointer',
-          color: 'hsl(var(--heroui-foreground))',
+          color: 'var(--foreground)',
           opacity: 0.7,
           boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
         }}
@@ -131,11 +131,11 @@ function SpeechBubble({ visible, text, canvasH }: { visible: boolean; text: stri
       }}
     >
       <div
-        className="text-xs px-3 py-1.5 rounded-2xl shadow-md"
+        className="rounded-lg px-3 py-1.5 text-xs shadow-md"
         style={{
-          background: 'hsl(var(--heroui-content1))',
-          border: '1px solid hsl(var(--heroui-divider))',
-          color: 'hsl(var(--heroui-foreground))',
+          background: 'var(--surface)',
+          border: '1px solid var(--separator)',
+          color: 'var(--foreground)',
         }}
       >
         {text}
@@ -150,7 +150,7 @@ function SpeechBubble({ visible, text, canvasH }: { visible: boolean; text: stri
           height: 0,
           borderLeft: '6px solid transparent',
           borderRight: '6px solid transparent',
-          borderTop: '6px solid hsl(var(--heroui-divider))',
+          borderTop: '6px solid var(--separator)',
         }}
       />
       <div
@@ -162,7 +162,7 @@ function SpeechBubble({ visible, text, canvasH }: { visible: boolean; text: stri
           height: 0,
           borderLeft: '6px solid transparent',
           borderRight: '6px solid transparent',
-          borderTop: '6px solid hsl(var(--heroui-content1))',
+          borderTop: '6px solid var(--surface)',
         }}
       />
     </div>
@@ -208,10 +208,10 @@ function ChatPanel({ onClose }: { onClose: () => void }) {
     <div style={{ width: 'min(320px, calc(100vw - 32px))' }}>
       {/* Toolbar */}
       <div
-        className="flex items-center justify-between px-3 py-1.5 mb-2 rounded-2xl"
+        className="mb-2 flex items-center justify-between rounded-lg px-3 py-1.5 shadow-sm"
         style={{
-          background: 'hsl(var(--heroui-content1))',
-          border: '1px solid hsl(var(--heroui-divider))',
+          background: 'var(--surface)',
+          border: '1px solid var(--separator)',
         }}
       >
         <div className="flex items-center gap-1.5">
@@ -243,8 +243,8 @@ function ChatPanel({ onClose }: { onClose: () => void }) {
               style={
                 msg.role === 'assistant'
                   ? {
-                    background: 'hsl(var(--heroui-content1))',
-                    border: '1px solid hsl(var(--heroui-divider))',
+                    background: 'var(--surface)',
+                    border: '1px solid var(--separator)',
                   }
                   : undefined
               }
@@ -258,8 +258,8 @@ function ChatPanel({ onClose }: { onClose: () => void }) {
             <div
               className="px-4 py-2.5 rounded-2xl shadow-sm flex gap-1 items-center"
               style={{
-                background: 'hsl(var(--heroui-content1))',
-                border: '1px solid hsl(var(--heroui-divider))',
+                background: 'var(--surface)',
+                border: '1px solid var(--separator)',
               }}
             >
               {[0, 1, 2].map(i => (
@@ -455,13 +455,60 @@ export default function ChatWidget() {
     saveWidgetState({ ...newPos, snap: null })
   }, [canvasW, canvasH])
 
+  if (initialized && isMobile) {
+    return (
+      <div
+        style={{
+          position: 'fixed',
+          inset: 0,
+          zIndex: 40,
+          pointerEvents: 'none',
+          userSelect: 'none',
+        }}
+      >
+        <div
+          style={{
+            position: 'absolute',
+            right: 12,
+            bottom: 76,
+            transition: 'opacity 0.25s, transform 0.25s',
+            opacity: isOpen ? 1 : 0,
+            transform: isOpen ? 'translateY(0)' : 'translateY(12px)',
+            pointerEvents: isOpen ? 'auto' : 'none',
+          }}
+        >
+          <ChatPanel onClose={close} />
+        </div>
+        <Button
+          isIconOnly
+          color="primary"
+          aria-label={isOpen ? '键道助手已打开' : '打开键道助手'}
+          onPress={() => {
+            setBubbleVisible(false)
+            open()
+          }}
+          className="absolute bottom-4 right-4 h-12 w-12 rounded-lg shadow-[0_14px_34px_hsl(var(--shadow-color)/0.22)]"
+          style={{ pointerEvents: 'auto' }}
+        >
+          <MessageCircle size={20} />
+        </Button>
+        <style>{`
+          @keyframes live2d-bounce {
+            0%, 80%, 100% { transform: translateY(0); opacity: 0.4; }
+            40% { transform: translateY(-4px); opacity: 1; }
+          }
+        `}</style>
+      </div>
+    )
+  }
+
   return (
     // Full-screen transparent overlay — pointerEvents:none lets all clicks through
     <div
       style={{
         position: 'fixed',
         inset: 0,
-        zIndex: 50,
+        zIndex: 40,
         pointerEvents: 'none',
         userSelect: 'none',
       }}
@@ -505,7 +552,7 @@ export default function ChatWidget() {
 
           {/* Live2D + speech bubble */}
           <div style={{ position: 'relative', width: canvasW, height: canvasH }}>
-            <SpeechBubble visible={bubbleVisible && !isOpen} text={bubbleText} canvasH={canvasH} />
+            <SpeechBubble visible={bubbleVisible && !isOpen && !isMobile} text={bubbleText} canvasH={canvasH} />
             {/* Drag wrapper — pointerEvents:auto re-enables interactions on this child */}
             <div
               style={{ cursor: 'grab', pointerEvents: 'auto' }}

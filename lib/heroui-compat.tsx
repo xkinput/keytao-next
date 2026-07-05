@@ -118,6 +118,11 @@ function selectedClass(isSelected: boolean, selected: string, idle: string) {
   return isSelected ? selected : idle
 }
 
+const buttonBaseClass = 'inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-lg font-medium transition-[background-color,border-color,color,box-shadow,transform] duration-200 ease-out active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-primary/35 focus-visible:ring-offset-2 focus-visible:ring-offset-background'
+const fieldWrapperClass = 'flex min-h-10 items-center gap-2 rounded-lg border border-default-200 bg-field px-3 text-sm text-field-foreground shadow-[0_1px_0_hsl(var(--shadow-color)/0.04)] transition-[border-color,box-shadow,background-color] duration-200 focus-within:border-primary/60 focus-within:shadow-[0_0_0_3px_color-mix(in_oklab,var(--accent)_16%,transparent)]'
+const fieldInputClass = 'min-w-0 flex-1 bg-transparent outline-none placeholder:text-field-placeholder disabled:opacity-60'
+const cardBaseClass = 'rounded-lg border border-default-200 bg-content1/90 shadow-[0_12px_34px_hsl(var(--shadow-color)/0.07)]'
+
 export function useDisclosure(options: AnyProps = {}) {
   const [isOpen, setIsOpen] = useState(Boolean(options.defaultOpen ?? options.isOpen))
   const setOpen = useCallback((nextOpen: boolean) => {
@@ -181,6 +186,7 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(function Button
   ref,
 ) {
   const disabledValue = Boolean(isDisabled ?? disabled ?? isLoading)
+  const resolvedClassName = cn(buttonBaseClass, className)
   const content = (
     <>
       {isLoading ? spinner ?? <H.Spinner size="sm" color="current" /> : startContent}
@@ -194,7 +200,7 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(function Button
     return (
       <Element
         ref={ref}
-        className={className}
+        className={resolvedClassName}
         href={href}
         target={target}
         rel={rel}
@@ -210,7 +216,7 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(function Button
   return (
     <H.Button
       ref={ref}
-      className={className}
+      className={resolvedClassName}
       isDisabled={disabledValue}
       disabled={disabledValue}
       variant={mapButtonVariant(color, variant)}
@@ -229,7 +235,7 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(function Button
 export function Chip({ children, className, color, variant, startContent, endContent, ...props }: AnyProps) {
   return (
     <H.Chip
-      className={className}
+      className={cn('font-medium', className)}
       color={mapStatusColor(color)}
       variant={mapSoftVariant(variant)}
       {...props}
@@ -290,7 +296,7 @@ export const Card = React.forwardRef<HTMLElement, CardProps>(function Card(
 
   return (
     <H.Card
-      className={cn(isPressable && 'cursor-pointer transition-colors hover:bg-default-100', className)}
+      className={cn(cardBaseClass, isPressable && 'cursor-pointer interactive-lift hover:border-primary/35 hover:bg-content1', className)}
       onClick={onClick ?? onPress}
       render={render}
       tabIndex={isPressable ? 0 : props.tabIndex}
@@ -381,20 +387,24 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(function Inp
     isDisabled,
     disabled,
     isClearable,
+    'aria-label': ariaLabel,
     ...props
   },
   ref,
 ) {
   const stringValue = value == null ? '' : String(value)
+  const resolvedAriaLabel = ariaLabel ?? (!label && typeof props.placeholder === 'string' ? props.placeholder : undefined)
+
   return (
     <label className={cn('flex w-full flex-col gap-1.5', slotClass(classNames), className)}>
       {label ? <span className="text-sm font-medium text-foreground">{label}{isRequired ? ' *' : ''}</span> : null}
-      <div className={cn('flex min-h-10 items-center gap-2 rounded-field bg-field px-3 text-sm text-field-foreground shadow-field', slotClass(classNames, 'inputWrapper'))}>
+      <div className={cn(fieldWrapperClass, slotClass(classNames, 'inputWrapper'))}>
         {startContent}
         <H.Input
           ref={ref}
-          className={cn('min-w-0 flex-1 bg-transparent outline-none placeholder:text-field-placeholder disabled:opacity-60', slotClass(classNames, 'input'))}
+          className={cn(fieldInputClass, slotClass(classNames, 'input'))}
           value={stringValue}
+          aria-label={resolvedAriaLabel}
           onChange={(event: React.ChangeEvent<HTMLInputElement>) => {
             onChange?.(event)
             onValueChange?.(event.target.value)
@@ -405,7 +415,7 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(function Inp
           {...props}
         />
         {isClearable && stringValue ? (
-          <button type="button" className="text-muted hover:text-foreground" onClick={onClear ?? (() => onValueChange?.(''))}>
+          <button type="button" className="rounded px-1 text-muted transition-colors hover:bg-default-100 hover:text-foreground" onClick={onClear ?? (() => onValueChange?.(''))}>
             x
           </button>
         ) : null}
@@ -462,7 +472,7 @@ export const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(fun
       {label ? <span className="text-sm font-medium text-foreground">{label}{isRequired ? ' *' : ''}</span> : null}
       <H.TextArea
         ref={ref}
-        className={cn('min-h-20 w-full rounded-field bg-field px-3 py-2 text-sm text-field-foreground shadow-field outline-none placeholder:text-field-placeholder disabled:opacity-60', slotClass(classNames, 'input'))}
+        className={cn('min-h-20 w-full resize-y rounded-lg border border-default-200 bg-field px-3 py-2 text-sm text-field-foreground shadow-[0_1px_0_hsl(var(--shadow-color)/0.04)] outline-none transition-[border-color,box-shadow,background-color] duration-200 placeholder:text-field-placeholder focus:border-primary/60 focus:shadow-[0_0_0_3px_color-mix(in_oklab,var(--accent)_16%,transparent)] disabled:opacity-60', slotClass(classNames, 'input'))}
         rows={minRows}
         value={value ?? ''}
         onChange={(event: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -490,12 +500,14 @@ type SelectProps = Omit<UnknownBaseProps, 'children'> & {
   onChange?: React.ChangeEventHandler<HTMLSelectElement>
 }
 
-export function Select({ children, label, placeholder, className, classNames, selectedKeys, onSelectionChange, onChange, ...props }: SelectProps) {
+export function Select({ children, label, placeholder, className, classNames, selectedKeys, onSelectionChange, onChange, 'aria-label': ariaLabel, ...props }: SelectProps) {
   const selectedKey = firstSelectedKey(selectedKeys)
+  const resolvedAriaLabel = ariaLabel ?? (!label && typeof placeholder === 'string' ? placeholder : undefined)
 
   return (
     <H.Select
       selectedKey={selectedKey}
+      aria-label={resolvedAriaLabel}
       onSelectionChange={(key: React.Key | null) => {
         emitSelection(onSelectionChange, key)
         if (key != null && onChange) {
@@ -506,11 +518,11 @@ export function Select({ children, label, placeholder, className, classNames, se
       {...props}
     >
       {label ? <H.Label className="mb-1.5 block text-sm font-medium text-foreground">{label}</H.Label> : null}
-      <H.Select.Trigger className={slotClass(classNames, 'trigger')}>
+      <H.Select.Trigger className={cn(fieldWrapperClass, 'justify-between', slotClass(classNames, 'trigger'))}>
         <H.Select.Value>{({ selectedText }: AnyProps) => selectedText || placeholder}</H.Select.Value>
       </H.Select.Trigger>
-      <H.Select.Popover>
-        <H.ListBox>{keyedChildren(children)}</H.ListBox>
+      <H.Select.Popover className="rounded-lg border border-default-200 bg-content1 shadow-[0_18px_48px_hsl(var(--shadow-color)/0.14)]">
+        <H.ListBox className="p-1">{keyedChildren(children)}</H.ListBox>
       </H.Select.Popover>
     </H.Select>
   )
@@ -695,8 +707,8 @@ export function Table({ children, className, ...props }: AnyProps) {
 
   return (
     <TableColumnCountContext.Provider value={columnCount}>
-      <H.Table className={className}>
-        <H.Table.ScrollContainer>
+      <H.Table className={cn('overflow-hidden rounded-lg border border-default-200 bg-content1/90 shadow-[0_12px_34px_hsl(var(--shadow-color)/0.06)]', className)}>
+        <H.Table.ScrollContainer className="bg-transparent">
           <H.Table.Content {...props}>{children}</H.Table.Content>
         </H.Table.ScrollContainer>
       </H.Table>
@@ -721,11 +733,11 @@ export function TableHeader({ children, ...props }: AnyProps) {
     })
   })
 
-  return <H.Table.Header {...props}>{columns}</H.Table.Header>
+  return <H.Table.Header className="bg-content2/80 text-xs font-semibold text-default-600" {...props}>{columns}</H.Table.Header>
 }
 
 export function TableColumn({ children, ...props }: AnyProps) {
-  return <H.Table.Column {...props}>{children}</H.Table.Column>
+  return <H.Table.Column className="px-4 py-3" {...props}>{children}</H.Table.Column>
 }
 
 export function TableBody({ emptyContent, children, ...props }: AnyProps) {
@@ -737,7 +749,7 @@ export function TableBody({ emptyContent, children, ...props }: AnyProps) {
     <H.Table.Body {...props}>
       {hasStaticRows || !emptyContent ? children : (
         <H.Table.Row>
-          <H.Table.Cell colSpan={columnCount} className="py-10 text-center text-default-500">
+          <H.Table.Cell colSpan={columnCount} className="py-12 text-center text-default-500">
             {emptyContent}
           </H.Table.Cell>
         </H.Table.Row>
@@ -745,8 +757,21 @@ export function TableBody({ emptyContent, children, ...props }: AnyProps) {
     </H.Table.Body>
   )
 }
-export const TableRow = compat(H.Table.Row ?? H.TableRow)
-export const TableCell = compat(H.Table.Cell ?? H.TableCell)
+export function TableRow({ children, className, ...props }: AnyProps) {
+  return (
+    <H.Table.Row className={cn('border-b border-default-100 transition-colors hover:bg-content2/55 last:border-b-0', className)} {...props}>
+      {children}
+    </H.Table.Row>
+  )
+}
+
+export function TableCell({ children, className, ...props }: AnyProps) {
+  return (
+    <H.Table.Cell className={cn('px-4 py-3 align-middle text-sm', className)} {...props}>
+      {children}
+    </H.Table.Cell>
+  )
+}
 
 type RadioGroupProps = Omit<UnknownBaseProps, 'children'> & {
   children?: React.ReactNode
