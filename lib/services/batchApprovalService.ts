@@ -1,5 +1,6 @@
 import { prisma } from '@/lib/prisma'
 import type { Batch } from '@prisma/client'
+import type { BatchConflictResult } from '@/lib/services/batchConflictService'
 
 export type BatchApprovalMode = 'admin' | 'bot-auto'
 
@@ -12,6 +13,69 @@ export interface ApproveSubmittedBatchOptions {
 
 export interface ApproveSubmittedBatchResult {
   batch: Batch
+}
+
+export function orderPullRequestsForApproval<T extends { id: number }>(
+  pullRequests: T[],
+  conflictResults: BatchConflictResult[]
+): T[] {
+  const indexById = new Map(pullRequests.map((pr, index) => [String(pr.id), index]))
+  const edges = new Map<number, Set<number>>()
+  const indegree = Array.from({ length: pullRequests.length }, () => 0)
+
+  for (const result of conflictResults) {
+    const dependentIndex = indexById.get(result.id)
+    if (dependentIndex === undefined) continue
+
+    for (const suggestion of result.conflict.suggestions ?? []) {
+      if (suggestion.action !== 'Resolved') continue
+      const resolverIndex = suggestion.resolverIndex
+      if (
+        resolverIndex === undefined
+        || resolverIndex < 0
+        || resolverIndex >= pullRequests.length
+        || resolverIndex === dependentIndex
+      ) {
+        continue
+      }
+
+      let outgoing = edges.get(resolverIndex)
+      if (!outgoing) {
+        outgoing = new Set<number>()
+        edges.set(resolverIndex, outgoing)
+      }
+      if (outgoing.has(dependentIndex)) continue
+
+      outgoing.add(dependentIndex)
+      indegree[dependentIndex] += 1
+    }
+  }
+
+  if (edges.size === 0) return pullRequests
+
+  const ready = indegree
+    .map((value, index) => ({ value, index }))
+    .filter(item => item.value === 0)
+    .map(item => item.index)
+  const orderedIndexes: number[] = []
+
+  while (ready.length > 0) {
+    const index = ready.shift()!
+    orderedIndexes.push(index)
+
+    for (const dependent of edges.get(index) ?? []) {
+      indegree[dependent] -= 1
+      if (indegree[dependent] === 0) {
+        ready.push(dependent)
+      }
+    }
+  }
+
+  if (orderedIndexes.length !== pullRequests.length) {
+    return pullRequests
+  }
+
+  return orderedIndexes.map(index => pullRequests[index])
 }
 
 export function classifyBatchDeleteRisk(
@@ -104,8 +168,10 @@ export async function approveSubmittedBatch({
     }
   })
 
+  const executionOrder = orderPullRequestsForApproval(batch.pullRequests, conflictResults)
+
   const updated = await prisma.$transaction(async (tx) => {
-    for (const pr of batch.pullRequests) {
+    for (const pr of executionOrder) {
       switch (pr.action) {
         case 'Create':
           if (pr.word && pr.code) {
