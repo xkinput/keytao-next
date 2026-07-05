@@ -46,6 +46,21 @@ function flatClassNames(classNames: ClassNames) {
   return Object.values(classNames).filter(Boolean).join(' ')
 }
 
+function hasClassToken(className: string | undefined, pattern: RegExp) {
+  if (!className) return false
+  return className.split(/\s+/).some((token) => pattern.test(token))
+}
+
+function sectionPadding(defaultX: string, defaultY: string, className: string | undefined) {
+  const hasX = hasClassToken(className, /^!?-?(p|px|pl|pr)-/)
+  const hasY = hasClassToken(className, /^!?-?(p|py|pt|pb)-/)
+  return cn(!hasX && defaultX, !hasY && defaultY)
+}
+
+function sectionGap(defaultGap: string, className: string | undefined) {
+  return hasClassToken(className, /^!?-?gap[xy]?-|^!?-?space-[xy]-/) ? undefined : defaultGap
+}
+
 function firstSelectedKey(selectedKeys: unknown): React.Key | undefined {
   if (!selectedKeys || selectedKeys === 'all') return undefined
   if (selectedKeys instanceof Set) return Array.from(selectedKeys)[0] as React.Key | undefined
@@ -128,7 +143,7 @@ function fieldAriaLabel(label: React.ReactNode, ariaLabel: unknown, placeholder:
 const buttonBaseClass = 'inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md text-sm font-medium tracking-normal transition-[background-color,border-color,color,box-shadow,transform] duration-200 ease-[cubic-bezier(0.32,0.72,0,1)] active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-primary/30 focus-visible:ring-offset-2 focus-visible:ring-offset-background'
 const fieldWrapperClass = 'flex min-h-10 items-center gap-2 rounded-md border border-default-200 bg-field px-3 text-sm text-field-foreground shadow-[0_1px_0_hsl(var(--shadow-color)/0.04)] transition-[border-color,box-shadow,background-color,transform] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] focus-within:border-default-300 focus-within:shadow-[0_0_0_3px_color-mix(in_oklab,var(--foreground)_8%,transparent)]'
 const fieldInputClass = 'min-w-0 flex-1 bg-transparent outline-none placeholder:text-field-placeholder disabled:opacity-60'
-const cardBaseClass = 'rounded-xl border border-default-200 bg-content1/94 shadow-[0_1px_1px_hsl(var(--shadow-color)/0.05),0_18px_42px_hsl(var(--shadow-color)/0.045)]'
+const cardBaseClass = 'gap-0 rounded-xl border border-default-200 bg-content1/94 p-0 shadow-[0_1px_1px_hsl(var(--shadow-color)/0.05),0_18px_42px_hsl(var(--shadow-color)/0.045)]'
 
 export function useDisclosure(options: AnyProps = {}) {
   const [isOpen, setIsOpen] = useState(Boolean(options.defaultOpen ?? options.isOpen))
@@ -315,9 +330,41 @@ export const Card = React.forwardRef<HTMLElement, CardProps>(function Card(
   )
 })
 
-export const CardHeader = compat(H.Card.Header ?? H.CardHeader)
-export const CardBody = compat(H.Card.Content ?? H.CardContent)
-export const CardFooter = compat(H.Card.Footer ?? H.CardFooter)
+export function CardHeader({ className, children, ...props }: AnyProps) {
+  const Component = H.Card.Header ?? H.CardHeader
+  return (
+    <Component
+      className={cn(sectionPadding('px-4 sm:px-5', 'pt-4 pb-3 sm:pt-5', className), sectionGap('gap-2', className), className)}
+      {...props}
+    >
+      {children}
+    </Component>
+  )
+}
+
+export function CardBody({ className, children, ...props }: AnyProps) {
+  const Component = H.Card.Content ?? H.CardContent
+  return (
+    <Component
+      className={cn(sectionPadding('px-4 sm:px-5', 'py-4 sm:py-5', className), sectionGap('gap-3', className), className)}
+      {...props}
+    >
+      {children}
+    </Component>
+  )
+}
+
+export function CardFooter({ className, children, ...props }: AnyProps) {
+  const Component = H.Card.Footer ?? H.CardFooter
+  return (
+    <Component
+      className={cn(sectionPadding('px-4 sm:px-5', 'pt-3 pb-4 sm:pb-5', className), sectionGap('gap-2', className), className)}
+      {...props}
+    >
+      {children}
+    </Component>
+  )
+}
 export const Divider = compat(H.Separator)
 export const Skeleton = compat(H.Skeleton)
 export const ScrollShadow = compat(H.ScrollShadow)
@@ -374,6 +421,9 @@ type InputProps = Omit<UnknownBaseProps, 'children'> & {
   isDisabled?: boolean
   disabled?: boolean
   isClearable?: boolean
+  size?: string
+  variant?: string
+  radius?: string
 }
 
 export const Input = React.forwardRef<HTMLInputElement, InputProps>(function Input(
@@ -394,11 +444,18 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(function Inp
     isDisabled,
     disabled,
     isClearable,
+    size,
+    variant,
+    radius,
     'aria-label': ariaLabel,
     ...props
   },
   ref,
 ) {
+  void size
+  void variant
+  void radius
+
   const stringValue = value == null ? '' : String(value)
   const resolvedAriaLabel = fieldAriaLabel(label, ariaLabel, props.placeholder, isRequired)
 
@@ -407,7 +464,7 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(function Inp
       {label ? <span className="text-sm font-medium text-foreground">{label}{isRequired ? ' *' : ''}</span> : null}
       <div className={cn(fieldWrapperClass, slotClass(classNames, 'inputWrapper'))}>
         {startContent}
-        <H.Input
+        <input
           ref={ref}
           className={cn(fieldInputClass, slotClass(classNames, 'input'))}
           value={stringValue}
@@ -449,6 +506,9 @@ type TextareaProps = Omit<UnknownBaseProps, 'children'> & {
   isRequired?: boolean
   isDisabled?: boolean
   disabled?: boolean
+  size?: string
+  variant?: string
+  radius?: string
 }
 
 export const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(function Textarea(
@@ -467,21 +527,28 @@ export const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(fun
     isRequired,
     isDisabled,
     disabled,
+    size,
+    variant,
+    radius,
     style,
     'aria-label': ariaLabel,
     ...props
   },
   ref,
 ) {
+  void size
+  void variant
+  void radius
+
   const maxHeight = typeof maxRows === 'number' ? `${maxRows * 1.5 + 1}rem` : undefined
   const resolvedAriaLabel = fieldAriaLabel(label, ariaLabel, props.placeholder, isRequired)
 
   return (
     <label className={cn('flex w-full flex-col gap-1.5', slotClass(classNames), className)}>
       {label ? <span className="text-sm font-medium text-foreground">{label}{isRequired ? ' *' : ''}</span> : null}
-      <H.TextArea
+      <textarea
         ref={ref}
-        className={cn('min-h-20 w-full resize-y rounded-md border border-default-200 bg-field px-3 py-2 text-sm text-field-foreground shadow-[0_1px_0_hsl(var(--shadow-color)/0.04)] outline-none transition-[border-color,box-shadow,background-color] duration-200 ease-[cubic-bezier(0.32,0.72,0,1)] placeholder:text-field-placeholder focus:border-default-300 focus:shadow-[0_0_0_3px_color-mix(in_oklab,var(--foreground)_8%,transparent)] disabled:opacity-60', slotClass(classNames, 'input'))}
+        className={cn('min-h-20 w-full resize-y rounded-md border border-default-200 bg-field px-3 py-2 text-sm text-field-foreground shadow-[0_1px_0_hsl(var(--shadow-color)/0.04)] outline-none transition-[border-color,box-shadow,background-color] duration-200 ease-[cubic-bezier(0.32,0.72,0,1)] placeholder:text-field-placeholder focus:border-default-300 focus:shadow-[0_0_0_3px_color-mix(in_oklab,var(--foreground)_8%,transparent)] disabled:opacity-60', slotClass(classNames, 'inputWrapper'), slotClass(classNames, 'input'))}
         rows={minRows}
         value={value ?? ''}
         aria-label={resolvedAriaLabel}
