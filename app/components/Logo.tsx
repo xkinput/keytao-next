@@ -17,7 +17,7 @@ export default function Logo({ className = '', size = 40 }: LogoProps) {
         className="rounded-md"
         priority
       />
-      <div className="flex flex-col leading-none">
+      <div className="flex flex-col gap-0.5 leading-none">
         <span className="text-[17px] font-semibold tracking-normal text-foreground">键道</span>
         <span className="text-[9px] font-semibold uppercase tracking-normal text-default-500">KeyTao</span>
       </div>
