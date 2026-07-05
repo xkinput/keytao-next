@@ -22,6 +22,7 @@ type ClassNames = string | Record<string, string | undefined> | undefined
 type SelectionKeys = 'all' | Set<React.Key>
 
 const OverlayCloseContext = React.createContext<(() => void) | null>(null)
+const ModalCompatContext = React.createContext<{ size?: string; hasWrapperSizing?: boolean }>({})
 const TableColumnCountContext = React.createContext(1)
 
 function cn(...values: Array<string | false | null | undefined>) {
@@ -83,6 +84,43 @@ function fieldRootClass(className: string | undefined, classNames: ClassNames) {
 function selectRootClass(className: string | undefined, classNames: ClassNames) {
   const rootClass = cn(slotClass(classNames), className)
   return cn('min-w-0', !hasFieldSizingIntent(rootClass) && 'w-full', rootClass)
+}
+
+function hasModalSizingIntent(className: string | undefined) {
+  if (!className) return false
+
+  return hasClassToken(className, /^!?(?:w|min-w|max-w)(?:-|$)|^\[width:|^\[max-width:/)
+}
+
+function modalDialogSizeClass(size: unknown) {
+  switch (String(size || 'md')) {
+    case 'xs':
+      return 'w-[min(calc(100vw-2rem),20rem)] sm:w-[min(calc(100vw-5rem),20rem)] !max-w-none'
+    case 'sm':
+      return 'w-[min(calc(100vw-2rem),24rem)] sm:w-[min(calc(100vw-5rem),24rem)] !max-w-none'
+    case 'lg':
+      return 'w-[min(calc(100vw-2rem),32rem)] sm:w-[min(calc(100vw-5rem),32rem)] !max-w-none'
+    case 'xl':
+      return 'w-[min(calc(100vw-2rem),34rem)] sm:w-[min(calc(100vw-5rem),34rem)] !max-w-none'
+    case '2xl':
+      return 'w-[min(calc(100vw-2rem),38rem)] sm:w-[min(calc(100vw-5rem),38rem)] !max-w-none'
+    case '3xl':
+      return 'w-[min(calc(100vw-2rem),43rem)] sm:w-[min(calc(100vw-5rem),43rem)] !max-w-none'
+    case '4xl':
+      return 'w-[min(calc(100vw-2rem),50rem)] sm:w-[min(calc(100vw-5rem),50rem)] !max-w-none'
+    case '5xl':
+      return 'w-[min(calc(100vw-2rem),56rem)] sm:w-[min(calc(100vw-5rem),56rem)] !max-w-none'
+    case 'cover':
+    case 'full':
+      return undefined
+    case 'md':
+    default:
+      return 'w-[min(calc(100vw-2rem),28rem)] sm:w-[min(calc(100vw-5rem),28rem)] !max-w-none'
+  }
+}
+
+function herouiModalSize(size: unknown) {
+  return ['cover', 'full', 'lg', 'md', 'sm', 'xs'].includes(String(size)) ? size : 'md'
 }
 
 function firstSelectedKey(selectedKeys: unknown): React.Key | undefined {
@@ -722,21 +760,25 @@ export function DropdownItem({ children, onPress, textValue, className, ...props
 export function Modal({ children, className, classNames, size, scrollBehavior, placement, backdrop, ...props }: AnyProps) {
   const [isOpen, setOpen] = useControlledOpen(props)
   const close = useCallback(() => setOpen(false), [setOpen])
+  const wrapperClass = cn(slotClass(classNames, 'wrapper'), className)
+  const compatSize = typeof size === 'string' ? size : undefined
 
   return (
     <OverlayCloseContext.Provider value={close}>
-      <H.Modal isOpen={isOpen} onOpenChange={setOpen}>
-        <H.Modal.Backdrop variant={backdrop === 'blur' ? 'blur' : 'opaque'} className={slotClass(classNames, 'backdrop')}>
-          <H.Modal.Container
-            size={size}
-            scroll={scrollBehavior}
-            placement={placement}
-            className={cn(slotClass(classNames, 'wrapper'), className)}
-          >
-            {children}
-          </H.Modal.Container>
-        </H.Modal.Backdrop>
-      </H.Modal>
+      <ModalCompatContext.Provider value={{ size: compatSize, hasWrapperSizing: hasModalSizingIntent(wrapperClass) }}>
+        <H.Modal isOpen={isOpen} onOpenChange={setOpen}>
+          <H.Modal.Backdrop variant={backdrop === 'blur' ? 'blur' : 'opaque'} className={slotClass(classNames, 'backdrop')}>
+            <H.Modal.Container
+              size={herouiModalSize(size)}
+              scroll={scrollBehavior}
+              placement={placement}
+              className={wrapperClass}
+            >
+              {children}
+            </H.Modal.Container>
+          </H.Modal.Backdrop>
+        </H.Modal>
+      </ModalCompatContext.Provider>
     </OverlayCloseContext.Provider>
   )
 }
@@ -747,8 +789,14 @@ type OverlayContentProps = Omit<UnknownBaseProps, 'children'> & {
 
 export function ModalContent({ children, className, ...props }: OverlayContentProps) {
   const close = useContext(OverlayCloseContext) ?? (() => undefined)
+  const { size, hasWrapperSizing } = useContext(ModalCompatContext)
   const content = typeof children === 'function' ? children(close) : children
-  return <H.Modal.Dialog className={className} {...props}>{content}</H.Modal.Dialog>
+  const shouldUseCompatSize = !hasWrapperSizing && !hasModalSizingIntent(className)
+  return (
+    <H.Modal.Dialog className={cn(shouldUseCompatSize && modalDialogSizeClass(size), className)} {...props}>
+      {content}
+    </H.Modal.Dialog>
+  )
 }
 
 export const ModalHeader = compat(H.Modal.Header ?? H.ModalHeader)

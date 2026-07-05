@@ -1142,7 +1142,7 @@ export default function CreatePRModal({
                                   <>
                                     {act === 'Change' ? (
                                       <>
-                                        <div className="grid gap-2 xl:grid-cols-[minmax(0,1fr)_minmax(14rem,24rem)]">
+                                        <div className="grid gap-2 xl:grid-cols-[minmax(0,1fr)_minmax(13rem,18rem)]">
                                           <div className="grid min-w-0 gap-2 md:grid-cols-[7rem_minmax(0,1fr)_minmax(0,1fr)]">
                                             <Controller
                                               name={`items.${index}.type`}
@@ -1260,7 +1260,7 @@ export default function CreatePRModal({
                                       </div>
                                     ) : (
                                       /* Create */
-                                      <div className="grid gap-2 xl:grid-cols-[minmax(0,1fr)_minmax(14rem,24rem)]">
+                                      <div className="grid gap-2 xl:grid-cols-[minmax(0,1fr)_minmax(13rem,18rem)]">
                                         <div className="grid min-w-0 gap-2 md:grid-cols-[7rem_minmax(0,1fr)]">
                                           <Controller
                                             name={`items.${index}.type`}

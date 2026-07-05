@@ -151,6 +151,9 @@ test.describe('认证与账号功能 e2e 覆盖', () => {
 
     const dialog = page.getByRole('dialog').filter({ hasText: '编辑修改提议' })
     await expect(dialog).toBeVisible()
+    const dialogBox = await dialog.boundingBox()
+    expect(dialogBox, 'draft edit dialog should have layout bounds').not.toBeNull()
+    expect(dialogBox!.width, 'draft edit dialog should stay visually contained').toBeLessThanOrEqual(880)
 
     const expectFieldInViewport = async (label: RegExp, minWidth = 80) => {
       const field = dialog.getByLabel(label)
@@ -168,5 +171,20 @@ test.describe('认证与账号功能 e2e 覆盖', () => {
     await expectFieldInViewport(/新词/)
     await expectFieldInViewport(/编码/)
     await expectFieldInViewport(/权重/, 48)
+  })
+
+  test('讨论功能: 新建讨论弹窗保持紧凑宽度', async ({ page }) => {
+    const user = await createE2EUser({ role: 'normal' })
+    await authenticatePage(page, user)
+    await page.setViewportSize({ width: 1280, height: 720 })
+
+    await page.goto('/issues')
+    await page.getByRole('button', { name: '新建讨论' }).click()
+
+    const dialog = page.getByRole('dialog').filter({ hasText: '新建讨论' })
+    await expect(dialog).toBeVisible()
+    const box = await dialog.boundingBox()
+    expect(box, 'create issue dialog should have layout bounds').not.toBeNull()
+    expect(box!.width, 'create issue dialog should not be overly wide').toBeLessThanOrEqual(660)
   })
 })
