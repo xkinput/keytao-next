@@ -8,7 +8,7 @@ import {
   DropdownTrigger,
   DropdownMenu,
   DropdownItem
-} from '@heroui/react'
+} from '@/lib/heroui-compat'
 import { MoreVertical, Trash2, Undo2 } from 'lucide-react'
 import { useAuthStore } from '@/lib/store/auth'
 import { useUIStore } from '@/lib/store/ui'
@@ -101,7 +101,7 @@ export default function BatchActionsDropdown({
           isIconOnly
           size={size}
           variant="light"
-          onClick={(e) => {
+          onClick={(e: React.MouseEvent<HTMLElement>) => {
             e.preventDefault()
             e.stopPropagation()
           }}

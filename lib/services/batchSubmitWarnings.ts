@@ -17,8 +17,11 @@ export interface BatchSubmitWarning {
   id: string
   word: string
   code: string
-  weight: number
+  weight?: number
   impact?: string
+  warningType?: 'duplicate_code' | 'multiple_code' | 'skipped_candidate_slot'
+  skippedCode?: string
+  skippedCodes?: string[]
 }
 
 export function buildBatchSubmitWarnings(
@@ -55,6 +58,18 @@ export function formatBatchSubmitWarnings(
     const itemIndex = items.findIndex(item => item.id === warning.id)
     const item = itemIndex >= 0 ? items[itemIndex] : undefined
     const displayIndex = itemIndex >= 0 ? itemIndex + 1 : fallbackIndex + 1
+    if (warning.warningType === 'skipped_candidate_slot') {
+      const skippedCode = warning.skippedCode || warning.skippedCodes?.[0] || ''
+      const requested = item ? `   请求词条: ${item.word} @ ${item.code}\n` : ''
+      const detail = warning.impact ||
+        `编码链中更短候选 "${skippedCode}" 仍是空位，不建议直接跳到更长编码 "${warning.code}"。`
+
+      return `▶ 项目 #${displayIndex} - 跳过编码空位警告:\n` +
+        requested +
+        `   ${detail}\n` +
+        `   ! 请确认是否要跳过编码 ${skippedCode} 直接继续。`
+    }
+
     const title = item?.action === 'Change' ? '修改重码/多编码警告' : '创建重码/多编码警告'
     const requested = item ? `   请求词条: ${item.word} @ ${item.code}\n` : ''
     const detail = warning.impact || `编码 "${warning.code}" 已被词条 "${warning.word}" 占用（权重: ${warning.weight}）`

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/auth'
 import { checkBatchConflictsWithWeight } from '@/lib/services/batchConflictService'
 import { buildBatchSubmitWarnings } from '@/lib/services/batchSubmitWarnings'
+import { buildSkippedCandidateSlotWarnings } from '@/lib/services/batchSkippedCodeWarnings'
 import { PhraseType } from '@/lib/constants/phraseTypes'
 
 interface PRItemInput {
@@ -53,8 +54,14 @@ export async function POST(request: NextRequest) {
     }
 
     // Use unified batch conflict detection service
-    const results = await checkBatchConflictsWithWeight(items)
-    const warnings = buildBatchSubmitWarnings(items, results)
+    const [results, skippedSlotWarnings] = await Promise.all([
+      checkBatchConflictsWithWeight(items),
+      buildSkippedCandidateSlotWarnings(items),
+    ])
+    const warnings = [
+      ...buildBatchSubmitWarnings(items, results),
+      ...skippedSlotWarnings,
+    ]
 
     return NextResponse.json({ results, warnings })
   } catch (error) {

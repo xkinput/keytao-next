@@ -11,7 +11,7 @@ import {
   Chip,
   useDisclosure,
   Input
-} from '@heroui/react'
+} from '@/lib/heroui-compat'
 import { useAuthStore } from '@/lib/store/auth'
 import { useAPI, apiRequest } from '@/lib/hooks/useSWR'
 import { mutate as globalMutate } from 'swr'
@@ -371,7 +371,7 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
                       <div className="flex items-center gap-2 flex-1">
                         <Input
                           value={batchName}
-                          onChange={(e) => setBatchName(e.target.value)}
+                          onChange={(e: React.ChangeEvent<HTMLInputElement>) => setBatchName(e.target.value)}
                           placeholder="输入批次名称"
                           className="flex-1"
                           autoFocus

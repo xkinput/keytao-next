@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import {
   Card, CardBody, CardHeader, Button, Input, Chip, Divider,
   Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, useDisclosure,
-} from '@heroui/react'
+} from '@/lib/heroui-compat'
 import { Code, Plus, Trash2, Copy, Check, Key } from 'lucide-react'
 import { useAPI, apiRequest } from '@/lib/hooks/useSWR'
 import { useAuthStore } from '@/lib/store/auth'
@@ -139,6 +139,7 @@ export default function DeveloperPage() {
                               isIconOnly
                               size="sm"
                               variant="light"
+                              aria-label={`复制 ${k.name}`}
                               onPress={() => handleCopy(k)}
                             >
                               {copiedId === k.id
@@ -157,6 +158,7 @@ export default function DeveloperPage() {
                           size="sm"
                           color="danger"
                           variant="light"
+                          aria-label={`删除 ${k.name}`}
                           isLoading={deletingId === k.id}
                           onPress={() => handleDelete(k.id)}
                         >
@@ -318,8 +320,8 @@ export default function DeveloperPage() {
               label="名称"
               placeholder="例如：我的脚本"
               value={newKeyName}
-              onChange={(e) => setNewKeyName(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewKeyName(e.target.value)}
+              onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => e.key === 'Enter' && handleCreate()}
               autoFocus
             />
           </ModalBody>

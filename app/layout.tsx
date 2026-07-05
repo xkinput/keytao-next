@@ -71,14 +71,14 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="zh-CN" suppressHydrationWarning>
-      {/* Cubism 2 runtime must be evaluated before pixi-live2d-display/cubism2 */}
-      <Script
-        src="https://cdn.jsdelivr.net/gh/dylanNew/live2d/webgl/Live2D/lib/live2d.min.js"
-        strategy="beforeInteractive"
-      />
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
+        {/* Cubism 2 runtime must be evaluated before pixi-live2d-display/cubism2 */}
+        <Script
+          src="https://cdn.jsdelivr.net/gh/dylanNew/live2d/webgl/Live2D/lib/live2d.min.js"
+          strategy="beforeInteractive"
+        />
         <Providers>
           <Navbar />
           {children}

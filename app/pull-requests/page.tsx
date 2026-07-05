@@ -11,7 +11,7 @@ import {
   Tabs,
   Tab,
   Pagination
-} from '@heroui/react'
+} from '@/lib/heroui-compat'
 import { RefreshCw, AlertTriangle, Link as LinkIcon } from 'lucide-react'
 import { useAPI } from '@/lib/hooks/useSWR'
 import { usePageFilterStore } from '@/lib/store/pageFilter'

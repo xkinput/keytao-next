@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { requireVerifiedBotUser } from '@/lib/botUserAuth'
 import { checkBatchConflictsWithWeight, recheckBatchConflicts } from '@/lib/services/batchConflictService'
 import { buildDependencies } from '@/lib/services/batchDependencyService'
+import { buildSkippedCandidateSlotWarnings } from '@/lib/services/batchSkippedCodeWarnings'
 import { PullRequestType } from '@prisma/client'
 import { PhraseType } from '@/lib/constants/phraseTypes'
 import type { BotCreatePRRequest, BotCreatePRResponse, BotConflictInfo, BotWarningInfo, BotDeleteNoteInfo } from '@/lib/types/bot'
@@ -124,6 +125,7 @@ export async function POST(request: NextRequest) {
 
     // Run conflict detection
     const results = await checkBatchConflictsWithWeight(validationItems)
+    const skippedSlotWarnings = await buildSkippedCandidateSlotWarnings(validationItems)
 
     // Categorize results: conflicts (真冲突) vs warnings (重码警告) vs notes (删除信息)
     const conflicts: BotConflictInfo[] = []
@@ -177,6 +179,19 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    for (const warning of skippedSlotWarnings) {
+      const index = validationItems.findIndex(item => item.id === warning.id)
+      if (index < 0) continue
+      warnings.push({
+        index,
+        item: items[index],
+        warningType: 'skipped_candidate_slot',
+        message: warning.impact || '跳过了编码链中的更短空位，不建议直接写入更长编码',
+        skippedCode: warning.skippedCode,
+        skippedCodes: warning.skippedCodes,
+      })
+    }
+
     // If there are true conflicts, reject immediately
     if (conflicts.length > 0) {
       return NextResponse.json<BotCreatePRResponse>(
@@ -195,7 +210,7 @@ export async function POST(request: NextRequest) {
         success: false,
         warnings,
         requiresConfirmation: true,
-        message: `存在 ${warnings.length} 个需要确认的警告（重码或多编码）`
+        message: `存在 ${warnings.length} 个需要确认的警告（重码、多编码或跳过编码空位）`
       }
       console.log('[Bot API] Returning warnings response:', JSON.stringify(responseData, null, 2))
       return NextResponse.json<BotCreatePRResponse>(responseData)

@@ -8,7 +8,7 @@ import {
   CardHeader,
   Chip,
   Divider
-} from '@heroui/react'
+} from '@/lib/heroui-compat'
 import { User, FileEdit, AlertTriangle } from 'lucide-react'
 import BatchActionsDropdown from './BatchActionsDropdown'
 import { BATCH_STATUS_MAP, STATUS_COLOR_MAP } from '@/lib/constants/status'

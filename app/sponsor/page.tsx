@@ -1,9 +1,10 @@
 'use client'
 
 import Image from 'next/image'
-import { Button, Link, Chip, Spinner } from '@heroui/react'
-import { Coffee, Github, Heart, ExternalLink } from 'lucide-react'
+import { Button, Link, Chip, Spinner } from '@/lib/heroui-compat'
+import { Coffee, Heart, ExternalLink } from 'lucide-react'
 import { useAPI } from '@/lib/hooks/useSWR'
+import { GithubLogo as Github } from '@/app/components/GithubLogo'
 
 interface SponsorItem {
   id: number

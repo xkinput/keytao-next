@@ -9,7 +9,7 @@ import {
   Button,
   Spinner,
   Chip
-} from '@heroui/react'
+} from '@/lib/heroui-compat'
 import { useAPI } from '@/lib/hooks/useSWR'
 import Link from 'next/link'
 import { PR_STATUS_MAP, STATUS_COLOR_MAP } from '@/lib/constants/status'

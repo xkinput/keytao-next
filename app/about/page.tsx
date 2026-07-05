@@ -1,11 +1,12 @@
 'use client'
 
-import { Button } from '@heroui/react'
-import { Github, ExternalLink, BookOpen, Bot, Users, Database, Edit3, GitPullRequest, MessageSquare, Sparkles } from 'lucide-react'
+import { Button } from '@/lib/heroui-compat'
+import { ExternalLink, BookOpen, Bot, Users, Database, Edit3, GitPullRequest, MessageSquare, Sparkles } from 'lucide-react'
 import Image from 'next/image'
 import Link from 'next/link'
 import { useKeytaoIntroStore } from '@/lib/store/keytaoIntro'
 import { KEYTAO_QQ_GROUP_URL } from '@/lib/constants/community'
+import { GithubLogo as Github } from '@/app/components/GithubLogo'
 
 const links = [
   {

@@ -79,4 +79,27 @@ describe('buildBatchSubmitWarnings', () => {
       '   ! 确认后将按批次净效果提交。',
     ])
   })
+
+  it('formats skipped candidate slot warnings', () => {
+    const items: BatchPRItem[] = [
+      { id: '1', action: 'Create', word: '跳码词', code: 'fmzlai', type: 'Phrase', weight: 100 },
+    ]
+    const warnings = [{
+      id: '1',
+      word: '跳码词',
+      code: 'fmzlai',
+      weight: 100,
+      warningType: 'skipped_candidate_slot' as const,
+      skippedCode: 'fmzla',
+      skippedCodes: ['fmzla'],
+      impact: '编码链中更短候选 "fmzla" 仍是空位，你正在跳过它直接把「跳码词」加到更长编码 "fmzlai"。',
+    }]
+
+    expect(formatBatchSubmitWarnings(warnings, items)).toEqual([
+      '▶ 项目 #1 - 跳过编码空位警告:\n' +
+      '   请求词条: 跳码词 @ fmzlai\n' +
+      '   编码链中更短候选 "fmzla" 仍是空位，你正在跳过它直接把「跳码词」加到更长编码 "fmzlai"。\n' +
+      '   ! 请确认是否要跳过编码 fmzla 直接继续。',
+    ])
+  })
 })

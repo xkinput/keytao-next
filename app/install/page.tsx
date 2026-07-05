@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Button, Card, CardBody, Code, Listbox, ListboxItem, Progress, Alert, Link } from '@heroui/react'
+import { Button, Card, CardBody, Code, Listbox, ListboxItem, Progress, Alert, Link } from '@/lib/heroui-compat'
 import { Folder, File, Apple, Monitor, Check, Download, RefreshCw, Smartphone, TabletSmartphone, Lightbulb, Package, ClipboardList } from 'lucide-react'
 import { unzip } from 'fflate'
 

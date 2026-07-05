@@ -18,6 +18,9 @@ docker compose -f docker-compose.test.yml up -d
 # 运行所有测试
 pnpm test
 
+# 运行完整浏览器 E2E 测试
+pnpm test:e2e
+
 # 监听模式（开发时推荐）
 pnpm test:watch
 
@@ -27,6 +30,39 @@ pnpm test:ui
 # 生成覆盖率报告
 pnpm test:coverage
 ```
+
+### 2.1 运行 E2E 测试
+
+E2E 测试使用 Playwright，会自动启动本地 Next.js 开发服务器：
+
+```bash
+pnpm test:e2e
+```
+
+首次在新机器运行时，先安装 Chromium：
+
+```bash
+pnpm exec playwright install chromium
+```
+
+如果要测试已经启动的站点，可以指定地址：
+
+```bash
+E2E_BASE_URL=http://127.0.0.1:3000 pnpm test:e2e
+```
+
+E2E 覆盖的功能名：
+
+- 公开页面：首页改词、讨论、修改提议、词库管理、GitHub 同步、赞助、安装、练习、关于、登录、注册
+- 响应式导航：移动端菜单和核心入口
+- 认证功能：注册、退出、重新登录
+- 账号功能：资料页、数据统计、修改密码入口
+- 个人词库：新增、编辑、删除词条
+- 开发者功能：创建、删除 API Key
+- 批次功能：创建批次、添加修改提议
+- 公开 API：词库、批次、提议、讨论、同步、赞助接口
+- 权限边界：未登录、普通用户、ROOT 管理员访问控制
+- 开发者 API：`X-API-Key` 调用 v1 词库查询
 
 ### 3. 停止测试数据库
 
@@ -43,6 +79,13 @@ lib/test/
 ├── setup.ts       # 全局测试设置，数据库初始化和清理
 ├── helpers.ts     # 测试辅助函数
 └── fixtures.ts    # 测试数据fixtures
+
+tests/e2e/
+├── global-setup.ts                 # E2E 迁移、角色初始化、测试数据清理
+├── helpers/e2e-data.ts             # E2E 用户、登录态、种子数据辅助函数
+├── public-pages.spec.ts            # 公开页面与移动导航 smoke 流程
+├── auth-and-account.spec.ts        # 认证、账号、个人词库、开发者页面流程
+└── api-and-permissions.spec.ts     # API、权限、批次、讨论流程
 
 app/api/
 ├── pull-requests/

@@ -129,6 +129,7 @@ model User {
   batches              Batch[]       @relation("UserBatches")
   linkKeys             LinkKey[]     @relation("UserLinkKeys")
   apiKeys              ApiKey[]      @relation("UserApiKeys")
+  userDictionaryEntries UserDictionaryEntry[] @relation("UserDictionaryEntries")
 
   @@map("users")
 }
@@ -245,6 +246,36 @@ model Phrase {
 
   @@unique([word, code])
   @@map("phrases")
+}
+
+/// User private dictionary entry
+model UserDictionaryEntry {
+  id       Int      @id @default(autoincrement())
+  createAt DateTime @default(now())
+  updateAt DateTime @updatedAt
+
+  /// Word text
+  word String
+  /// Input code
+  code String
+  /// Entry type
+  type PhraseType @default(Phrase)
+  /// Candidate weight
+  weight Int @default(0)
+  /// User note
+  remark String?
+  /// Prefer this entry over public entries with the same word and type.
+  replacePublic Boolean @default(true)
+
+  // Relations
+  user   User @relation("UserDictionaryEntries", fields: [userId], references: [id], onDelete: Cascade)
+  userId Int
+
+  @@unique([userId, word, code, type])
+  @@index([userId])
+  @@index([userId, code])
+  @@index([userId, word, type])
+  @@map("user_dictionary_entries")
 }
 
 /// 标签 - 用于搜索关联词条

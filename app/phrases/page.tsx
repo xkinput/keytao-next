@@ -14,7 +14,7 @@ import {
   Select,
   SelectItem,
   Button
-} from '@heroui/react'
+} from '@/lib/heroui-compat'
 import { RefreshCw, Download } from 'lucide-react'
 import { useAPI, apiDownload } from '@/lib/hooks/useSWR'
 import { useIsAdmin } from '@/lib/hooks/useAuth'

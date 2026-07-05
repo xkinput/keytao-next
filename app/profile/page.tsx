@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { Card, CardBody, CardHeader, Button, Input, Divider, Chip } from '@heroui/react'
+import { Card, CardBody, CardHeader, Button, Input, Divider, Chip } from '@/lib/heroui-compat'
 import { useAPI, apiRequest } from '@/lib/hooks/useSWR'
 import { useAuthStore } from '@/lib/store/auth'
 import { BarChart3, FileText, GitPullRequest, Lock, Calendar, Clock, CheckCircle } from 'lucide-react'
@@ -227,7 +227,7 @@ export default function ProfilePage() {
                     label="昵称"
                     placeholder="请输入昵称"
                     value={editNickname}
-                    onChange={(e) => setEditNickname(e.target.value)}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEditNickname(e.target.value)}
                     isDisabled={isSavingProfile}
                   />
                   <Input
@@ -235,7 +235,7 @@ export default function ProfilePage() {
                     label="邮箱"
                     placeholder="请输入邮箱"
                     value={editEmail}
-                    onChange={(e) => setEditEmail(e.target.value)}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEditEmail(e.target.value)}
                     isDisabled={isSavingProfile}
                   />
 
@@ -394,7 +394,7 @@ export default function ProfilePage() {
                   label="当前密码"
                   placeholder="请输入当前密码"
                   value={currentPassword}
-                  onChange={(e) => setCurrentPassword(e.target.value)}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCurrentPassword(e.target.value)}
                   isDisabled={isChangingPassword}
                 />
                 <Input
@@ -402,7 +402,7 @@ export default function ProfilePage() {
                   label="新密码"
                   placeholder="请输入新密码（至少6个字符）"
                   value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value)}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewPassword(e.target.value)}
                   isDisabled={isChangingPassword}
                 />
                 <Input
@@ -410,7 +410,7 @@ export default function ProfilePage() {
                   label="确认新密码"
                   placeholder="请再次输入新密码"
                   value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setConfirmPassword(e.target.value)}
                   isDisabled={isChangingPassword}
                 />
 

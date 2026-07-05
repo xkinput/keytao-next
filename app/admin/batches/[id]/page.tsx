@@ -10,7 +10,7 @@ import {
   Spinner,
   Chip,
   Textarea
-} from '@heroui/react'
+} from '@/lib/heroui-compat'
 import { AlertTriangle, Bot, CheckCircle2, RefreshCw, Search } from 'lucide-react'
 import BatchPreview from '@/app/components/BatchPreview'
 import { useAPI, apiRequest } from '@/lib/hooks/useSWR'

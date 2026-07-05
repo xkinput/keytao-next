@@ -11,7 +11,7 @@ import {
   Button,
   Input,
   Textarea
-} from '@heroui/react'
+} from '@/lib/heroui-compat'
 import { useIsAuthenticated } from '@/lib/hooks/useAuth'
 import { apiRequest } from '@/lib/hooks/useSWR'
 

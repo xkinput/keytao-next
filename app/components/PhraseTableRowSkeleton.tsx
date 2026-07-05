@@ -1,4 +1,4 @@
-import { TableRow, TableCell, Skeleton } from '@heroui/react'
+import { TableRow, TableCell, Skeleton } from '@/lib/heroui-compat'
 
 export default function PhraseTableRowSkeleton() {
   return (

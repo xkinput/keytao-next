@@ -10,10 +10,11 @@ import {
   Tab,
   Input,
   Pagination
-} from '@heroui/react'
+} from '@/lib/heroui-compat'
 import { RefreshCw } from 'lucide-react'
 import { useAuthStore } from '@/lib/store/auth'
 import { useAPI, apiRequest } from '@/lib/hooks/useSWR'
+import { useClientReady } from '@/lib/hooks/useClientReady'
 import { usePageFilterStore } from '@/lib/store/pageFilter'
 import BatchCard from '@/app/components/BatchCard'
 import BatchCardSkeleton from '@/app/components/BatchCardSkeleton'
@@ -68,7 +69,8 @@ interface BatchesResponse {
 export default function BatchesPage() {
   const router = useRouter()
   const isAuthenticated = useAuthStore(state => state.isAuthenticated)
-  const isAuthenticatedValue = isAuthenticated()
+  const isClientReady = useClientReady()
+  const isAuthenticatedValue = isClientReady && isAuthenticated()
   const { getFilter, setFilter, getPage, setPage: setStorePage } = usePageFilterStore()
   const [status, setStatus] = useState<string>(() => getFilter('/', 'all'))
   const [page, setPage] = useState(() => getPage('/', 1))

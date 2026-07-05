@@ -3,6 +3,7 @@ import { getSession } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { checkBatchConflictsWithWeight } from '@/lib/services/batchConflictService'
 import { buildBatchSubmitWarnings } from '@/lib/services/batchSubmitWarnings'
+import { buildSkippedCandidateSlotWarnings } from '@/lib/services/batchSkippedCodeWarnings'
 import { PhraseType } from '@/lib/constants/phraseTypes'
 
 // POST /api/batches/:id/submit - Submit batch for review
@@ -84,12 +85,15 @@ export async function POST(
     }
 
     if (!confirmed) {
-      const warnings = buildBatchSubmitWarnings(items, results)
+      const warnings = [
+        ...buildBatchSubmitWarnings(items, results),
+        ...await buildSkippedCandidateSlotWarnings(items),
+      ]
 
       if (warnings.length > 0) {
         return NextResponse.json(
           {
-            error: `批次中存在 ${warnings.length} 个重码/多编码警告，确认后可继续提交`,
+            error: `批次中存在 ${warnings.length} 个重码/多编码/跳过编码空位警告，确认后可继续提交`,
             warnings,
             requiresConfirmation: true,
           },

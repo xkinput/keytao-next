@@ -1,0 +1,959 @@
+'use client'
+
+import React, { useCallback, useContext, useMemo, useState } from 'react'
+import * as Hero from '@heroui/react'
+
+const H = Hero as Record<string, any>
+
+type RenderChild = React.ReactNode | ((...args: any[]) => React.ReactNode)
+type AnyProps = {
+  children?: RenderChild
+  className?: string
+  classNames?: ClassNames
+  [key: string]: any
+}
+type UnknownBaseProps = {
+  children?: React.ReactNode
+  className?: string
+  classNames?: ClassNames
+  [key: string]: any
+}
+type ClassNames = string | Record<string, string | undefined> | undefined
+type SelectionKeys = 'all' | Set<React.Key>
+
+const OverlayCloseContext = React.createContext<(() => void) | null>(null)
+const TableColumnCountContext = React.createContext(1)
+
+function cn(...values: Array<string | false | null | undefined>) {
+  return values.filter(Boolean).join(' ')
+}
+
+function compat(Component: any) {
+  return function CompatComponent(props: AnyProps) {
+    return <Component {...props} />
+  }
+}
+
+function slotClass(classNames: ClassNames, slot?: string) {
+  if (!classNames) return undefined
+  if (typeof classNames === 'string') return slot ? undefined : classNames
+  return slot ? classNames[slot] : classNames.base
+}
+
+function flatClassNames(classNames: ClassNames) {
+  if (!classNames) return undefined
+  if (typeof classNames === 'string') return classNames
+  return Object.values(classNames).filter(Boolean).join(' ')
+}
+
+function firstSelectedKey(selectedKeys: unknown): React.Key | undefined {
+  if (!selectedKeys || selectedKeys === 'all') return undefined
+  if (selectedKeys instanceof Set) return Array.from(selectedKeys)[0] as React.Key | undefined
+  if (Array.isArray(selectedKeys)) return selectedKeys[0] as React.Key | undefined
+  if (typeof selectedKeys === 'string' || typeof selectedKeys === 'number') return selectedKeys
+  return undefined
+}
+
+function emitSelection(onSelectionChange: ((keys: SelectionKeys) => void) | undefined, key: React.Key | null) {
+  if (!onSelectionChange || key == null) return
+  onSelectionChange(new Set([key]))
+}
+
+function mapStatusColor(color?: string) {
+  if (color === 'primary') return 'accent'
+  if (color === 'secondary') return 'default'
+  return color
+}
+
+function mapButtonVariant(color?: string, variant?: string) {
+  if (color === 'danger') return variant === 'flat' ? 'danger-soft' : 'danger'
+  if (variant === 'bordered') return 'outline'
+  if (variant === 'light') return 'ghost'
+  if (variant === 'flat' || variant === 'faded') return color === 'primary' ? 'primary' : 'secondary'
+  if (variant === 'ghost') return 'ghost'
+  if (color === 'primary') return 'primary'
+  return 'secondary'
+}
+
+function mapSoftVariant(variant?: string) {
+  if (variant === 'flat' || variant === 'faded') return 'soft'
+  if (variant === 'bordered') return 'secondary'
+  if (variant === 'light') return 'tertiary'
+  return variant
+}
+
+function keyedChildren(children: React.ReactNode) {
+  return React.Children.map(children, (child) => {
+    if (!React.isValidElement<AnyProps>(child)) return child
+    const id = child.props.id ?? child.props.value ?? (child.key == null ? undefined : String(child.key))
+    return React.cloneElement(child, id == null ? undefined : ({ id } as Partial<AnyProps>))
+  })
+}
+
+function useControlledOpen(props: AnyProps) {
+  const { isOpen, defaultOpen } = props
+  const onOpenChange = typeof props.onOpenChange === 'function' ? props.onOpenChange as (open: boolean) => void : undefined
+  const onClose = typeof props.onClose === 'function' ? props.onClose as () => void : undefined
+  const [localOpen, setLocalOpen] = useState(Boolean(defaultOpen))
+  const controlled = typeof isOpen === 'boolean'
+  const open = controlled ? isOpen : localOpen
+  const setOpen = useCallback((nextOpen: boolean) => {
+    if (!controlled) setLocalOpen(nextOpen)
+    onOpenChange?.(nextOpen)
+    if (!nextOpen) onClose?.()
+  }, [controlled, onClose, onOpenChange])
+
+  return [open, setOpen] as const
+}
+
+function normalizeReactKey(key: React.Key | null, fallback: React.Key): React.Key {
+  if (key == null) return fallback
+  const value = String(key)
+  if (value.startsWith('.$')) return value.slice(2)
+  if (value.startsWith('.')) return value.slice(1)
+  return key
+}
+
+function selectedClass(isSelected: boolean, selected: string, idle: string) {
+  return isSelected ? selected : idle
+}
+
+export function useDisclosure(options: AnyProps = {}) {
+  const [isOpen, setIsOpen] = useState(Boolean(options.defaultOpen ?? options.isOpen))
+  const setOpen = useCallback((nextOpen: boolean) => {
+    setIsOpen(nextOpen)
+    if (typeof options.onChange === 'function') options.onChange(nextOpen)
+    if (nextOpen && typeof options.onOpen === 'function') options.onOpen()
+    if (!nextOpen && typeof options.onClose === 'function') options.onClose()
+  }, [options])
+
+  return {
+    isOpen,
+    onOpen: () => setOpen(true),
+    onClose: () => setOpen(false),
+    onOpenChange: (nextOpen?: boolean) => setOpen(typeof nextOpen === 'boolean' ? nextOpen : !isOpen),
+    isControlled: false,
+  }
+}
+
+export function HeroUIProvider({ children }: { children: React.ReactNode }) {
+  return <>{children}</>
+}
+
+type ButtonProps = Omit<UnknownBaseProps, 'children'> & {
+  children?: React.ReactNode
+  color?: string
+  variant?: string
+  isLoading?: boolean
+  isDisabled?: boolean
+  disabled?: boolean
+  startContent?: React.ReactNode
+  endContent?: React.ReactNode
+  spinner?: React.ReactNode
+  as?: React.ElementType
+  href?: string
+  target?: string
+  rel?: string
+  onPress?: (event?: unknown) => void
+  onClick?: React.MouseEventHandler<HTMLElement>
+}
+
+export const Button = React.forwardRef<HTMLElement, ButtonProps>(function Button(
+  {
+    children,
+    className,
+    color,
+    variant,
+    isLoading,
+    isDisabled,
+    disabled,
+    startContent,
+    endContent,
+    spinner,
+    as: Component,
+    onPress,
+    onClick,
+    href,
+    target,
+    rel,
+    ...props
+  },
+  ref,
+) {
+  const disabledValue = Boolean(isDisabled ?? disabled ?? isLoading)
+  const content = (
+    <>
+      {isLoading ? spinner ?? <H.Spinner size="sm" color="current" /> : startContent}
+      {children}
+      {endContent}
+    </>
+  )
+
+  if (Component && Component !== H.Button) {
+    const Element = Component
+    return (
+      <Element
+        ref={ref}
+        className={className}
+        href={href}
+        target={target}
+        rel={rel}
+        aria-disabled={disabledValue || undefined}
+        onClick={disabledValue ? undefined : onClick ?? (() => onPress?.())}
+        {...props}
+      >
+        {content}
+      </Element>
+    )
+  }
+
+  return (
+    <H.Button
+      ref={ref}
+      className={className}
+      isDisabled={disabledValue}
+      disabled={disabledValue}
+      variant={mapButtonVariant(color, variant)}
+      onPress={onPress}
+      onClick={onClick}
+      href={href}
+      target={target}
+      rel={rel}
+      {...props}
+    >
+      {content}
+    </H.Button>
+  )
+})
+
+export function Chip({ children, className, color, variant, startContent, endContent, ...props }: AnyProps) {
+  return (
+    <H.Chip
+      className={className}
+      color={mapStatusColor(color)}
+      variant={mapSoftVariant(variant)}
+      {...props}
+    >
+      {startContent}
+      {children}
+      {endContent}
+    </H.Chip>
+  )
+}
+
+export function Spinner({ color, ...props }: AnyProps) {
+  return <H.Spinner color={mapStatusColor(color)} {...props} />
+}
+
+export function Progress({ color, className, ...props }: AnyProps) {
+  return (
+    <H.ProgressBar color={mapStatusColor(color)} className={className} {...props}>
+      <H.ProgressBar.Track>
+        <H.ProgressBar.Fill />
+      </H.ProgressBar.Track>
+    </H.ProgressBar>
+  )
+}
+
+export function Alert({ children, color, title, description, className, classNames, variant, hideIcon, ...props }: AnyProps) {
+  void variant
+  void hideIcon
+
+  return (
+    <H.Alert status={mapStatusColor(color)} className={cn(slotClass(classNames), className)} {...props}>
+      <H.Alert.Content className={slotClass(classNames, 'mainWrapper')}>
+        {title ? <H.Alert.Title>{title}</H.Alert.Title> : null}
+        {description ? <H.Alert.Description>{description}</H.Alert.Description> : null}
+        {children}
+      </H.Alert.Content>
+    </H.Alert>
+  )
+}
+
+type CardProps = Omit<UnknownBaseProps, 'children'> & {
+  children?: React.ReactNode
+  isPressable?: boolean
+  onPress?: React.MouseEventHandler<HTMLElement>
+  onClick?: React.MouseEventHandler<HTMLElement>
+  onPointerDown?: React.PointerEventHandler<HTMLElement>
+  as?: React.ElementType
+  href?: string
+}
+
+export const Card = React.forwardRef<HTMLElement, CardProps>(function Card(
+  { children, className, isPressable, onPress, onClick, as: Component, href, ...props },
+  ref,
+) {
+  const render = Component
+    ? (domProps: AnyProps) => <Component {...domProps} ref={ref} href={href} />
+    : undefined
+
+  return (
+    <H.Card
+      className={cn(isPressable && 'cursor-pointer transition-colors hover:bg-default-100', className)}
+      onClick={onClick ?? onPress}
+      render={render}
+      tabIndex={isPressable ? 0 : props.tabIndex}
+      role={isPressable ? 'button' : props.role}
+      {...props}
+    >
+      {children}
+    </H.Card>
+  )
+})
+
+export const CardHeader = compat(H.Card.Header ?? H.CardHeader)
+export const CardBody = compat(H.Card.Content ?? H.CardContent)
+export const CardFooter = compat(H.Card.Footer ?? H.CardFooter)
+export const Divider = compat(H.Separator)
+export const Skeleton = compat(H.Skeleton)
+export const ScrollShadow = compat(H.ScrollShadow)
+
+type CodeProps = Omit<UnknownBaseProps, 'children'> & {
+  children?: React.ReactNode
+  size?: string
+}
+
+export function Code({ children, className, size, ...props }: CodeProps) {
+  return (
+    <code
+      className={cn(
+        'inline-flex max-w-full items-center rounded bg-content2 px-1.5 py-0.5 font-mono text-[0.85em] text-foreground',
+        size === 'sm' && 'text-xs',
+        className,
+      )}
+      {...props}
+    >
+      {children}
+    </code>
+  )
+}
+
+export function Link({ children, className, isExternal, showAnchorIcon, target, rel, ...props }: AnyProps) {
+  const external = Boolean(isExternal)
+  return (
+    <H.Link
+      className={className}
+      target={target ?? (external ? '_blank' : undefined)}
+      rel={rel ?? (external ? 'noopener noreferrer' : undefined)}
+      {...props}
+    >
+      {children}
+      {showAnchorIcon ? <H.ExternalLinkIcon className="ml-1 inline size-3" aria-hidden /> : null}
+    </H.Link>
+  )
+}
+
+type InputProps = Omit<UnknownBaseProps, 'children'> & {
+  children?: React.ReactNode
+  label?: React.ReactNode
+  description?: React.ReactNode
+  errorMessage?: React.ReactNode
+  value?: string | number
+  onValueChange?: (value: string) => void
+  onChange?: React.ChangeEventHandler<HTMLInputElement>
+  onClear?: () => void
+  onKeyDown?: React.KeyboardEventHandler<HTMLInputElement>
+  startContent?: React.ReactNode
+  endContent?: React.ReactNode
+  isInvalid?: boolean
+  isRequired?: boolean
+  isDisabled?: boolean
+  disabled?: boolean
+  isClearable?: boolean
+}
+
+export const Input = React.forwardRef<HTMLInputElement, InputProps>(function Input(
+  {
+    label,
+    description,
+    errorMessage,
+    className,
+    classNames,
+    value,
+    onValueChange,
+    onChange,
+    onClear,
+    startContent,
+    endContent,
+    isInvalid,
+    isRequired,
+    isDisabled,
+    disabled,
+    isClearable,
+    ...props
+  },
+  ref,
+) {
+  const stringValue = value == null ? '' : String(value)
+  return (
+    <label className={cn('flex w-full flex-col gap-1.5', slotClass(classNames), className)}>
+      {label ? <span className="text-sm font-medium text-foreground">{label}{isRequired ? ' *' : ''}</span> : null}
+      <div className={cn('flex min-h-10 items-center gap-2 rounded-field bg-field px-3 text-sm text-field-foreground shadow-field', slotClass(classNames, 'inputWrapper'))}>
+        {startContent}
+        <H.Input
+          ref={ref}
+          className={cn('min-w-0 flex-1 bg-transparent outline-none placeholder:text-field-placeholder disabled:opacity-60', slotClass(classNames, 'input'))}
+          value={stringValue}
+          onChange={(event: React.ChangeEvent<HTMLInputElement>) => {
+            onChange?.(event)
+            onValueChange?.(event.target.value)
+          }}
+          disabled={Boolean(isDisabled ?? disabled)}
+          aria-invalid={isInvalid}
+          aria-required={isRequired}
+          {...props}
+        />
+        {isClearable && stringValue ? (
+          <button type="button" className="text-muted hover:text-foreground" onClick={onClear ?? (() => onValueChange?.(''))}>
+            x
+          </button>
+        ) : null}
+        {endContent}
+      </div>
+      {description ? <span className="text-xs text-muted">{description}</span> : null}
+      {errorMessage ? <span className="text-xs text-danger">{errorMessage}</span> : null}
+    </label>
+  )
+})
+
+type TextareaProps = Omit<UnknownBaseProps, 'children'> & {
+  children?: React.ReactNode
+  label?: React.ReactNode
+  description?: React.ReactNode
+  errorMessage?: React.ReactNode
+  value?: string
+  onValueChange?: (value: string) => void
+  onChange?: React.ChangeEventHandler<HTMLTextAreaElement>
+  onKeyDown?: React.KeyboardEventHandler<HTMLTextAreaElement>
+  minRows?: number
+  maxRows?: number
+  isInvalid?: boolean
+  isRequired?: boolean
+  isDisabled?: boolean
+  disabled?: boolean
+}
+
+export const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(function Textarea(
+  {
+    label,
+    description,
+    errorMessage,
+    className,
+    classNames,
+    value,
+    onValueChange,
+    onChange,
+    minRows,
+    maxRows,
+    isInvalid,
+    isRequired,
+    isDisabled,
+    disabled,
+    style,
+    ...props
+  },
+  ref,
+) {
+  const maxHeight = typeof maxRows === 'number' ? `${maxRows * 1.5 + 1}rem` : undefined
+
+  return (
+    <label className={cn('flex w-full flex-col gap-1.5', slotClass(classNames), className)}>
+      {label ? <span className="text-sm font-medium text-foreground">{label}{isRequired ? ' *' : ''}</span> : null}
+      <H.TextArea
+        ref={ref}
+        className={cn('min-h-20 w-full rounded-field bg-field px-3 py-2 text-sm text-field-foreground shadow-field outline-none placeholder:text-field-placeholder disabled:opacity-60', slotClass(classNames, 'input'))}
+        rows={minRows}
+        value={value ?? ''}
+        onChange={(event: React.ChangeEvent<HTMLTextAreaElement>) => {
+          onChange?.(event)
+          onValueChange?.(event.target.value)
+        }}
+        disabled={Boolean(isDisabled ?? disabled)}
+        aria-invalid={isInvalid}
+        aria-required={isRequired}
+        style={{ maxHeight, ...(style as React.CSSProperties | undefined) }}
+        {...props}
+      />
+      {description ? <span className="text-xs text-muted">{description}</span> : null}
+      {errorMessage ? <span className="text-xs text-danger">{errorMessage}</span> : null}
+    </label>
+  )
+})
+
+type SelectProps = Omit<UnknownBaseProps, 'children'> & {
+  children?: React.ReactNode
+  label?: React.ReactNode
+  placeholder?: React.ReactNode
+  selectedKeys?: SelectionKeys | Iterable<React.Key>
+  onSelectionChange?: (keys: SelectionKeys) => void
+  onChange?: React.ChangeEventHandler<HTMLSelectElement>
+}
+
+export function Select({ children, label, placeholder, className, classNames, selectedKeys, onSelectionChange, onChange, ...props }: SelectProps) {
+  const selectedKey = firstSelectedKey(selectedKeys)
+
+  return (
+    <H.Select
+      selectedKey={selectedKey}
+      onSelectionChange={(key: React.Key | null) => {
+        emitSelection(onSelectionChange, key)
+        if (key != null && onChange) {
+          onChange({ target: { value: String(key) } } as React.ChangeEvent<HTMLSelectElement>)
+        }
+      }}
+      className={cn('w-full', slotClass(classNames), className)}
+      {...props}
+    >
+      {label ? <H.Label className="mb-1.5 block text-sm font-medium text-foreground">{label}</H.Label> : null}
+      <H.Select.Trigger className={slotClass(classNames, 'trigger')}>
+        <H.Select.Value>{({ selectedText }: AnyProps) => selectedText || placeholder}</H.Select.Value>
+      </H.Select.Trigger>
+      <H.Select.Popover>
+        <H.ListBox>{keyedChildren(children)}</H.ListBox>
+      </H.Select.Popover>
+    </H.Select>
+  )
+}
+
+export function SelectItem({ children, textValue, ...props }: AnyProps) {
+  return (
+    <H.ListBoxItem textValue={textValue ?? (typeof children === 'string' ? children : undefined)} {...props}>
+      {children}
+    </H.ListBoxItem>
+  )
+}
+
+type ListboxProps = Omit<UnknownBaseProps, 'children'> & {
+  children?: React.ReactNode | ((item: any) => React.ReactNode)
+}
+
+export function Listbox({ children, className, classNames, ...props }: ListboxProps) {
+  const content = typeof children === 'function' ? children : keyedChildren(children)
+  return <H.ListBox className={cn(flatClassNames(classNames), className)} {...props}>{content}</H.ListBox>
+}
+
+export function ListboxItem({ children, textValue, ...props }: AnyProps) {
+  return (
+    <H.ListBoxItem textValue={textValue ?? (typeof children === 'string' ? children : undefined)} {...props}>
+      {children}
+    </H.ListBoxItem>
+  )
+}
+
+export function Dropdown({ children, ...props }: AnyProps) {
+  return <H.Dropdown {...props}>{children}</H.Dropdown>
+}
+
+export function DropdownTrigger({ children, ...props }: AnyProps) {
+  if (React.isValidElement<AnyProps>(children)) {
+    const childProps = children.props
+    const disabledValue = Boolean(childProps.isDisabled ?? childProps.disabled)
+
+    return (
+      <H.Dropdown.Trigger
+        className={childProps.className}
+        aria-label={childProps['aria-label']}
+        isDisabled={disabledValue}
+        disabled={disabledValue}
+        onPress={childProps.onPress}
+        onClick={childProps.onClick}
+        {...props}
+      >
+        {childProps.startContent}
+        {childProps.children}
+        {childProps.endContent}
+      </H.Dropdown.Trigger>
+    )
+  }
+
+  return <H.Dropdown.Trigger {...props}>{children}</H.Dropdown.Trigger>
+}
+
+type DropdownMenuProps = Omit<UnknownBaseProps, 'children'> & {
+  children?: React.ReactNode
+  onAction?: (key: React.Key) => void
+}
+
+export function DropdownMenu({ children, className, classNames, onAction, ...props }: DropdownMenuProps) {
+  return (
+    <H.Dropdown.Popover>
+      <H.Dropdown.Menu className={cn(flatClassNames(classNames), className)} onAction={onAction} {...props}>
+        {keyedChildren(children)}
+      </H.Dropdown.Menu>
+    </H.Dropdown.Popover>
+  )
+}
+
+export function DropdownItem({ children, onPress, textValue, ...props }: AnyProps) {
+  return (
+    <H.Dropdown.Item onAction={onPress} textValue={textValue ?? (typeof children === 'string' ? children : undefined)} {...props}>
+      {children}
+    </H.Dropdown.Item>
+  )
+}
+
+export function Modal({ children, className, classNames, size, scrollBehavior, placement, backdrop, ...props }: AnyProps) {
+  const [isOpen, setOpen] = useControlledOpen(props)
+  const close = useCallback(() => setOpen(false), [setOpen])
+
+  return (
+    <OverlayCloseContext.Provider value={close}>
+      <H.Modal isOpen={isOpen} onOpenChange={setOpen}>
+        <H.Modal.Backdrop variant={backdrop === 'blur' ? 'blur' : 'opaque'} className={slotClass(classNames, 'backdrop')}>
+          <H.Modal.Container
+            size={size === '2xl' || size === '3xl' || size === '4xl' || size === '5xl' || size === 'full' ? 'lg' : size}
+            scroll={scrollBehavior}
+            placement={placement}
+            className={cn(slotClass(classNames, 'wrapper'), className)}
+          >
+            {children}
+          </H.Modal.Container>
+        </H.Modal.Backdrop>
+      </H.Modal>
+    </OverlayCloseContext.Provider>
+  )
+}
+
+type OverlayContentProps = Omit<UnknownBaseProps, 'children'> & {
+  children?: React.ReactNode | ((onClose: () => void) => React.ReactNode)
+}
+
+export function ModalContent({ children, className, ...props }: OverlayContentProps) {
+  const close = useContext(OverlayCloseContext) ?? (() => undefined)
+  const content = typeof children === 'function' ? children(close) : children
+  return <H.Modal.Dialog className={className} {...props}>{content}</H.Modal.Dialog>
+}
+
+export const ModalHeader = compat(H.Modal.Header ?? H.ModalHeader)
+export const ModalBody = compat(H.Modal.Body ?? H.ModalBody)
+export const ModalFooter = compat(H.Modal.Footer ?? H.ModalFooter)
+
+export function Drawer({ children, classNames, placement = 'left', ...props }: AnyProps) {
+  const [isOpen, setOpen] = useControlledOpen(props)
+  const close = useCallback(() => setOpen(false), [setOpen])
+
+  return (
+    <OverlayCloseContext.Provider value={close}>
+      <H.Drawer isOpen={isOpen} onOpenChange={setOpen}>
+        <H.Drawer.Backdrop className={slotClass(classNames, 'backdrop')}>
+          {React.Children.map(children as React.ReactNode, (child) => {
+            if (!React.isValidElement<AnyProps>(child)) return child
+            return React.cloneElement(child, { placement, classNames })
+          })}
+        </H.Drawer.Backdrop>
+      </H.Drawer>
+    </OverlayCloseContext.Provider>
+  )
+}
+
+export function DrawerContent({ children, className, classNames, placement = 'left', ...props }: OverlayContentProps) {
+  const close = useContext(OverlayCloseContext) ?? (() => undefined)
+  const content = typeof children === 'function' ? children(close) : children
+  return (
+    <H.Drawer.Content placement={placement} className={cn(slotClass(classNames, 'wrapper'), className)} {...props}>
+      <H.Drawer.Dialog>
+        {content}
+      </H.Drawer.Dialog>
+    </H.Drawer.Content>
+  )
+}
+
+export const DrawerHeader = compat(H.Drawer.Header ?? H.DrawerHeader)
+export const DrawerBody = compat(H.Drawer.Body ?? H.DrawerBody)
+
+export function Popover({ children, classNames, placement, ...props }: AnyProps) {
+  const [isOpen, setOpen] = useControlledOpen(props)
+
+  return (
+    <H.Popover isOpen={isOpen} onOpenChange={setOpen}>
+      {React.Children.map(children as React.ReactNode, (child) => {
+        if (!React.isValidElement<AnyProps>(child)) return child
+        return React.cloneElement(child, { placement, classNames })
+      })}
+    </H.Popover>
+  )
+}
+
+export function PopoverTrigger({ children, ...props }: AnyProps) {
+  return <H.Popover.Trigger {...props}>{children}</H.Popover.Trigger>
+}
+
+export function PopoverContent({ children, className, classNames, showArrow, placement, ...props }: AnyProps) {
+  return (
+    <H.Popover.Content placement={placement} className={cn(slotClass(classNames, 'content'), className)} {...props}>
+      {showArrow ? <H.Popover.Arrow /> : null}
+      <H.Popover.Dialog>
+        {children}
+      </H.Popover.Dialog>
+    </H.Popover.Content>
+  )
+}
+
+export function Table({ children, className, ...props }: AnyProps) {
+  const columnCount = getTableColumnCount(children as React.ReactNode)
+
+  return (
+    <TableColumnCountContext.Provider value={columnCount}>
+      <H.Table className={className}>
+        <H.Table.ScrollContainer>
+          <H.Table.Content {...props}>{children}</H.Table.Content>
+        </H.Table.ScrollContainer>
+      </H.Table>
+    </TableColumnCountContext.Provider>
+  )
+}
+
+function getTableColumnCount(children: React.ReactNode) {
+  let count = 1
+  React.Children.forEach(children, (child) => {
+    if (!React.isValidElement<AnyProps>(child) || child.type !== TableHeader) return
+    count = Math.max(1, React.Children.count(child.props.children as React.ReactNode))
+  })
+  return count
+}
+
+export function TableHeader({ children, ...props }: AnyProps) {
+  const columns = React.Children.map(children as React.ReactNode, (child, index) => {
+    if (!React.isValidElement<AnyProps>(child)) return child
+    return React.cloneElement(child, {
+      isRowHeader: child.props.isRowHeader ?? index === 0,
+    })
+  })
+
+  return <H.Table.Header {...props}>{columns}</H.Table.Header>
+}
+
+export function TableColumn({ children, ...props }: AnyProps) {
+  return <H.Table.Column {...props}>{children}</H.Table.Column>
+}
+
+export function TableBody({ emptyContent, children, ...props }: AnyProps) {
+  const columnCount = useContext(TableColumnCountContext)
+  const hasStaticRows =
+    typeof children === 'function' || React.Children.count(children as React.ReactNode) > 0
+
+  return (
+    <H.Table.Body {...props}>
+      {hasStaticRows || !emptyContent ? children : (
+        <H.Table.Row>
+          <H.Table.Cell colSpan={columnCount} className="py-10 text-center text-default-500">
+            {emptyContent}
+          </H.Table.Cell>
+        </H.Table.Row>
+      )}
+    </H.Table.Body>
+  )
+}
+export const TableRow = compat(H.Table.Row ?? H.TableRow)
+export const TableCell = compat(H.Table.Cell ?? H.TableCell)
+
+type RadioGroupProps = Omit<UnknownBaseProps, 'children'> & {
+  children?: React.ReactNode
+  value?: string
+  onValueChange?: (value: string) => void
+}
+
+export function RadioGroup({ children, value, onValueChange, orientation, className, ...props }: RadioGroupProps) {
+  return (
+    <H.RadioGroup value={value} onChange={onValueChange} orientation={orientation} className={className} {...props}>
+      {children}
+    </H.RadioGroup>
+  )
+}
+
+export function Radio({ children, className, classNames, ...props }: AnyProps) {
+  return (
+    <H.Radio className={cn(flatClassNames(classNames), className)} {...props}>
+      <H.Radio.Control>
+        <H.Radio.Indicator />
+      </H.Radio.Control>
+      <H.Radio.Content>{children}</H.Radio.Content>
+    </H.Radio>
+  )
+}
+
+type SwitchProps = Omit<UnknownBaseProps, 'children'> & {
+  children?: React.ReactNode
+  isSelected?: boolean
+  onValueChange?: (value: boolean) => void
+}
+
+export function Switch({ children, className, isSelected, onValueChange, ...props }: SwitchProps) {
+  return (
+    <H.Switch isSelected={isSelected} onChange={onValueChange} className={className} {...props}>
+      <H.Switch.Control>
+        <H.Switch.Thumb />
+      </H.Switch.Control>
+      {children ? <H.Switch.Content>{children}</H.Switch.Content> : null}
+    </H.Switch>
+  )
+}
+
+export function Tooltip({ children, content, className, ...props }: AnyProps) {
+  if (!content) return <>{children}</>
+
+  return (
+    <H.Tooltip {...props}>
+      <H.Tooltip.Trigger>{children}</H.Tooltip.Trigger>
+      <H.Tooltip.Content className={className}>{content}</H.Tooltip.Content>
+    </H.Tooltip>
+  )
+}
+
+export function Avatar({ name, src, className, size, ...props }: AnyProps) {
+  const fallback = typeof name === 'string' && name.length > 0 ? name.slice(0, 1).toUpperCase() : '?'
+
+  return (
+    <H.Avatar className={className} size={size} {...props}>
+      {src ? <H.Avatar.Image src={src} alt={name ?? ''} /> : null}
+      <H.Avatar.Fallback>{fallback}</H.Avatar.Fallback>
+    </H.Avatar>
+  )
+}
+
+type PaginationProps = Omit<UnknownBaseProps, 'children'> & {
+  total?: number
+  page?: number
+  initialPage?: number
+  onChange?: (page: number) => void
+  showControls?: boolean
+}
+
+function paginationItems(total: number, page: number) {
+  if (total <= 7) return Array.from({ length: total }, (_, index) => index + 1)
+  const pages = new Set<number>([1, total, page, page - 1, page + 1])
+  if (page <= 3) {
+    pages.add(2)
+    pages.add(3)
+    pages.add(4)
+  }
+  if (page >= total - 2) {
+    pages.add(total - 1)
+    pages.add(total - 2)
+    pages.add(total - 3)
+  }
+  const sorted = Array.from(pages).filter((item) => item >= 1 && item <= total).sort((a, b) => a - b)
+  return sorted.reduce<Array<number | 'ellipsis'>>((result, item) => {
+    const previous = result[result.length - 1]
+    if (typeof previous === 'number' && item - previous > 1) result.push('ellipsis')
+    result.push(item)
+    return result
+  }, [])
+}
+
+export function Pagination({ total = 1, page, initialPage = 1, onChange, className, showControls = true }: PaginationProps) {
+  const [localPage, setLocalPage] = useState(initialPage)
+  const currentPage = Math.min(Math.max(page ?? localPage, 1), Math.max(total, 1))
+  const updatePage = useCallback((nextPage: number) => {
+    const normalized = Math.min(Math.max(nextPage, 1), Math.max(total, 1))
+    if (page == null) setLocalPage(normalized)
+    onChange?.(normalized)
+  }, [onChange, page, total])
+
+  const items = useMemo(() => paginationItems(Math.max(total, 1), currentPage), [currentPage, total])
+  const buttonBase = 'inline-flex h-8 min-w-8 items-center justify-center rounded-md px-2 text-sm transition-colors disabled:pointer-events-none disabled:opacity-40'
+
+  return (
+    <nav className={cn('flex items-center gap-1', className)} aria-label="pagination">
+      {showControls ? (
+        <button type="button" className={cn(buttonBase, 'bg-content2 text-foreground hover:bg-content3')} disabled={currentPage <= 1} onClick={() => updatePage(currentPage - 1)}>
+          Prev
+        </button>
+      ) : null}
+      {items.map((item, index) => item === 'ellipsis' ? (
+        <span key={`ellipsis-${index}`} className="px-2 text-default-400">...</span>
+      ) : (
+        <button
+          key={item}
+          type="button"
+          className={cn(
+            buttonBase,
+            selectedClass(item === currentPage, 'bg-primary text-primary-foreground', 'bg-content2 text-foreground hover:bg-content3'),
+          )}
+          aria-current={item === currentPage ? 'page' : undefined}
+          onClick={() => updatePage(item)}
+        >
+          {item}
+        </button>
+      ))}
+      {showControls ? (
+        <button type="button" className={cn(buttonBase, 'bg-content2 text-foreground hover:bg-content3')} disabled={currentPage >= total} onClick={() => updatePage(currentPage + 1)}>
+          Next
+        </button>
+      ) : null}
+    </nav>
+  )
+}
+
+type TabsProps = Omit<UnknownBaseProps, 'children'> & {
+  children?: React.ReactNode
+  selectedKey?: React.Key
+  defaultSelectedKey?: React.Key
+  onSelectionChange?: (key: React.Key) => void
+  orientation?: 'horizontal' | 'vertical'
+}
+
+export function Tabs({ children, selectedKey, defaultSelectedKey, onSelectionChange, className, classNames, orientation }: TabsProps) {
+  const tabItems = useMemo(() => {
+    const items: Array<{ key: React.Key; title: React.ReactNode; panel: React.ReactNode; disabled?: boolean }> = []
+    React.Children.forEach(children, (child, index) => {
+      if (!React.isValidElement<AnyProps>(child)) return
+      const key = normalizeReactKey(child.key, index)
+      items.push({
+        key,
+        title: child.props.title ?? child.props.children,
+        panel: child.props.title ? child.props.children as React.ReactNode : null,
+        disabled: child.props.isDisabled,
+      })
+    })
+    return items
+  }, [children])
+  const firstKey = tabItems[0]?.key
+  const [localKey, setLocalKey] = useState<React.Key | undefined>(defaultSelectedKey ?? firstKey)
+  const activeKey = selectedKey ?? localKey ?? firstKey
+  const activePanel = tabItems.find((item) => item.key === activeKey)?.panel
+
+  const choose = useCallback((key: React.Key) => {
+    setLocalKey(key)
+    onSelectionChange?.(key)
+  }, [onSelectionChange])
+
+  return (
+    <div className={className}>
+      <div
+        role="tablist"
+        aria-orientation={orientation}
+        className={cn('flex flex-wrap items-center gap-2', orientation === 'vertical' && 'flex-col items-stretch', slotClass(classNames, 'tabList'))}
+      >
+        {tabItems.map((item) => {
+          const isSelected = item.key === activeKey
+          return (
+            <button
+              key={item.key}
+              type="button"
+              role="tab"
+              aria-selected={isSelected}
+              data-selected={isSelected ? 'true' : undefined}
+              disabled={item.disabled}
+              className={cn(
+                'group relative inline-flex h-10 items-center justify-center rounded-md px-3 text-sm font-medium transition-colors disabled:pointer-events-none disabled:opacity-50',
+                selectedClass(isSelected, 'text-primary', 'text-default-600 hover:text-foreground'),
+                slotClass(classNames, 'tab'),
+              )}
+              onClick={() => choose(item.key)}
+            >
+              <span className={slotClass(classNames, 'tabContent')}>{item.title}</span>
+              {isSelected ? <span className={cn('absolute inset-x-0 bottom-0 h-0.5 rounded-full bg-primary', slotClass(classNames, 'cursor'))} /> : null}
+            </button>
+          )
+        })}
+      </div>
+      {activePanel ? <div className={slotClass(classNames, 'panel')}>{activePanel}</div> : null}
+    </div>
+  )
+}
+
+export function Tab({ children }: AnyProps) {
+  return <>{children}</>
+}

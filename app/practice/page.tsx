@@ -17,7 +17,7 @@ import {
   Switch,
   Textarea,
   Tooltip,
-} from '@heroui/react'
+} from '@/lib/heroui-compat'
 import {
   AlertTriangle,
   Coffee,
@@ -2449,7 +2449,7 @@ export default function KeyTaoPracticePage() {
             <Card
               radius="sm"
               shadow="sm"
-              onPointerDown={(event) => {
+              onPointerDown={(event: React.PointerEvent<HTMLElement>) => {
                 const target = event.target as HTMLElement
                 if (target.closest('button,[role="tab"],select,textarea,input')) return
                 focusPracticeSurface()

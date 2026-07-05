@@ -23,7 +23,7 @@ import {
   Link,
   Skeleton,
   Input,
-} from '@heroui/react'
+} from '@/lib/heroui-compat'
 import { RefreshCw, Tag } from 'lucide-react'
 import { useAPI } from '@/lib/hooks/useSWR'
 import { useAuthStore } from '@/lib/store/auth'
@@ -340,7 +340,7 @@ export default function SyncPage() {
                     placeholder="v1.0.0"
                     label="新 Tag 名称"
                     value={newTagName}
-                    onValueChange={(v) => {
+                    onValueChange={(v: string) => {
                       setNewTagName(v)
                       setTagError(null)
                       setTagSuccess(null)

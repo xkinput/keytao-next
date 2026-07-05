@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Card, CardBody, CardHeader, Button, Input, Divider, Chip } from '@heroui/react'
+import { Card, CardBody, CardHeader, Button, Input, Divider, Chip } from '@/lib/heroui-compat'
 import { MessageCircle, Key, Unlink } from 'lucide-react'
 import { useAuthStore } from '@/lib/store/auth'
 

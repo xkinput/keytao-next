@@ -1,5 +1,5 @@
 'use client'
-import { Chip, Spinner } from '@heroui/react'
+import { Chip, Spinner } from '@/lib/heroui-compat'
 import { AlertTriangle, X } from 'lucide-react'
 import { useAPI } from '@/lib/hooks/useSWR'
 

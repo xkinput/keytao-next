@@ -12,7 +12,7 @@ import {
   Textarea,
   Avatar,
   Divider
-} from '@heroui/react'
+} from '@/lib/heroui-compat'
 import { useAuthStore } from '@/lib/store/auth'
 import { useAPI, apiRequest } from '@/lib/hooks/useSWR'
 import { BATCH_STATUS_MAP, STATUS_COLOR_MAP } from '@/lib/constants/status'

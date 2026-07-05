@@ -2,7 +2,7 @@
 
 import React, { useRef, useEffect, useCallback, useState } from 'react'
 import dynamic from 'next/dynamic'
-import { Button, Textarea, ScrollShadow } from '@heroui/react'
+import { Button, Textarea, ScrollShadow } from '@/lib/heroui-compat'
 import { Trash2, X, Send, ChevronLeft, ChevronRight, ChevronUp, ChevronDown } from 'lucide-react'
 import { useChatStore } from '@/lib/store/chat'
 import { useAuthStore } from '@/lib/store/auth'

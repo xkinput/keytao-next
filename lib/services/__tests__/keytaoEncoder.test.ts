@@ -312,6 +312,7 @@ describe('phrase-level pinyin disambiguation', () => {
     ['读着', ['dú', 'zhe']],
     ['学着', ['xué', 'zhe']],
     ['着想', ['zhuó', 'xiǎng']],
+    ['小藏羚', ['xiǎo', 'zàng', 'líng']],
   ])('resolves contextual pinyin for %s', (word, expected) => {
     expect(getPhrasePinyins(word)).toEqual(expected)
   })
@@ -470,6 +471,14 @@ describe('encodePhrase', { timeout: 30000 }, () => {
     expect(r.chars[0].phoneticCode).toBe('gb')
     expect(r.chars[1].phoneticCode).toBe('yl')
     expect(r.codes[0]).toBe('gbyl')
+  })
+
+  it('encodes 小藏羚 with zàng instead of cáng', async () => {
+    const r = await encodePhrase('小藏羚')
+    expect(r.type).toBe('三字词')
+    expect(r.chars.map(c => c.pinyin)).toEqual(['xiǎo', 'zàng', 'líng'])
+    expect(r.chars[1].phoneticCode).toBe('zp')
+    expect(r.codes[0]).toBe('xzl')
   })
 })
 

@@ -1,4 +1,4 @@
-import { Card, CardBody, CardHeader, Skeleton } from '@heroui/react'
+import { Card, CardBody, CardHeader, Skeleton } from '@/lib/heroui-compat'
 
 export default function PullRequestCardSkeleton() {
   return (

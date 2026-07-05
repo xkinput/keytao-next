@@ -1,6 +1,6 @@
 'use client'
 
-import { Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, Button } from '@heroui/react'
+import { Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, Button } from '@/lib/heroui-compat'
 import { useUIStore } from '@/lib/store/ui'
 import { useState } from 'react'
 

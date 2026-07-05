@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireVerifiedBotUser } from '@/lib/botUserAuth'
 import { checkBatchConflictsWithWeight } from '@/lib/services/batchConflictService'
+import { buildSkippedCandidateSlotWarnings } from '@/lib/services/batchSkippedCodeWarnings'
 import { PullRequestType } from '@prisma/client'
 import { detectPhraseType, isValidPhraseType, PhraseType } from '@/lib/constants/phraseTypes'
 import type {
@@ -36,7 +37,7 @@ const MAX_REMARK_LENGTH = 500
 export async function POST(request: NextRequest) {
   try {
     const body: BotBatchDraftRequest = await request.json()
-    const { platform, platformId, items, batchId: requestedBatchId } = body
+    const { platform, platformId, items, batchId: requestedBatchId, confirmed = false } = body
 
     const auth = await requireVerifiedBotUser(platform, platformId)
     if (!auth.authorized) {
@@ -155,6 +156,56 @@ export async function POST(request: NextRequest) {
       weight: item.weight,
     }))
     const conflictResults = await checkBatchConflictsWithWeight(conflictItems)
+    const skippedSlotWarnings = await buildSkippedCandidateSlotWarnings(conflictItems)
+
+    if (skippedSlotWarnings.length > 0 && !confirmed) {
+      return NextResponse.json<BotBatchDraftResponse>(
+        {
+          success: false,
+          message: `存在 ${skippedSlotWarnings.length} 个跳过编码空位警告，请确认后再写入草稿`,
+          batchId,
+          successCount: 0,
+          failedCount: 0,
+          skippedCount: 0,
+          warnedCount: skippedSlotWarnings.length,
+          failed: [],
+          skipped: [],
+          warned: skippedSlotWarnings.map((warning) => {
+            const index = conflictItems.findIndex(item => item.id === warning.id)
+            return {
+              index: index >= 0 ? index : 0,
+              word: conflictItems[index]?.word || warning.word,
+              code: conflictItems[index]?.code || warning.code,
+              reason: warning.impact || '跳过了编码链中的更短空位，不建议直接写入更长编码',
+            }
+          }),
+          warnings: skippedSlotWarnings.map((warning) => {
+            const index = conflictItems.findIndex(item => item.id === warning.id)
+            const normalizedItem = normalizedItems[index >= 0 ? index : 0]
+            return {
+              index: index >= 0 ? index : 0,
+              item: {
+                action: normalizedItem?.action || 'Create',
+                word: normalizedItem?.word || warning.word,
+                oldWord: normalizedItem?.oldWord,
+                code: normalizedItem?.code || warning.code,
+                type: normalizedItem?.type,
+                weight: normalizedItem?.weight,
+                remark: normalizedItem?.remark,
+              },
+              warningType: 'skipped_candidate_slot',
+              message: warning.impact || '跳过了编码链中的更短空位，不建议直接写入更长编码',
+              skippedCode: warning.skippedCode,
+              skippedCodes: warning.skippedCodes,
+            }
+          }),
+          requiresConfirmation: true,
+          draftItems: [],
+          draftTotal: 0,
+        },
+        { status: 400 }
+      )
+    }
 
     const failed: BotBatchDraftFailedItem[] = []
     const skipped: BotBatchDraftFailedItem[] = []

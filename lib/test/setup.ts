@@ -1,6 +1,7 @@
 // Load test environment variables FIRST before any imports
 import { config } from 'dotenv'
 config({ path: '.env.test' })
+config({ path: '.env' })
 
 import { execSync } from 'child_process'
 import { beforeAll, afterEach, afterAll } from 'vitest'

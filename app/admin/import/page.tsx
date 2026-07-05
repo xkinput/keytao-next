@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { Card, CardBody, CardHeader, Button, Progress, Textarea, Chip, Listbox, ListboxItem, Select, SelectItem, Spinner } from '@heroui/react'
+import { Card, CardBody, CardHeader, Button, Progress, Textarea, Chip, Listbox, ListboxItem, Select, SelectItem, Spinner } from '@/lib/heroui-compat'
 import { Check } from 'lucide-react'
 import { apiRequest, useAPI } from '@/lib/hooks/useSWR'
 import { type PhraseType, getPhraseTypeOptions } from '@/lib/constants/phraseTypes'
@@ -305,7 +305,7 @@ export default function ImportPage() {
                   <div className="w-48">
                     <Select
                       selectedKeys={[phraseType]}
-                      onChange={(e) => setPhraseType(e.target.value as PhraseType)}
+                      onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setPhraseType(e.target.value as PhraseType)}
                       label="选择类型"
                       placeholder="请选择词条类型"
                       isRequired

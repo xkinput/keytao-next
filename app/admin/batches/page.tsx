@@ -10,7 +10,7 @@ import {
   Chip,
   RadioGroup,
   Radio
-} from '@heroui/react'
+} from '@/lib/heroui-compat'
 import { RefreshCw } from 'lucide-react'
 import { useAPI } from '@/lib/hooks/useSWR'
 import { usePageFilterStore } from '@/lib/store/pageFilter'

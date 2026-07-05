@@ -2,7 +2,7 @@
 
 import { useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { Spinner } from '@heroui/react'
+import { Spinner } from '@/lib/heroui-compat'
 
 export default function AdminPage() {
   const router = useRouter()

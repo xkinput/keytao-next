@@ -2,12 +2,14 @@
 
 import { useEffect, useMemo, useCallback, memo, useState, useRef } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
-import { Button, Dropdown, DropdownTrigger, DropdownMenu, DropdownItem, Link, Drawer, DrawerContent, DrawerHeader, DrawerBody, Divider } from '@heroui/react'
-import { Menu, User, Database, Shield, ChevronDown, Edit, Download, BookOpen, Code, Github, Coffee, Info, Keyboard } from 'lucide-react'
+import { Button, Dropdown, DropdownTrigger, DropdownMenu, DropdownItem, Link, Drawer, DrawerContent, DrawerHeader, DrawerBody, Divider } from '@/lib/heroui-compat'
+import { Menu, User, Database, Shield, ChevronDown, Edit, Download, BookOpen, Code, Coffee, Info, Keyboard } from 'lucide-react'
 import { useAuthStore } from '@/lib/store/auth'
 import { useAPI } from '@/lib/hooks/useSWR'
+import { useClientReady } from '@/lib/hooks/useClientReady'
 import Logo from './Logo'
 import ThemeSwitch from './ThemeSwitch'
+import { GithubLogo as Github } from './GithubLogo'
 
 function Navbar() {
   const router = useRouter()
@@ -15,6 +17,7 @@ function Navbar() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
   const [openDropdown, setOpenDropdown] = useState<string | null>(null)
   const closeTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const isClientReady = useClientReady()
 
   // Get documentation URL based on current host
   const docsUrl = useMemo(() => {
@@ -36,7 +39,7 @@ function Navbar() {
   const setAdminStatus = useAuthStore(state => state.setAdminStatus)
 
   // Check authentication based on user and token directly from store
-  const isAuthenticatedValue = !!user && !!token
+  const isAuthenticatedValue = isClientReady && !!user && !!token
 
   // Only check admin status when authenticated and not yet checked
   const shouldCheckAdmin = isAuthenticatedValue && token && !adminChecked
@@ -105,6 +108,7 @@ function Navbar() {
       icon: Database,
       items: [
         { label: '词库管理', href: '/phrases' },
+        { label: '我的词库', href: '/user-dictionary' },
         { label: 'GitHub 同步', href: '/sync' },
       ]
     },

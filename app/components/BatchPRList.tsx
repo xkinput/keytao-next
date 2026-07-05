@@ -7,7 +7,7 @@ import {
     Chip,
     Button,
     Tooltip,
-} from '@heroui/react'
+} from '@/lib/heroui-compat'
 import { AlertTriangle, Bot } from 'lucide-react'
 import CodePhrasesPopover from './CodePhrasesPopover'
 import { getPhraseTypeLabel, type PhraseType } from '@/lib/constants/phraseTypes'

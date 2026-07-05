@@ -9,7 +9,7 @@ import {
   useDisclosure,
   Avatar,
   Pagination,
-} from '@heroui/react'
+} from '@/lib/heroui-compat'
 import { RefreshCw } from 'lucide-react'
 import { useIsAuthenticated } from '@/lib/hooks/useAuth'
 import { useAPI } from '@/lib/hooks/useSWR'

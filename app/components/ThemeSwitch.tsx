@@ -1,7 +1,7 @@
 'use client'
 
 import { useTheme } from 'next-themes'
-import { Button } from '@heroui/react'
+import { Button } from '@/lib/heroui-compat'
 import { Sun, Moon, Monitor } from 'lucide-react'
 
 export default function ThemeSwitch() {

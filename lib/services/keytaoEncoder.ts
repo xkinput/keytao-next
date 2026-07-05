@@ -1,7 +1,7 @@
 import * as fs from 'fs'
 import * as https from 'https'
 import * as path from 'path'
-import { pinyin } from 'pinyin-pro'
+import { customPinyin, pinyin } from 'pinyin-pro'
 
 // ── Data loading ──────────────────────────────────────────────────────────────
 
@@ -32,6 +32,14 @@ const SPLIT_MAP: Record<string, { c1: string; c2: string }> = (() => {
   }
   return map
 })()
+
+const PHRASE_PINYIN_OVERRIDES: Record<string, string> = {
+  '藏羚': 'zàng líng',
+  '藏羚羊': 'zàng líng yáng',
+  '小藏羚': 'xiǎo zàng líng',
+}
+
+customPinyin(PHRASE_PINYIN_OVERRIDES, { multiple: 'replace', polyphonic: 'replace' })
 
 // ── Phonetic encoding ─────────────────────────────────────────────────────────
 

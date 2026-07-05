@@ -1,6 +1,6 @@
 'use client'
 
-import { Card, CardBody, CardHeader, Spinner, Chip } from '@heroui/react'
+import { Card, CardBody, CardHeader, Spinner, Chip } from '@/lib/heroui-compat'
 import { useAPI } from '@/lib/hooks/useSWR'
 import { getPhraseTypeLabel, type PhraseType } from '@/lib/constants/phraseTypes'
 import { BATCH_STATUS_MAP, STATUS_COLOR_MAP } from '@/lib/constants/status'

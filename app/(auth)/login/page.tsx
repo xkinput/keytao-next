@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { Card, CardHeader, CardBody, CardFooter, Input, Button, Divider } from '@heroui/react'
+import { Card, CardHeader, CardBody, CardFooter, Input, Button, Divider } from '@/lib/heroui-compat'
 import { useAuthStore } from '@/lib/store/auth'
 import { apiRequest } from '@/lib/hooks/useSWR'
 

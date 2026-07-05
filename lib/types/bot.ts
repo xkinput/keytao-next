@@ -31,13 +31,15 @@ export interface BotConflictInfo {
 export interface BotWarningInfo {
   index: number
   item: BotPRItem
-  warningType: 'duplicate_code' | 'multiple_code'
+  warningType: 'duplicate_code' | 'multiple_code' | 'skipped_candidate_slot'
   message: string
-  existing: {
+  existing?: {
     word: string
     code: string
     weight: number
   }
+  skippedCode?: string
+  skippedCodes?: string[]
   // For Delete action with multiple_code warning, list all codes for this word
   allCodes?: Array<{
     code: string
@@ -130,6 +132,7 @@ export interface BotBatchDraftRequest {
   platformId: string
   items: BotBatchDraftItem[]
   batchId?: string
+  confirmed?: boolean
 }
 
 export interface BotBatchDraftFailedItem {
@@ -162,6 +165,8 @@ export interface BotBatchDraftResponse {
   failed: BotBatchDraftFailedItem[]
   skipped: BotBatchDraftFailedItem[]
   warned: BotBatchDraftFailedItem[]
+  warnings?: BotWarningInfo[]
+  requiresConfirmation?: boolean
   draftItems: BotDraftSnapshotItem[]
   draftTotal: number
 }

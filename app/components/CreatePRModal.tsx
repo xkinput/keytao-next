@@ -17,7 +17,7 @@ import {
   RadioGroup,
   Radio,
   Tooltip
-} from '@heroui/react'
+} from '@/lib/heroui-compat'
 import toast from 'react-hot-toast'
 import { apiRequest } from '@/lib/hooks/useSWR'
 import { getPhraseTypeOptions, getDefaultWeight, checkTypeMismatch, detectPhraseType, type PhraseType } from '@/lib/constants/phraseTypes'
@@ -1163,7 +1163,7 @@ export default function CreatePRModal({
                                                   value={f.value} label="旧词" placeholder="当前编码对应的词"
                                                   isRequired isInvalid={!!fieldState.error} errorMessage={fieldState.error?.message}
                                                   size="sm" className="flex-1"
-                                                  onValueChange={v => { f.onChange(v); updateMeta(field.id, { hasChecked: false, conflict: null }) }}
+                                                  onValueChange={(v: string) => { f.onChange(v); updateMeta(field.id, { hasChecked: false, conflict: null }) }}
                                                   onBlur={() => autoCheckConflictForItem(index, field.id)}
                                                   endContent={f.value && <WordCodesPopover word={f.value}><Button size="sm" variant="light" isIconOnly className="min-w-unit-6 w-6 h-6"><Eye className="w-4 h-4" /></Button></WordCodesPopover>}
                                                 />
@@ -1180,7 +1180,7 @@ export default function CreatePRModal({
                                                     value={f.value} label="新词" placeholder="请输入新词"
                                                     isRequired isInvalid={!!fieldState.error} errorMessage={fieldState.error?.message}
                                                     size="sm" className="flex-1"
-                                                    onValueChange={v => { f.onChange(v); updateMeta(field.id, { hasChecked: false, conflict: null }) }}
+                                                    onValueChange={(v: string) => { f.onChange(v); updateMeta(field.id, { hasChecked: false, conflict: null }) }}
                                                     endContent={
                                                       <div className="flex items-center gap-1">
                                                         {inf && inf.wordExists.length > 0 && <Tooltip content={`词条已存在，编码：${inf.wordExists.map(e => e.code).join('、')}`}><Chip size="sm" variant="flat" color="warning" className="h-5 text-[10px] cursor-default">已存在</Chip></Tooltip>}
@@ -1203,7 +1203,7 @@ export default function CreatePRModal({
                                                   value={f.value} label="编码" placeholder="请输入编码"
                                                   isRequired isInvalid={!!fieldState.error} errorMessage={fieldState.error?.message}
                                                   size="sm" className="flex-1"
-                                                  onValueChange={v => { f.onChange(v); updateMeta(field.id, { hasChecked: false, conflict: null }) }}
+                                                  onValueChange={(v: string) => { f.onChange(v); updateMeta(field.id, { hasChecked: false, conflict: null }) }}
                                                   onBlur={() => autoCheckConflictForItem(index, field.id)}
                                                   endContent={f.value && <CodePhrasesPopover code={f.value}><Button size="sm" variant="light" isIconOnly className="min-w-unit-6 w-6 h-6"><Eye className="w-4 h-4" /></Button></CodePhrasesPopover>}
                                                 />
@@ -1214,7 +1214,7 @@ export default function CreatePRModal({
                                               control={control}
                                               render={({ field: f }) => {
                                                 const t = watch(`items.${index}.type`) as PhraseType
-                                                return <Input value={f.value} label="权重" type="number" placeholder={`${getDefaultWeight(t)}`} size="sm" className="w-16 shrink-0" onValueChange={v => f.onChange(v)} />
+                                                return <Input value={f.value} label="权重" type="number" placeholder={`${getDefaultWeight(t)}`} size="sm" className="w-16 shrink-0" onValueChange={(v: string) => f.onChange(v)} />
                                               }}
                                             />
                                           </div>
@@ -1241,7 +1241,7 @@ export default function CreatePRModal({
                                                 value={f.value} label="词" placeholder="请输入词"
                                                 isRequired isInvalid={!!fieldState.error} errorMessage={fieldState.error?.message}
                                                 size="sm" className="flex-1"
-                                                onValueChange={v => { f.onChange(v); updateMeta(field.id, { hasChecked: false, conflict: null }) }}
+                                                onValueChange={(v: string) => { f.onChange(v); updateMeta(field.id, { hasChecked: false, conflict: null }) }}
                                               />
                                             )}
                                           />
@@ -1255,7 +1255,7 @@ export default function CreatePRModal({
                                               value={f.value} label="编码" placeholder="请输入编码"
                                               isRequired isInvalid={!!fieldState.error} errorMessage={fieldState.error?.message}
                                               size="sm" className="w-28 shrink-0"
-                                              onValueChange={v => { f.onChange(v); updateMeta(field.id, { hasChecked: false, conflict: null }) }}
+                                              onValueChange={(v: string) => { f.onChange(v); updateMeta(field.id, { hasChecked: false, conflict: null }) }}
                                             />
                                           )}
                                         />
@@ -1285,7 +1285,7 @@ export default function CreatePRModal({
                                                   value={f.value} label="词" placeholder="请输入词"
                                                   isRequired isInvalid={!!fieldState.error} errorMessage={fieldState.error?.message}
                                                   size="sm" className="flex-1"
-                                                  onValueChange={v => { f.onChange(v); updateMeta(field.id, { hasChecked: false, conflict: null }) }}
+                                                  onValueChange={(v: string) => { f.onChange(v); updateMeta(field.id, { hasChecked: false, conflict: null }) }}
                                                   endContent={
                                                     <div className="flex items-center gap-1">
                                                       {inf && inf.wordExists.length > 0 && <Tooltip content={`词条已存在，编码：${inf.wordExists.map(e => e.code).join('、')}`}><Chip size="sm" variant="flat" color="warning" className="h-5 text-[10px] cursor-default">已存在</Chip></Tooltip>}
@@ -1309,7 +1309,7 @@ export default function CreatePRModal({
                                                 isRequired isInvalid={!!fieldState.error} errorMessage={fieldState.error?.message}
                                                 color={fieldState.error ? 'danger' : 'default'}
                                                 size="sm" className="flex-1"
-                                                onValueChange={v => { f.onChange(v); updateMeta(field.id, { hasChecked: false, conflict: null }); autoFilledRef.current.delete(field.id) }}
+                                                onValueChange={(v: string) => { f.onChange(v); updateMeta(field.id, { hasChecked: false, conflict: null }); autoFilledRef.current.delete(field.id) }}
                                                 endContent={
                                                   encodingFields.has(field.id) ? (
                                                     <WandSparkles className="w-4 h-4 animate-pulse" />
@@ -1336,7 +1336,7 @@ export default function CreatePRModal({
                                             control={control}
                                             render={({ field: f }) => {
                                               const t = watch(`items.${index}.type`) as PhraseType
-                                              return <Input value={f.value} label="权重" type="number" placeholder={`${getDefaultWeight(t)}`} size="sm" className="w-16 shrink-0" onValueChange={v => f.onChange(v)} />
+                                              return <Input value={f.value} label="权重" type="number" placeholder={`${getDefaultWeight(t)}`} size="sm" className="w-16 shrink-0" onValueChange={(v: string) => f.onChange(v)} />
                                             }}
                                           />
                                         </div>
@@ -1412,7 +1412,7 @@ export default function CreatePRModal({
                                         name={`items.${index}.remark`}
                                         control={control}
                                         render={({ field: f }) => (
-                                          <Textarea value={f.value} label="备注" placeholder="可选，说明修改原因" minRows={1} size="sm" onValueChange={v => f.onChange(v)} />
+                                          <Textarea value={f.value} label="备注" placeholder="可选，说明修改原因" minRows={1} size="sm" onValueChange={(v: string) => f.onChange(v)} />
                                         )}
                                       />
                                     )}
@@ -1712,7 +1712,7 @@ export default function CreatePRModal({
                       onValueChange={setDictInput}
                       minRows={12}
                       classNames={{ input: "font-mono text-sm" }}
-                      onKeyDown={(e) => {
+                      onKeyDown={(e: React.KeyboardEvent<HTMLTextAreaElement>) => {
                         if (e.key === 'Tab') {
                           e.preventDefault()
                           const el = e.currentTarget as HTMLTextAreaElement
@@ -1771,7 +1771,7 @@ export default function CreatePRModal({
                             isDisabled={item.status === 'inferring' || item.excluded}
                             className="w-24 shrink-0"
                             classNames={{ input: "font-mono text-xs" }}
-                            onValueChange={v => updateDictItemCode(idx, v)}
+                            onValueChange={(v: string) => updateDictItemCode(idx, v)}
                           />
                           {/* Status badges */}
                           <div className="flex-1 flex items-center gap-1 min-w-0 overflow-hidden">

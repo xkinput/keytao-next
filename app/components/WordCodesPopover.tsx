@@ -15,7 +15,7 @@ import {
   Spinner,
   Input,
   Pagination
-} from '@heroui/react'
+} from '@/lib/heroui-compat'
 import toast from 'react-hot-toast'
 import { getPhraseTypeLabel, type PhraseType } from '@/lib/constants/phraseTypes'
 
@@ -144,7 +144,7 @@ export default function WordCodesPopover({
               value={searchWord}
               onValueChange={setSearchWord}
               placeholder="输入词条查询"
-              onKeyDown={(e) => {
+              onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
                 if (e.key === 'Enter') {
                   handleSearch()
                 }

@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { requireVerifiedBotUser } from '@/lib/botUserAuth'
 import { checkBatchConflictsWithWeight } from '@/lib/services/batchConflictService'
 import { buildBatchSubmitWarnings } from '@/lib/services/batchSubmitWarnings'
+import { buildSkippedCandidateSlotWarnings } from '@/lib/services/batchSkippedCodeWarnings'
 import { PhraseType } from '@/lib/constants/phraseTypes'
 
 function getErrorCode(error: unknown): string | undefined {
@@ -115,7 +116,10 @@ export async function POST(
 
     // Check for warnings (重码/多编码) — block until confirmed
     if (!confirmed) {
-      const warnings = buildBatchSubmitWarnings(items, results)
+      const warnings = [
+        ...buildBatchSubmitWarnings(items, results),
+        ...await buildSkippedCandidateSlotWarnings(items),
+      ]
 
       if (warnings.length > 0) {
         return NextResponse.json(
@@ -123,7 +127,7 @@ export async function POST(
             success: false,
             warnings,
             requiresConfirmation: true,
-            message: `批次中存在 ${warnings.length} 个重码/多编码警告，确认后可继续提交`
+            message: `批次中存在 ${warnings.length} 个重码/多编码/跳过编码空位警告，确认后可继续提交`
           },
           { status: 400 }
         )

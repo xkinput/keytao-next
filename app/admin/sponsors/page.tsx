@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Button, Input, Select, SelectItem, Switch, Chip, Spinner } from '@heroui/react'
+import { Button, Input, Select, SelectItem, Switch, Chip, Spinner } from '@/lib/heroui-compat'
 import { Plus, Trash2, Eye, EyeOff } from 'lucide-react'
 import { useAPI } from '@/lib/hooks/useSWR'
 import { apiRequest } from '@/lib/hooks/useSWR'
@@ -108,18 +108,18 @@ export default function AdminSponsorsPage() {
         <div className="flex flex-wrap gap-2">
           <Input
             label="付款姓名 *" size="sm" className="flex-1 min-w-32"
-            value={form.payerName} onValueChange={v => setForm(f => ({ ...f, payerName: v }))}
+            value={form.payerName} onValueChange={(v: string) => setForm(f => ({ ...f, payerName: v }))}
           />
           <Input
             label="备注名（展示用）" size="sm" className="flex-1 min-w-32"
             placeholder="留空则展示付款姓名"
-            value={form.remark} onValueChange={v => setForm(f => ({ ...f, remark: v }))}
+            value={form.remark} onValueChange={(v: string) => setForm(f => ({ ...f, remark: v }))}
           />
         </div>
         <div className="flex flex-wrap gap-2">
           <Input
             label="金额（元）*" size="sm" type="number" className="w-28 shrink-0"
-            value={form.amount} onValueChange={v => setForm(f => ({ ...f, amount: v }))}
+            value={form.amount} onValueChange={(v: string) => setForm(f => ({ ...f, amount: v }))}
           />
           <Select
             label="渠道" size="sm" className="w-28 shrink-0"
@@ -131,11 +131,11 @@ export default function AdminSponsorsPage() {
           </Select>
           <Input
             label="留言（可选）" size="sm" className="flex-1 min-w-40"
-            value={form.message} onValueChange={v => setForm(f => ({ ...f, message: v }))}
+            value={form.message} onValueChange={(v: string) => setForm(f => ({ ...f, message: v }))}
           />
           <div className="flex items-center gap-2 self-end pb-1">
             <span className="text-xs text-default-500">公开</span>
-            <Switch size="sm" isSelected={form.visible} onValueChange={v => setForm(f => ({ ...f, visible: v }))} />
+            <Switch size="sm" isSelected={form.visible} onValueChange={(v: boolean) => setForm(f => ({ ...f, visible: v }))} />
           </div>
         </div>
         <Button

@@ -381,14 +381,14 @@ function buildReviewItem(
 
   if (!reviewRecord && pr.action !== 'Delete') {
     raiseStatus(state, 'attention', 'warning')
-    addUnique(reasons, '未看到喵喵写入的读音或权威来源审词记录。')
-    addUnique(suggestions, '建议补充汉典、维基百科、百度百科、辞典等来源中的读音证据。')
+    addUnique(reasons, '未看到喵喵复审记录、读音来源或常用词语言常识判断。')
+    addUnique(suggestions, '建议点击“让喵再审”，由喵结合 LLM、词典来源和现代汉语常识判断；常见成语或熟语不必强制要求词典来源。')
   }
 
   if (reviewRecord && reviewRecord.sources.length === 0 && pr.action !== 'Delete') {
     raiseStatus(state, 'attention', 'warning')
-    addUnique(reasons, '有喵喵审词记录，但没有识别到权威来源名称。')
-    addUnique(suggestions, '补充来源名称，便于管理员复核。')
+    addUnique(reasons, '有喵喵审词记录，但没有识别到来源名称或常识判断说明。')
+    addUnique(suggestions, '若是大众已知的常见词、成语或熟语，可由喵在复审理由中写明读音、含义和语言常识依据。')
   }
 
   if (reviewRecord && !reviewRecord.pronunciation && pr.action !== 'Delete') {
@@ -630,14 +630,14 @@ function buildChainRecommendations(
 function buildChecklist(items: BatchAiReviewItem[], codeChains: BatchAiReviewCodeChain[]): string[] {
   const checklist = [
     '已检查批次内冲突、数据库重码、多编码和动态权重。',
-    '已识别喵喵写入的读音与权威来源备注，并标注证据缺口。',
+    '已识别喵喵写入的读音、来源或常用词语言常识备注，并标注证据缺口。',
     '已把纯删除和改码移动区分开，纯删除保留给管理员确认。',
     '已检查改词操作是否可能覆盖仍然有效的原词。',
     '已生成受影响编码链的前后顺序和优先级建议。',
   ]
 
   const missingEvidenceCount = items.filter(item =>
-    item.reasons.some(reason => reason.includes('未看到喵喵写入') || reason.includes('未看到 bot 写入') || reason.includes('没有识别到'))
+    item.reasons.some(reason => reason.includes('未看到喵喵复审') || reason.includes('未看到 bot 写入') || reason.includes('没有识别到'))
   ).length
   if (missingEvidenceCount > 0) {
     checklist.push(`有 ${missingEvidenceCount} 个条目缺少完整读音或来源证据。`)

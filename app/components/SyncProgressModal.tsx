@@ -12,7 +12,7 @@ import {
   Card,
   CardBody,
   Link,
-} from '@heroui/react'
+} from '@/lib/heroui-compat'
 import { CheckCircle2, AlertCircle } from 'lucide-react'
 
 interface SyncFile {

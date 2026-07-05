@@ -10,7 +10,7 @@ import {
   Chip,
   Button,
   Spinner,
-} from '@heroui/react'
+} from '@/lib/heroui-compat'
 import { useAPI, apiRequest } from '@/lib/hooks/useSWR'
 import { useState } from 'react'
 import { useAuthStore } from '@/lib/store/auth'
