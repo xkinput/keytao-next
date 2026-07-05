@@ -21,6 +21,11 @@ export interface GithubAutoSyncResult {
   prUrl?: string | null
   prNumber?: number | null
   branch?: string | null
+  merged?: boolean
+  mergeCommitSha?: string | null
+  releaseTag?: string | null
+  previousReleaseTag?: string | null
+  releaseUrl?: string | null
   noChanges?: boolean
   skippedReason?: string
   message: string
@@ -243,12 +248,52 @@ export async function runGithubAutoSync(options: GithubAutoSyncOptions = {}): Pr
     await prisma.syncTask.update({
       where: { id: task.id },
       data: {
-        status: SyncTaskStatus.Completed,
-        progress: 100,
-        message: '自动同步完成',
-        completedAt: new Date(),
+        progress: 95,
+        message: `已创建 GitHub PR #${pr.number}，正在自动合并并发布 Release...`,
         githubPrUrl: pr.html_url,
         githubPrNumber: pr.number,
+        processedItems: allPullRequests.length,
+      },
+    })
+
+    const releaseDate = new Date().toISOString().split('T')[0]
+    const merge = await githubService.mergePullRequest(
+      pr.number,
+      `Update dictionaries - ${releaseDate}`,
+      `自动同步 KeyTao 词库。\n\nSync task: ${task.id}`
+    )
+    const { latestTag, nextTag } = await githubService.getNextReleaseTag('patch')
+    const releaseBody = [
+      `本次 Release 由喵喵自动同步词库后发布。`,
+      '',
+      `- 同步任务：${task.id}`,
+      `- 合并 PR：${pr.html_url}`,
+      `- 待同步批次：${pendingSyncBatches} 个`,
+      `- 词条修改：${allPullRequests.length} 条`,
+      `- 更新文件：${fileNames.join('、')}`,
+      latestTag ? `- 上一个 Release：${latestTag}` : '- 上一个 Release：无',
+      '',
+      summary,
+    ].join('\n')
+
+    await githubService.createAndPushTag(
+      nextTag,
+      `Release ${nextTag}`,
+      merge.mergeCommitSha
+    )
+    const release = await githubService.createReleaseForTag(
+      nextTag,
+      `KeyTao Dictionary ${nextTag}`,
+      releaseBody
+    )
+
+    await prisma.syncTask.update({
+      where: { id: task.id },
+      data: {
+        status: SyncTaskStatus.Completed,
+        progress: 100,
+        message: `自动同步完成，已发布 ${release.tagName}`,
+        completedAt: new Date(),
         processedItems: allPullRequests.length,
       },
     })
@@ -261,7 +306,12 @@ export async function runGithubAutoSync(options: GithubAutoSyncOptions = {}): Pr
       prUrl: pr.html_url,
       prNumber: pr.number,
       branch,
-      message: 'GitHub 词库自动同步完成',
+      merged: merge.merged,
+      mergeCommitSha: merge.mergeCommitSha,
+      previousReleaseTag: latestTag,
+      releaseTag: release.tagName,
+      releaseUrl: release.htmlUrl,
+      message: `GitHub 词库自动同步完成，已发布 ${release.tagName}`,
     }
   } catch (error) {
     await prisma.syncTask.update({

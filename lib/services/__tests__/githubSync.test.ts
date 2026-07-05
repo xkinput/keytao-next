@@ -4,6 +4,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { incrementVersionTag } from '../githubSync';
 
 describe('GitHub Private Key Handling', () => {
   it('should handle private key with real newlines', () => {
@@ -68,5 +69,17 @@ MIIEpAIBAAKCAQEA
 
     const normalized = normalizeKey(singleLineKey);
     expect(normalized).toBe(singleLineKey);
+  });
+});
+
+describe('GitHub release version tags', () => {
+  it('increments release tags by patch by default', () => {
+    expect(incrementVersionTag('v1.2.3')).toBe('v1.2.4');
+    expect(incrementVersionTag(null)).toBe('v0.0.1');
+  });
+
+  it('supports minor and major bumps', () => {
+    expect(incrementVersionTag('v1.2.3', 'minor')).toBe('v1.3.0');
+    expect(incrementVersionTag('v1.2.3', 'major')).toBe('v2.0.0');
   });
 });

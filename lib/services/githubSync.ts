@@ -30,11 +30,46 @@ export interface CreatePRResult {
   branch: string;
 }
 
+export interface MergePRResult {
+  number: number;
+  html_url: string;
+  mergeCommitSha: string;
+  merged: boolean;
+}
+
+export interface CreateReleaseResult {
+  tagName: string;
+  htmlUrl: string;
+  id: number;
+}
+
+export type VersionBump = 'major' | 'minor' | 'patch';
+
 function isGitHubStatusError(error: unknown, status: number): boolean {
   return typeof error === 'object'
     && error !== null
     && 'status' in error
     && error.status === status;
+}
+
+export function incrementVersionTag(tagName: string | null, bump: VersionBump = 'patch'): string {
+  const match = tagName?.match(/^v(\d+)\.(\d+)\.(\d+)$/);
+  const major = match ? Number(match[1]) : 0;
+  const minor = match ? Number(match[2]) : 0;
+  const patch = match ? Number(match[3]) : 0;
+
+  if (bump === 'major') return `v${major + 1}.0.0`;
+  if (bump === 'minor') return `v${major}.${minor + 1}.0`;
+  return `v${major}.${minor}.${patch + 1}`;
+}
+
+function compareVersionTags(a: string, b: string): number {
+  const pa = a.slice(1).split('.').map(Number);
+  const pb = b.slice(1).split('.').map(Number);
+  for (let i = 0; i < 3; i++) {
+    if (pa[i] !== pb[i]) return pb[i] - pa[i];
+  }
+  return 0;
 }
 
 /**
@@ -364,23 +399,43 @@ export class GithubSyncService {
     const versionTags = data
       .map((t) => t.name)
       .filter((name) => /^v\d+\.\d+\.\d+$/.test(name))
-      .sort((a, b) => {
-        const pa = a.slice(1).split('.').map(Number);
-        const pb = b.slice(1).split('.').map(Number);
-        for (let i = 0; i < 3; i++) {
-          if (pa[i] !== pb[i]) return pb[i] - pa[i];
-        }
-        return 0;
-      });
+      .sort(compareVersionTags);
 
     return versionTags[0] ?? null;
   }
 
   /**
+   * Get the latest semver release tag (v[x.x.x]) from GitHub Releases
+   */
+  async getLatestReleaseTag(): Promise<string | null> {
+    const { data } = await this.octokit.repos.listReleases({
+      owner: this.owner,
+      repo: this.repo,
+      per_page: 100,
+    });
+
+    const versionTags = data
+      .map((release) => release.tag_name)
+      .filter((name): name is string => /^v\d+\.\d+\.\d+$/.test(name))
+      .sort(compareVersionTags);
+
+    return versionTags[0] ?? null;
+  }
+
+  async getNextReleaseTag(bump: VersionBump = 'patch'): Promise<{ latestTag: string | null; nextTag: string }> {
+    const latestReleaseTag = await this.getLatestReleaseTag();
+    const latestTag = latestReleaseTag ?? await this.getLatestVersionTag();
+    return {
+      latestTag,
+      nextTag: incrementVersionTag(latestTag, bump),
+    };
+  }
+
+  /**
    * Create an annotated tag on the latest commit of baseBranch and push it
    */
-  async createAndPushTag(tagName: string, message: string): Promise<void> {
-    const sha = await this.getLatestCommitSha();
+  async createAndPushTag(tagName: string, message: string, targetSha?: string): Promise<void> {
+    const sha = targetSha || await this.getLatestCommitSha();
 
     const { data: tagObj } = await this.octokit.git.createTag({
       owner: this.owner,
@@ -397,6 +452,58 @@ export class GithubSyncService {
       ref: `refs/tags/${tagName}`,
       sha: tagObj.sha,
     });
+  }
+
+  async mergePullRequest(
+    pullNumber: number,
+    commitTitle: string,
+    commitMessage: string
+  ): Promise<MergePRResult> {
+    const { data: pr } = await this.octokit.pulls.get({
+      owner: this.owner,
+      repo: this.repo,
+      pull_number: pullNumber,
+    });
+
+    const { data } = await this.octokit.pulls.merge({
+      owner: this.owner,
+      repo: this.repo,
+      pull_number: pullNumber,
+      commit_title: commitTitle,
+      commit_message: commitMessage,
+      merge_method: 'squash',
+    });
+
+    const mergeCommitSha = data.sha || await this.getLatestCommitSha();
+
+    return {
+      number: pullNumber,
+      html_url: pr.html_url,
+      mergeCommitSha,
+      merged: Boolean(data.merged),
+    };
+  }
+
+  async createReleaseForTag(
+    tagName: string,
+    name: string,
+    body: string
+  ): Promise<CreateReleaseResult> {
+    const { data } = await this.octokit.repos.createRelease({
+      owner: this.owner,
+      repo: this.repo,
+      tag_name: tagName,
+      name,
+      body,
+      draft: false,
+      prerelease: false,
+    });
+
+    return {
+      tagName: data.tag_name,
+      htmlUrl: data.html_url,
+      id: data.id,
+    };
   }
 
   /**
