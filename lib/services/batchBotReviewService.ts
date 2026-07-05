@@ -21,6 +21,7 @@ type BotBatchReviewResponse = {
 }
 
 const MIAOMIAO_REVIEW_BLOCK_PATTERN = /\n?--- miao-review:start ---[\s\S]*?--- miao-review:end ---/g
+const MIAOMIAO_REVIEW_TIMEOUT_MS = 290_000
 
 function botReviewUrl(): string {
   const baseUrl = (process.env.BOT_API_URL || 'http://localhost:8080').replace(/\/+$/, '')
@@ -40,15 +41,28 @@ export async function requestMiaomiaoBatchReview(input: {
   localReview: BatchAiReviewResult
   focusPrId?: number
 }): Promise<BatchAiReviewResult> {
-  const response = await fetch(botReviewUrl(), {
-    method: 'POST',
-    headers: botReviewHeaders(),
-    body: JSON.stringify({
-      batch: input.batch,
-      local_review: input.localReview,
-      focus_pr_id: input.focusPrId,
-    }),
-  })
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), MIAOMIAO_REVIEW_TIMEOUT_MS)
+  let response: Response
+  try {
+    response = await fetch(botReviewUrl(), {
+      method: 'POST',
+      headers: botReviewHeaders(),
+      body: JSON.stringify({
+        batch: input.batch,
+        local_review: input.localReview,
+        focus_pr_id: input.focusPrId,
+      }),
+      signal: controller.signal,
+    })
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error('喵喵复审服务超时，请稍后再试')
+    }
+    throw error
+  } finally {
+    clearTimeout(timeoutId)
+  }
 
   const data = await response.json().catch(() => ({})) as BotBatchReviewResponse
   if (!response.ok || !data.aiReview) {

@@ -3,6 +3,9 @@ import { checkAdminPermission } from '@/lib/adminAuth'
 import { getAdminBatchReviewDetail } from '@/lib/services/adminBatchReviewDetailService'
 import { requestMiaomiaoBatchReview, writeMiaomiaoBatchReview } from '@/lib/services/batchBotReviewService'
 
+export const runtime = 'nodejs'
+export const maxDuration = 300
+
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
