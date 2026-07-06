@@ -1,6 +1,6 @@
 'use client'
 
-import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type Key } from 'react'
+import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type Key } from 'react'
 import Link from 'next/link'
 import JSZip from 'jszip'
 import { pinyin } from 'pinyin-pro'
@@ -86,6 +86,7 @@ const COMMON_CHARACTER_RANK = new Map(Array.from(COMMON_SINGLE_CHARACTER_ORDER).
 type SchemeStatus = 'idle' | 'loading' | 'ready' | 'error'
 type PracticeSource = 'common500' | 'common1000' | 'article' | 'custom' | 'flyKey' | 'keytao630'
 type PracticeMode = 'follow' | 'study'
+type PracticeInputEngine = 'system' | 'librime'
 type FlyKeyRuleId = 'zh-outer' | 'zh-inner' | 'ch-outer' | 'ch-inner' | 'uang-m' | 'uang-x'
 
 interface KeyTaoConfigData {
@@ -155,6 +156,11 @@ const PRACTICE_SOURCE_OPTIONS: Array<{ key: PracticeSource; label: string; detai
   { key: 'article', label: '文章', detail: '下拉选择' },
   { key: 'flyKey', label: '键道飞键练习', detail: '常用飞键500' },
   { key: 'custom', label: '自定义文本', detail: '上传或粘贴' },
+]
+
+const PRACTICE_INPUT_ENGINE_OPTIONS: Array<{ key: PracticeInputEngine; label: string; detail: string }> = [
+  { key: 'system', label: '系统输入法', detail: '使用当前设备 IME' },
+  { key: 'librime', label: '内置 Rime', detail: '浏览器 librime 引擎' },
 ]
 
 const FLY_RULE_SUMMARY = [
@@ -860,6 +866,17 @@ interface FollowPracticeTextItemProps {
   setCurrentTargetAnchor: (node: HTMLElement | null) => void
 }
 
+function InputAnchor({ setCurrentTargetAnchor }: { setCurrentTargetAnchor: (node: HTMLElement | null) => void }) {
+  return (
+    <span
+      ref={setCurrentTargetAnchor}
+      aria-hidden="true"
+      data-current-input-anchor="true"
+      className="inline-block h-[1em] w-0 align-baseline"
+    />
+  )
+}
+
 const FollowPracticeTextItem = memo(function FollowPracticeTextItem({
   text,
   itemIndex,
@@ -869,10 +886,13 @@ const FollowPracticeTextItem = memo(function FollowPracticeTextItem({
   setCurrentTargetAnchor,
 }: FollowPracticeTextItemProps) {
   const usesOverlaySegments = tone !== 'done' && Boolean(overlaySegments && overlaySegments.length > 0)
+  const inputAnchorSegmentIndex = tone === 'current' && overlaySegments
+    ? overlaySegments.findIndex((segment) => segment.tone === 'pending')
+    : -1
+  const shouldAppendInputAnchor = tone === 'current' && usesOverlaySegments && inputAnchorSegmentIndex < 0
 
   return (
     <span
-      ref={tone === 'current' ? setCurrentTargetAnchor : undefined}
       className={`mx-0.5 inline leading-none ${usesOverlaySegments ? '' : 'border-b-2 pb-1'} ${tone === 'done'
         ? 'border-success-400 text-success-500/80'
         : tone === 'current'
@@ -881,22 +901,30 @@ const FollowPracticeTextItem = memo(function FollowPracticeTextItem({
     >
       {usesOverlaySegments && overlaySegments
         ? overlaySegments.map((segment, segmentIndex) => (
-          <span
-            key={`${itemIndex}-segment-${segmentIndex}`}
-            className={`inline border-b-2 pb-1 leading-none ${segment.tone === 'done'
-              ? 'border-success-400 text-success-500/80'
-              : segment.tone === 'wrong'
-                ? 'border-danger text-danger'
-                : tone === 'current' && showInputError
-                  ? 'border-danger/40 text-danger/55'
-                  : tone === 'current'
-                    ? 'border-primary text-foreground'
-                    : 'border-default-200 text-default-300'}`}
-          >
-            {renderFixedWidthText(segment.text, `${itemIndex}-segment-${segmentIndex}`)}
-          </span>
+          <Fragment key={`${itemIndex}-segment-${segmentIndex}`}>
+            {segmentIndex === inputAnchorSegmentIndex ? <InputAnchor setCurrentTargetAnchor={setCurrentTargetAnchor} /> : null}
+            <span
+              className={`inline border-b-2 pb-1 leading-none ${segment.tone === 'done'
+                ? 'border-success-400 text-success-500/80'
+                : segment.tone === 'wrong'
+                  ? 'border-danger text-danger'
+                  : tone === 'current' && showInputError
+                    ? 'border-danger/40 text-danger/55'
+                    : tone === 'current'
+                      ? 'border-primary text-foreground'
+                      : 'border-default-200 text-default-300'}`}
+            >
+              {renderFixedWidthText(segment.text, `${itemIndex}-segment-${segmentIndex}`)}
+            </span>
+          </Fragment>
         ))
-        : renderFixedWidthText(text, `${itemIndex}`)}
+        : (
+          <>
+            {tone === 'current' ? <InputAnchor setCurrentTargetAnchor={setCurrentTargetAnchor} /> : null}
+            {renderFixedWidthText(text, `${itemIndex}`)}
+          </>
+        )}
+      {shouldAppendInputAnchor ? <InputAnchor setCurrentTargetAnchor={setCurrentTargetAnchor} /> : null}
     </span>
   )
 })
@@ -919,18 +947,21 @@ export default function KeyTaoPracticePage() {
   const practiceTurnRef = useRef(0)
   const processRimeQueueRef = useRef<Promise<void>>(Promise.resolve())
   const currentTargetAnchorRef = useRef<HTMLElement | null>(null)
+  const practiceInputEngineRef = useRef<PracticeInputEngine>('system')
 
   const selectedSchemeKey = usePracticeStore((state) => state.selectedSchemeKey)
   const cachedSchemeVersions = usePracticeStore((state) => state.cachedSchemeVersions)
   const practiceSource = usePracticeStore((state) => state.practiceSource) as PracticeSource
   const selectedArticleId = usePracticeStore((state) => state.selectedArticleId)
   const practiceMode = usePracticeStore((state) => state.practiceMode) as PracticeMode
+  const practiceInputEngine = usePracticeStore((state) => state.practiceInputEngine) as PracticeInputEngine
   const pureDoublePinyinPractice = usePracticeStore((state) => state.pureDoublePinyinPractice)
   const hasHydratedPracticeStore = usePracticeStore((state) => state.hasHydrated)
   const setSelectedSchemeKey = usePracticeStore((state) => state.setSelectedSchemeKey)
   const setPracticeSource = usePracticeStore((state) => state.setPracticeSource)
   const setSelectedArticleId = usePracticeStore((state) => state.setSelectedArticleId)
   const setStoredPracticeMode = usePracticeStore((state) => state.setPracticeMode)
+  const setPracticeInputEngine = usePracticeStore((state) => state.setPracticeInputEngine)
   const setPureDoublePinyinPractice = usePracticeStore((state) => state.setPureDoublePinyinPractice)
   const upsertCachedSchemeVersion = usePracticeStore((state) => state.upsertCachedSchemeVersion)
   const removeCachedSchemeVersion = usePracticeStore((state) => state.removeCachedSchemeVersion)
@@ -1023,8 +1054,10 @@ export default function KeyTaoPracticePage() {
     [remainingPracticeTexts]
   )
   const isStudyMode = practiceMode === 'study'
+  const isLibrimeInputEngine = practiceInputEngine === 'librime'
+  const isSystemInputEngine = practiceInputEngine === 'system'
   const isRimeReady = rimeStatus === 'ready' && Boolean(rimeEngineRef.current)
-  const shouldUsePureDoublePinyinDetection = isStudyMode && pureDoublePinyinPractice
+  const shouldUsePureDoublePinyinDetection = isLibrimeInputEngine && isStudyMode && pureDoublePinyinPractice
   const shouldPreferCssDetectionCodes = shouldUsePureDoublePinyinDetection && isCssPracticeCodeSource(
     selectedRimeSchema ? `${selectedRimeSchema.id} ${selectedRimeSchema.name}` : undefined
   )
@@ -1179,15 +1212,17 @@ export default function KeyTaoPracticePage() {
   const rimeDetailLabel = rimeStatus === 'ready'
     ? `${selectedRimeSchema?.name ?? '已部署方案'}${rimeSchemas.length > 0 ? ` · ${rimeSchemas.length} 个方案` : ''}`
     : rimeDetail || rimeMessage
+  const inputEngineStatusLabel = isLibrimeInputEngine ? rimeStatusLabel : '系统输入法'
+  const inputEngineDetailLabel = isLibrimeInputEngine
+    ? rimeDetailLabel
+    : '使用当前设备输入法，输入法候选窗由系统显示'
 
   const focusPracticeSurface = useCallback(() => {
-    const shouldUseKeyboardBridge = window.matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0
+    const shouldUseKeyboardBridge = practiceInputEngineRef.current === 'system'
+      || window.matchMedia('(pointer: coarse)').matches
+      || navigator.maxTouchPoints > 0
     const target = shouldUseKeyboardBridge ? keyboardBridgeRef.current : inputSurfaceRef.current
     target?.focus({ preventScroll: true })
-  }, [])
-
-  const setCurrentTargetAnchor = useCallback((node: HTMLElement | null) => {
-    currentTargetAnchorRef.current = node
   }, [])
 
   const updateCandidateOverlayPosition = useCallback(() => {
@@ -1196,18 +1231,25 @@ export default function KeyTaoPracticePage() {
       return
     }
 
+    const cardRect = cardBodyRef.current.getBoundingClientRect()
     const anchorRect = currentTargetAnchorRef.current.getBoundingClientRect()
     const minWidth = 180
     const minLeft = 12
-    const viewportWidth = window.visualViewport?.width ?? window.innerWidth
-    const maxLeft = Math.max(minLeft, viewportWidth - minLeft - minWidth)
-    const anchorLeft = anchorRect.left
+    const maxLeft = Math.max(minLeft, cardRect.width - minLeft - minWidth)
+    const anchorLeft = anchorRect.left - cardRect.left
     const left = Math.min(Math.max(anchorLeft, minLeft), maxLeft)
-    const maxWidth = Math.max(minWidth, viewportWidth - left - minLeft)
-    const top = anchorRect.bottom + 14
+    const maxWidth = Math.max(minWidth, cardRect.width - left - minLeft)
+    const top = anchorRect.bottom - cardRect.top + 14
 
     setCandidateOverlayStyle({ top, left, maxWidth })
   }, [isTouchLayout])
+
+  const setCurrentTargetAnchor = useCallback((node: HTMLElement | null) => {
+    currentTargetAnchorRef.current = node
+    if (!node || typeof window === 'undefined') return
+
+    window.requestAnimationFrame(updateCandidateOverlayPosition)
+  }, [updateCandidateOverlayPosition])
 
   const updateMobileCandidateOverlayPosition = useCallback(() => {
     if (!isTouchLayout || !candidatePanelRef.current) {
@@ -1224,6 +1266,15 @@ export default function KeyTaoPracticePage() {
 
     setMobileCandidateOverlayTop(Math.round(nextTop))
   }, [isTouchLayout])
+
+  const keyboardBridgeStyle = useMemo<CSSProperties | undefined>(() => {
+    if (!isSystemInputEngine || isTouchLayout || !candidateOverlayStyle) return undefined
+
+    return {
+      top: `${Math.max(12, candidateOverlayStyle.top - 10)}px`,
+      left: `${candidateOverlayStyle.left}px`,
+    }
+  }, [candidateOverlayStyle, isSystemInputEngine, isTouchLayout])
 
   const scrollCurrentTargetIntoView = useCallback((behavior: ScrollBehavior = 'smooth') => {
     const surface = inputSurfaceRef.current
@@ -1279,6 +1330,10 @@ export default function KeyTaoPracticePage() {
   }, [selectedSchemaId])
 
   useEffect(() => {
+    practiceInputEngineRef.current = practiceInputEngine
+  }, [practiceInputEngine])
+
+  useEffect(() => {
     currentCommittedTextRef.current = currentCommittedText
   }, [currentCommittedText])
 
@@ -1326,7 +1381,7 @@ export default function KeyTaoPracticePage() {
       viewport?.removeEventListener('resize', updateMobileCandidateOverlayPosition)
       viewport?.removeEventListener('scroll', updateMobileCandidateOverlayPosition)
     }
-  }, [currentIndex, displayedCandidateMeasureKey, isPracticeFocused, isStudyMode, updateCandidateOverlayPosition, updateMobileCandidateOverlayPosition])
+  }, [currentCommittedText, currentIndex, displayedCandidateMeasureKey, isPracticeFocused, isStudyMode, updateCandidateOverlayPosition, updateMobileCandidateOverlayPosition])
 
   useEffect(() => {
     if (isStudyMode) return
@@ -1721,6 +1776,49 @@ export default function KeyTaoPracticePage() {
     applyCommittedText(result.committedText, result.composition ?? null)
   }, [applyCommittedText])
 
+  const submitSystemCommittedText = useCallback((text: string) => {
+    if (!currentItem || isFinished || !text) return false
+
+    clearPendingStudyAutoCommit()
+    if (!startTime) setStartTime(Date.now())
+    setTotalKeys((value) => value + Math.max(1, Array.from(text).length))
+    setRimeComposition(null)
+    applyCommittedText(text, null)
+    return true
+  }, [applyCommittedText, clearPendingStudyAutoCommit, currentItem, isFinished, startTime])
+
+  const submitSystemBackspace = useCallback(() => {
+    if (!currentItem || isFinished) return false
+
+    if (!startTime) setStartTime(Date.now())
+    setTotalKeys((value) => value + 1)
+    clearPendingStudyAutoCommit()
+
+    if (currentCommittedTextRef.current) {
+      const nextCommittedText = Array.from(currentCommittedTextRef.current).slice(0, -1).join('')
+      currentCommittedTextRef.current = nextCommittedText
+      setCurrentCommittedText(nextCommittedText)
+      if (isStudyMode) {
+        setFeedback(null)
+      } else if (nextCommittedText) {
+        const resolution = resolveFollowPracticeCommit({
+          currentCommittedText: '',
+          committedText: nextCommittedText,
+          remainingTexts: remainingPracticeTexts,
+          remainingTargetText: remainingPracticeText,
+        })
+        setFeedback(resolution.type === 'mismatch'
+          ? `当前输入「${resolution.attemptedText}」，目标是「${resolution.targetText}」`
+          : null)
+      } else {
+        setFeedback(null)
+      }
+      return true
+    }
+
+    return rewindToPreviousItem()
+  }, [clearPendingStudyAutoCommit, currentItem, isFinished, isStudyMode, remainingPracticeText, remainingPracticeTexts, rewindToPreviousItem, startTime])
+
   const processRimeKey = useCallback(async (key: string) => {
     const turn = practiceTurnRef.current
     processRimeQueueRef.current = processRimeQueueRef.current
@@ -1835,6 +1933,14 @@ export default function KeyTaoPracticePage() {
 
     const isKeyboardBridge = event.currentTarget === keyboardBridgeRef.current
     const isPlainTextKey = event.key.length === 1 && !event.ctrlKey && !event.altKey && !event.metaKey
+    if (isSystemInputEngine) {
+      if (event.key === 'Backspace' && (!isKeyboardBridge || !keyboardBridgeRef.current?.value)) {
+        event.preventDefault()
+        submitSystemBackspace()
+      }
+      return
+    }
+
     if (isKeyboardBridge && isPlainTextKey) return
 
     if (event.key === 'Backspace' && !rimeComposition?.preedit && !currentCommittedTextRef.current) {
@@ -1860,11 +1966,19 @@ export default function KeyTaoPracticePage() {
 
     event.preventDefault()
     submitRimeKey(rimeKey)
-  }, [changeRimePage, currentItem, isFinished, isRimeReady, rewindToPreviousItem, rimeComposition?.preedit, submitRimeKey])
+  }, [changeRimePage, currentItem, isFinished, isRimeReady, isSystemInputEngine, rewindToPreviousItem, rimeComposition?.preedit, submitRimeKey, submitSystemBackspace])
 
   const handleKeyboardBridgeBeforeInput = useCallback((event: React.FormEvent<HTMLInputElement>) => {
     const nativeEvent = event.nativeEvent as InputEvent
     if (nativeEvent.isComposing) return
+
+    if (isSystemInputEngine) {
+      if (nativeEvent.inputType === 'deleteContentBackward' && !event.currentTarget.value) {
+        event.preventDefault()
+        submitSystemBackspace()
+      }
+      return
+    }
 
     const keys = nativeEvent.inputType === 'deleteContentBackward'
       ? ['{BackSpace}']
@@ -1881,15 +1995,23 @@ export default function KeyTaoPracticePage() {
     event.preventDefault()
     submitPracticeKeys(keys)
     event.currentTarget.value = ''
-  }, [submitPracticeKeys])
+  }, [isSystemInputEngine, submitPracticeKeys, submitSystemBackspace])
 
   const handleKeyboardBridgeInput = useCallback((event: React.FormEvent<HTMLInputElement>) => {
+    const nativeEvent = event.nativeEvent as InputEvent
+    if (nativeEvent.isComposing) return
+
     const value = event.currentTarget.value
     event.currentTarget.value = ''
     if (!value) return
 
+    if (isSystemInputEngine) {
+      submitSystemCommittedText(value)
+      return
+    }
+
     submitPracticeKeys(Array.from(value))
-  }, [submitPracticeKeys])
+  }, [isSystemInputEngine, submitPracticeKeys, submitSystemCommittedText])
 
   const handlePracticeModeChange = useCallback((enabled: boolean) => {
     clearPendingStudyAutoCommit()
@@ -1905,6 +2027,21 @@ export default function KeyTaoPracticePage() {
     setFeedback(null)
     focusPracticeSurface()
   }, [clearPendingStudyAutoCommit, focusPracticeSurface, setPureDoublePinyinPractice])
+
+  const handlePracticeInputEngineChange = useCallback((keys: 'all' | Set<Key>) => {
+    const nextInputEngine = getSingleSelectionValue(keys)
+    if (nextInputEngine !== 'system' && nextInputEngine !== 'librime') return
+
+    clearPendingStudyAutoCommit()
+    setPracticeInputEngine(nextInputEngine)
+    setRimeComposition(null)
+    if (keyboardBridgeRef.current) keyboardBridgeRef.current.value = ''
+    if (nextInputEngine === 'librime' && rimeStatusRef.current === 'ready') {
+      void resetRimeSession().catch(() => undefined)
+    }
+    setFeedback(nextInputEngine === 'system' ? '已切换为系统输入法' : '已切换为内置 Rime 输入引擎')
+    window.requestAnimationFrame(focusPracticeSurface)
+  }, [clearPendingStudyAutoCommit, focusPracticeSurface, resetRimeSession, setPracticeInputEngine])
 
   const loadPracticeArticles = useCallback(async (forceRefresh = false) => {
     const cachedArticles = readCachedPracticeArticles()
@@ -2402,7 +2539,7 @@ export default function KeyTaoPracticePage() {
             {showRimeStatus && (
               <Alert
                 hideIcon
-                color={rimeStatus === 'ready' ? 'success' : rimeStatus === 'checking' ? 'primary' : 'warning'}
+                color={isLibrimeInputEngine ? rimeStatus === 'ready' ? 'success' : rimeStatus === 'checking' ? 'primary' : 'warning' : 'success'}
                 variant="flat"
                 className="min-w-0 w-full overflow-hidden"
                 classNames={{
@@ -2413,14 +2550,14 @@ export default function KeyTaoPracticePage() {
                 <div className="flex min-w-0 w-full flex-col gap-1">
                   <div className="flex min-w-0 w-full items-start justify-between gap-2 sm:items-center">
                     <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto whitespace-nowrap text-[12px] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:overflow-hidden">
-                      <span className="shrink-0 font-medium text-default-500">Rime引擎：</span>
-                      <span className="shrink-0 font-semibold">{rimeStatusLabel}</span>
-                      {rimeStatus === 'checking' && (
+                      <span className="shrink-0 font-medium text-default-500">输入：</span>
+                      <span className="shrink-0 font-semibold">{inputEngineStatusLabel}</span>
+                      {isLibrimeInputEngine && rimeStatus === 'checking' && (
                         <Progress aria-label="Rime 启动进度" value={rimeProgress} color="primary" size="sm" className="w-24 shrink-0" />
                       )}
-                      <span className="hidden min-w-0 truncate text-[11px] text-default-500 sm:inline">{rimeDetailLabel}</span>
+                      <span className="hidden min-w-0 truncate text-[11px] text-default-500 sm:inline">{inputEngineDetailLabel}</span>
                     </div>
-                    {isRimeReady && rimeSchemas.length > 0 && (
+                    {isLibrimeInputEngine && isRimeReady && rimeSchemas.length > 0 && (
                       <div className="w-38 min-w-38 shrink-0 sm:w-40 sm:min-w-40">
                         <Select
                           aria-label="Rime 方案列表"
@@ -2448,7 +2585,7 @@ export default function KeyTaoPracticePage() {
                       </div>
                     )}
                   </div>
-                  <div className="min-w-0 text-[11px] leading-tight text-default-500 sm:hidden">{rimeDetailLabel}</div>
+                  <div className="min-w-0 text-[11px] leading-tight text-default-500 sm:hidden">{inputEngineDetailLabel}</div>
                 </div>
               </Alert>
             )}
@@ -2477,9 +2614,12 @@ export default function KeyTaoPracticePage() {
                   autoComplete="off"
                   autoCorrect="off"
                   spellCheck={false}
-                  aria-label="键道移动端输入桥"
+                  aria-label={isSystemInputEngine ? '键道练习系统输入法输入框' : '键道移动端输入桥'}
                   tabIndex={-1}
-                  className="pointer-events-none absolute left-4 top-4 h-11 w-11 opacity-0"
+                  style={isSystemInputEngine ? { top: '1rem', left: '1rem', ...keyboardBridgeStyle } : undefined}
+                  className={isSystemInputEngine
+                    ? 'pointer-events-none absolute z-60 h-8 w-24 border-0 bg-transparent text-transparent caret-transparent opacity-[0.01] outline-none'
+                    : 'pointer-events-none absolute left-4 top-4 h-11 w-11 opacity-0'}
                   onFocus={() => setIsPracticeFocused(true)}
                   onBlur={() => setIsPracticeFocused(false)}
                   onKeyDown={handleKeyDown}
@@ -2495,6 +2635,29 @@ export default function KeyTaoPracticePage() {
                     <span>{practiceItems.length.toLocaleString()} 项</span>
                   </div>
                   <div className="flex flex-wrap items-center justify-end gap-2">
+                    <div className="w-36 min-w-36">
+                      <Select
+                        aria-label="输入引擎"
+                        placeholder="输入方式"
+                        size="sm"
+                        disallowEmptySelection
+                        selectedKeys={[practiceInputEngine]}
+                        onSelectionChange={handlePracticeInputEngineChange}
+                        classNames={{
+                          trigger: 'h-9 min-h-9 rounded-xl bg-content1 px-3',
+                          value: 'text-[12px] font-semibold',
+                        }}
+                      >
+                        {PRACTICE_INPUT_ENGINE_OPTIONS.map((option) => (
+                          <SelectItem key={option.key} textValue={option.label}>
+                            <span className="flex min-w-0 flex-col">
+                              <span className="truncate font-semibold">{option.label}</span>
+                              <span className="truncate text-xs text-default-500">{option.detail}</span>
+                            </span>
+                          </SelectItem>
+                        ))}
+                      </Select>
+                    </div>
                     <Switch
                       size="sm"
                       isSelected={isStudyMode}
@@ -2502,7 +2665,7 @@ export default function KeyTaoPracticePage() {
                     >
                       学习模式
                     </Switch>
-                    {isStudyMode && (
+                    {isStudyMode && isLibrimeInputEngine && (
                       <Switch
                         size="sm"
                         isSelected={pureDoublePinyinPractice}
@@ -2576,7 +2739,7 @@ export default function KeyTaoPracticePage() {
                       {currentItem && !isFinished ? (
                         <div className="flex flex-col items-center gap-3">
                           <div className="text-small text-default-500">{currentIndex + 1} / {practiceItems.length}</div>
-                          <div ref={(node) => { currentTargetAnchorRef.current = node }} className="text-[clamp(3.5rem,9vw,7rem)] font-semibold leading-none tracking-normal text-foreground">{currentItem.text}</div>
+                          <div ref={setCurrentTargetAnchor} data-current-input-anchor="true" className="text-[clamp(3.5rem,9vw,7rem)] font-semibold leading-none tracking-normal text-foreground">{currentItem.text}</div>
                         </div>
                       ) : isPracticeLoading ? (
                         <div className="flex flex-col items-center gap-3">
@@ -2633,12 +2796,13 @@ export default function KeyTaoPracticePage() {
                   )}
                 </div>
 
-                {isPracticeFocused && currentItem && !isFinished && (
+                {isLibrimeInputEngine && isPracticeFocused && currentItem && !isFinished && (isTouchLayout || candidateOverlayStyle) && (
                   <div
                     ref={candidatePanelRef}
+                    data-test-candidate-panel="true"
                     className={`${isTouchLayout
                       ? 'fixed left-3 right-3 z-60 overflow-hidden rounded-large border bg-content1/95 shadow-2xl backdrop-blur sm:left-4 sm:right-4'
-                      : 'fixed z-60 w-max overflow-hidden rounded-large border bg-content1/95 shadow-2xl backdrop-blur'} ${hasInputError ? 'border-danger' : 'border-primary/40'}`}
+                      : 'absolute z-60 w-max overflow-hidden rounded-large border bg-content1/95 shadow-2xl backdrop-blur'} ${hasInputError ? 'border-danger' : 'border-primary/40'}`}
                     style={isTouchLayout
                       ? mobileCandidateOverlayTop === null
                         ? { bottom: 'calc(env(safe-area-inset-bottom) + 0.75rem)' }

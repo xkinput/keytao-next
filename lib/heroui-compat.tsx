@@ -404,17 +404,18 @@ export function CardHeader({ className, children, ...props }: AnyProps) {
   )
 }
 
-export function CardBody({ className, children, ...props }: AnyProps) {
+export const CardBody = React.forwardRef<HTMLElement, AnyProps>(function CardBody({ className, children, ...props }, ref) {
   const Component = H.Card.Content ?? H.CardContent
   return (
     <Component
+      ref={ref}
       className={cn(sectionPadding('px-4 sm:px-5', 'py-4 sm:py-5', className), sectionGap('gap-3', className), className)}
       {...props}
     >
       {children}
     </Component>
   )
-}
+})
 
 export function CardFooter({ className, children, ...props }: AnyProps) {
   const Component = H.Card.Footer ?? H.CardFooter
@@ -966,13 +967,15 @@ type SwitchProps = Omit<UnknownBaseProps, 'children'> & {
   onValueChange?: (value: boolean) => void
 }
 
-export function Switch({ children, className, isSelected, onValueChange, ...props }: SwitchProps) {
+export function Switch({ children, className, classNames, isSelected, onValueChange, ...props }: SwitchProps) {
   return (
-    <H.Switch isSelected={isSelected} onChange={onValueChange} className={className} {...props}>
-      <H.Switch.Control>
-        <H.Switch.Thumb />
-      </H.Switch.Control>
-      {children ? <H.Switch.Content>{children}</H.Switch.Content> : null}
+    <H.Switch isSelected={isSelected} onChange={onValueChange} className={cn(slotClass(classNames), className)} {...props}>
+      <H.Switch.Content className={cn('inline-flex items-center gap-2', slotClass(classNames, 'content'))}>
+        <H.Switch.Control className={slotClass(classNames, 'control')}>
+          <H.Switch.Thumb className={slotClass(classNames, 'thumb')} />
+        </H.Switch.Control>
+        {children}
+      </H.Switch.Content>
     </H.Switch>
   )
 }
