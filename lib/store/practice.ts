@@ -38,6 +38,20 @@ function sortCachedVersions(versions: CachedPracticeSchemeVersion[]): CachedPrac
   return [...versions].sort((a, b) => b.downloadedAt.localeCompare(a.downloadedAt))
 }
 
+function migratePracticeStore(persistedState: unknown, version: number): Partial<PracticeStore> {
+  if (!persistedState || typeof persistedState !== 'object') return {}
+
+  const state = persistedState as Partial<PracticeStore>
+  if (version < 1) {
+    return {
+      ...state,
+      practiceInputEngine: 'librime',
+    }
+  }
+
+  return state
+}
+
 export const usePracticeStore = create<PracticeStore>()(
   persist(
     (set) => ({
@@ -46,7 +60,7 @@ export const usePracticeStore = create<PracticeStore>()(
       practiceSource: 'common500',
       selectedArticleId: 'builtin:default-longform',
       practiceMode: 'follow',
-      practiceInputEngine: 'system',
+      practiceInputEngine: 'librime',
       pureDoublePinyinPractice: false,
       hasHydrated: false,
       setSelectedSchemeKey: (schemeKey) => set({ selectedSchemeKey: schemeKey }),
@@ -79,6 +93,8 @@ export const usePracticeStore = create<PracticeStore>()(
     }),
     {
       name: 'practice-storage',
+      version: 1,
+      migrate: migratePracticeStore,
       partialize: (state) => ({
         selectedSchemeKey: state.selectedSchemeKey,
         cachedSchemeVersions: state.cachedSchemeVersions,

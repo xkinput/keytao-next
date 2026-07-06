@@ -947,7 +947,7 @@ export default function KeyTaoPracticePage() {
   const practiceTurnRef = useRef(0)
   const processRimeQueueRef = useRef<Promise<void>>(Promise.resolve())
   const currentTargetAnchorRef = useRef<HTMLElement | null>(null)
-  const practiceInputEngineRef = useRef<PracticeInputEngine>('system')
+  const practiceInputEngineRef = useRef<PracticeInputEngine>('librime')
 
   const selectedSchemeKey = usePracticeStore((state) => state.selectedSchemeKey)
   const cachedSchemeVersions = usePracticeStore((state) => state.cachedSchemeVersions)
@@ -2013,6 +2013,16 @@ export default function KeyTaoPracticePage() {
     submitPracticeKeys(Array.from(value))
   }, [isSystemInputEngine, submitPracticeKeys, submitSystemCommittedText])
 
+  const handleKeyboardBridgeCompositionEnd = useCallback((event: React.CompositionEvent<HTMLInputElement>) => {
+    if (!isSystemInputEngine) return
+
+    const value = event.currentTarget.value
+    event.currentTarget.value = ''
+    if (!value) return
+
+    submitSystemCommittedText(value)
+  }, [isSystemInputEngine, submitSystemCommittedText])
+
   const handlePracticeModeChange = useCallback((enabled: boolean) => {
     clearPendingStudyAutoCommit()
     setStoredPracticeMode(enabled ? 'study' : 'follow')
@@ -2625,6 +2635,7 @@ export default function KeyTaoPracticePage() {
                   onKeyDown={handleKeyDown}
                   onBeforeInput={handleKeyboardBridgeBeforeInput}
                   onInput={handleKeyboardBridgeInput}
+                  onCompositionEnd={handleKeyboardBridgeCompositionEnd}
                 />
                 <div className="shrink-0 flex flex-col gap-3 border-b border-divider px-5 py-4 md:flex-row md:items-center md:justify-between">
                   <div className="flex items-center gap-2 text-small text-default-500">
