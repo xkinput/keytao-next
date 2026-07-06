@@ -967,14 +967,23 @@ type SwitchProps = Omit<UnknownBaseProps, 'children'> & {
   onValueChange?: (value: boolean) => void
 }
 
-export function Switch({ children, className, classNames, isSelected, onValueChange, ...props }: SwitchProps) {
+export function Switch({ children, className, classNames, isSelected, onValueChange, style, ...props }: SwitchProps) {
   return (
-    <H.Switch isSelected={isSelected} onChange={onValueChange} className={cn(slotClass(classNames), className)} {...props}>
-      <H.Switch.Content className={cn('inline-flex items-center gap-2', slotClass(classNames, 'content'))}>
+    <H.Switch
+      isSelected={isSelected}
+      onChange={onValueChange}
+      className={cn('!inline-flex !flex-row !items-center !gap-2', slotClass(classNames), className)}
+      style={{ display: 'inline-flex', flexDirection: 'row', alignItems: 'center', ...style }}
+      {...props}
+    >
+      <H.Switch.Content
+        className={cn('!inline-flex !flex-row !items-center !gap-2 whitespace-nowrap', slotClass(classNames, 'content'))}
+        style={{ display: 'inline-flex', flexDirection: 'row', alignItems: 'center', gap: '0.5rem' }}
+      >
         <H.Switch.Control className={slotClass(classNames, 'control')}>
           <H.Switch.Thumb className={slotClass(classNames, 'thumb')} />
         </H.Switch.Control>
-        {children}
+        {children ? <span className="whitespace-nowrap leading-none">{children}</span> : null}
       </H.Switch.Content>
     </H.Switch>
   )
