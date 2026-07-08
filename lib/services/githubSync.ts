@@ -7,6 +7,10 @@ import { Octokit } from '@octokit/rest';
 import { createAppAuth } from '@octokit/auth-app';
 import { format } from 'date-fns';
 
+type GithubBranchData = Awaited<ReturnType<Octokit['repos']['getBranch']>>['data'];
+
+const GITHUB_BRANCH_RETRY_DELAYS_MS = [500, 1000, 2000, 4000];
+
 export interface GithubConfig {
   owner: string;
   repo: string;
@@ -72,6 +76,10 @@ function compareVersionTags(a: string, b: string): number {
   return 0;
 }
 
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /**
  * Github Sync Service Class
  */
@@ -123,7 +131,8 @@ export class GithubSyncService {
       .replace(/[^a-z0-9-]/g, '-')
       .replace(/-+/g, '-')
       .replace(/^-|-$/g, '')
-      .slice(0, 24);
+      .slice(0, 24)
+      .replace(/-+$/g, '');
 
     return normalizedSuffix
       ? `update-dict-${date}-${normalizedSuffix}`
@@ -138,11 +147,7 @@ export class GithubSyncService {
    * Get latest commit SHA from base branch
    */
   async getLatestCommitSha(): Promise<string> {
-    const { data } = await this.octokit.repos.getBranch({
-      owner: this.owner,
-      repo: this.repo,
-      branch: this.baseBranch,
-    });
+    const data = await this.getBranchWithRetry(this.baseBranch);
     return data.commit.sha;
   }
 
@@ -150,11 +155,7 @@ export class GithubSyncService {
    * Get latest commit info from base branch
    */
   async getLatestCommitInfo(): Promise<{ sha: string; message: string; date: string; author: string }> {
-    const { data } = await this.octokit.repos.getBranch({
-      owner: this.owner,
-      repo: this.repo,
-      branch: this.baseBranch,
-    });
+    const data = await this.getBranchWithRetry(this.baseBranch);
     const c = data.commit.commit;
     return {
       sha: data.commit.sha,
@@ -205,9 +206,36 @@ export class GithubSyncService {
 
     if (!exists) {
       await this.createBranch(branchName);
+      await this.getBranchWithRetry(branchName);
     }
 
     return branchName;
+  }
+
+  private async getBranchWithRetry(branch: string): Promise<GithubBranchData> {
+    let lastError: unknown;
+
+    for (let attempt = 0; attempt <= GITHUB_BRANCH_RETRY_DELAYS_MS.length; attempt++) {
+      try {
+        const { data } = await this.octokit.repos.getBranch({
+          owner: this.owner,
+          repo: this.repo,
+          branch,
+        });
+        return data;
+      } catch (error: unknown) {
+        lastError = error;
+        if (!isGitHubStatusError(error, 404) || attempt >= GITHUB_BRANCH_RETRY_DELAYS_MS.length) {
+          throw error;
+        }
+
+        const delayMs = GITHUB_BRANCH_RETRY_DELAYS_MS[attempt];
+        console.warn(`[GitHub] Branch ${branch} not visible yet, retrying in ${delayMs}ms`);
+        await wait(delayMs);
+      }
+    }
+
+    throw lastError;
   }
 
   /**
@@ -313,11 +341,7 @@ export class GithubSyncService {
       return;
     }
 
-    const { data: branchData } = await this.octokit.repos.getBranch({
-      owner: this.owner,
-      repo: this.repo,
-      branch,
-    });
+    const branchData = await this.getBranchWithRetry(branch);
 
     const baseCommitSha = branchData.commit.sha;
     const { data: baseCommit } = await this.octokit.git.getCommit({

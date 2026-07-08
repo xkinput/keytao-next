@@ -69,6 +69,7 @@ vi.mock('@/lib/prisma', () => ({
       create: vi.fn(),
       findFirst: vi.fn(),
       update: vi.fn(),
+      updateMany: vi.fn(),
       count: vi.fn(),
     },
     pullRequest: {
@@ -119,6 +120,7 @@ vi.mock('@/lib/prisma', () => ({
       findUnique: vi.fn(),
       update: vi.fn(),
     },
+    $transaction: vi.fn(async (operations: unknown[]) => Promise.all(operations)),
   },
 }))
 
@@ -154,6 +156,7 @@ beforeEach(() => {
   mockCreateGithubSyncService.mockReturnValue({})
   mockPrisma.batch.create.mockResolvedValue({ id: 'batch-new' })
   mockPrisma.batch.update.mockResolvedValue({ id: 'batch-1' })
+  mockPrisma.batch.updateMany.mockResolvedValue({ count: 0 })
   mockPrisma.batch.findMany.mockResolvedValue([])
   mockPrisma.pullRequest.create.mockResolvedValue({ id: 1 })
   mockPrisma.pullRequest.findMany.mockResolvedValue([])
@@ -300,6 +303,37 @@ describe('API abuse guards', () => {
       skippedReason: 'below_threshold',
     })
     expect(mockPrisma.syncTask.findFirst).not.toHaveBeenCalled()
+    expect(mockCreateGithubSyncService).not.toHaveBeenCalled()
+  })
+
+  it('releases failed auto-sync batches before counting scheduled sync work', async () => {
+    mockPrisma.syncTask.findMany.mockResolvedValue([{ id: 'failed-task-1' }])
+    mockPrisma.batch.updateMany.mockResolvedValue({ count: 15 })
+    mockPrisma.batch.count.mockResolvedValue(10)
+    const { POST } = await import('./bot/sync-to-github/auto/route')
+
+    const res = await POST(jsonRequest('http://localhost/api/bot/sync-to-github/auto', { threshold: 10 }))
+    const data = await res.json()
+
+    expect(res.status).toBe(200)
+    expect(data).toMatchObject({
+      success: true,
+      triggered: false,
+      pendingSyncBatches: 10,
+      releasedFailedBatches: 15,
+      skippedReason: 'below_threshold',
+    })
+    expect(mockPrisma.batch.updateMany).toHaveBeenCalledWith({
+      where: {
+        status: 'Approved',
+        syncTaskId: {
+          in: ['failed-task-1'],
+        },
+      },
+      data: {
+        syncTaskId: null,
+      },
+    })
     expect(mockCreateGithubSyncService).not.toHaveBeenCalled()
   })
 

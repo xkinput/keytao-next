@@ -3,8 +3,13 @@
  * These tests don't require database connection
  */
 
-import { describe, it, expect } from 'vitest';
-import { incrementVersionTag } from '../githubSync';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { GithubSyncService, incrementVersionTag } from '../githubSync';
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
 
 describe('GitHub Private Key Handling', () => {
   it('should handle private key with real newlines', () => {
@@ -81,5 +86,51 @@ describe('GitHub release version tags', () => {
   it('supports minor and major bumps', () => {
     expect(incrementVersionTag('v1.2.3', 'minor')).toBe('v1.3.0');
     expect(incrementVersionTag('v1.2.3', 'major')).toBe('v2.0.0');
+  });
+});
+
+describe('GitHub sync branch handling', () => {
+  it('trims generated branch names after truncating uuid suffixes', () => {
+    const service = new GithubSyncService({ owner: 'xkinput', repo: 'KeyTao', token: 'token' });
+
+    const branch = service.generateBranchName('0becd0d5-f61b-4975-9341-34faf4db61b6');
+
+    expect(branch).toMatch(/^update-dict-\d{4}-\d{2}-\d{2}-0becd0d5-f61b-4975-9341$/);
+    expect(branch.endsWith('-')).toBe(false);
+  });
+
+  it('retries transient branch 404s before committing files', async () => {
+    vi.useFakeTimers();
+    const service = new GithubSyncService({ owner: 'xkinput', repo: 'KeyTao', token: 'token' });
+    const transientNotFound = Object.assign(new Error('Branch not found'), { status: 404 });
+    const octokit = {
+      repos: {
+        getBranch: vi.fn()
+          .mockRejectedValueOnce(transientNotFound)
+          .mockResolvedValueOnce({ data: { commit: { sha: 'base-sha' } } }),
+      },
+      git: {
+        getCommit: vi.fn().mockResolvedValue({ data: { tree: { sha: 'tree-sha' } } }),
+        createTree: vi.fn().mockResolvedValue({ data: { sha: 'new-tree-sha' } }),
+        createCommit: vi.fn().mockResolvedValue({ data: { sha: 'new-commit-sha' } }),
+        updateRef: vi.fn().mockResolvedValue({ data: {} }),
+      },
+    };
+    Object.assign(service, { octokit });
+
+    const commitPromise = service.commitFiles(
+      'update-dict-branch',
+      [{ path: 'rime/keytao.dict.yaml', content: 'content' }],
+      'Update dictionaries'
+    );
+
+    await vi.advanceTimersByTimeAsync(500);
+    await commitPromise;
+
+    expect(octokit.repos.getBranch).toHaveBeenCalledTimes(2);
+    expect(octokit.git.updateRef).toHaveBeenCalledWith(expect.objectContaining({
+      ref: 'heads/update-dict-branch',
+      sha: 'new-commit-sha',
+    }));
   });
 });

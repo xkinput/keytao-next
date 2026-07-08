@@ -27,8 +27,41 @@ export interface GithubAutoSyncResult {
   previousReleaseTag?: string | null
   releaseUrl?: string | null
   noChanges?: boolean
+  releasedFailedBatches?: number
   skippedReason?: string
   message: string
+}
+
+async function releaseFailedGithubSyncBatches(): Promise<number> {
+  const failedTasks = await prisma.syncTask.findMany({
+    where: {
+      status: SyncTaskStatus.Failed,
+      githubPrUrl: null,
+      batches: {
+        some: {
+          status: 'Approved',
+        },
+      },
+    },
+    select: {
+      id: true,
+    },
+  })
+  const failedTaskIds = failedTasks.map((task) => task.id)
+  if (failedTaskIds.length === 0) return 0
+
+  const result = await prisma.batch.updateMany({
+    where: {
+      status: 'Approved',
+      syncTaskId: {
+        in: failedTaskIds,
+      },
+    },
+    data: {
+      syncTaskId: null,
+    },
+  })
+  return result.count
 }
 
 export async function countPendingGithubSyncBatches(): Promise<number> {
@@ -42,6 +75,7 @@ export async function countPendingGithubSyncBatches(): Promise<number> {
 
 export async function runGithubAutoSync(options: GithubAutoSyncOptions = {}): Promise<GithubAutoSyncResult> {
   const threshold = options.threshold ?? DEFAULT_GITHUB_AUTO_SYNC_THRESHOLD
+  const releasedFailedBatches = await releaseFailedGithubSyncBatches()
   const pendingSyncBatches = await countPendingGithubSyncBatches()
 
   if (pendingSyncBatches <= threshold) {
@@ -49,6 +83,7 @@ export async function runGithubAutoSync(options: GithubAutoSyncOptions = {}): Pr
       success: true,
       triggered: false,
       pendingSyncBatches,
+      releasedFailedBatches,
       skippedReason: 'below_threshold',
       message: `待同步批次数量为 ${pendingSyncBatches}，未超过阈值 ${threshold}`,
     }
@@ -75,6 +110,7 @@ export async function runGithubAutoSync(options: GithubAutoSyncOptions = {}): Pr
       success: true,
       triggered: false,
       pendingSyncBatches,
+      releasedFailedBatches,
       taskId: runningTask.id,
       prUrl: runningTask.githubPrUrl,
       skippedReason: 'sync_in_progress',
@@ -115,6 +151,7 @@ export async function runGithubAutoSync(options: GithubAutoSyncOptions = {}): Pr
       success: false,
       triggered: false,
       pendingSyncBatches,
+      releasedFailedBatches,
       skippedReason: 'no_affected_types',
       message: '没有识别到需要同步的词库类型',
     }
@@ -137,6 +174,7 @@ export async function runGithubAutoSync(options: GithubAutoSyncOptions = {}): Pr
       success: false,
       triggered: false,
       pendingSyncBatches,
+      releasedFailedBatches,
       skippedReason: 'no_finished_phrases',
       message: '词库中没有已完成的词条',
     }
@@ -152,6 +190,7 @@ export async function runGithubAutoSync(options: GithubAutoSyncOptions = {}): Pr
       success: false,
       triggered: false,
       pendingSyncBatches,
+      releasedFailedBatches,
       skippedReason: 'empty_dict_files',
       message: '生成词典文件失败',
     }
@@ -172,6 +211,7 @@ export async function runGithubAutoSync(options: GithubAutoSyncOptions = {}): Pr
       success: true,
       triggered: false,
       pendingSyncBatches,
+      releasedFailedBatches,
       noChanges: true,
       skippedReason: 'no_changed_files',
       message: '待同步批次没有生成新的词库文件变化',
@@ -196,6 +236,7 @@ export async function runGithubAutoSync(options: GithubAutoSyncOptions = {}): Pr
     },
   })
 
+  let prUrl: string | null = null
   try {
     const branch = githubService.generateBranchName(task.id)
     await githubService.getOrCreateBranch(branch)
@@ -244,6 +285,7 @@ export async function runGithubAutoSync(options: GithubAutoSyncOptions = {}): Pr
       `[自动同步] 词库更新 - ${new Date().toLocaleDateString('zh-CN')}`,
       summary
     )
+    prUrl = pr.html_url
 
     await prisma.syncTask.update({
       where: { id: task.id },
@@ -302,6 +344,7 @@ export async function runGithubAutoSync(options: GithubAutoSyncOptions = {}): Pr
       success: true,
       triggered: true,
       pendingSyncBatches,
+      releasedFailedBatches,
       taskId: task.id,
       prUrl: pr.html_url,
       prNumber: pr.number,
@@ -314,14 +357,33 @@ export async function runGithubAutoSync(options: GithubAutoSyncOptions = {}): Pr
       message: `GitHub 词库自动同步完成，已发布 ${release.tagName}`,
     }
   } catch (error) {
-    await prisma.syncTask.update({
-      where: { id: task.id },
-      data: {
-        status: SyncTaskStatus.Failed,
-        error: error instanceof Error ? error.message : '自动同步失败',
-        completedAt: new Date(),
-      },
-    })
+    const errorMessage = error instanceof Error ? error.message : '自动同步失败'
+    const shouldReleaseBatches = prUrl === null
+    await prisma.$transaction([
+      prisma.syncTask.update({
+        where: { id: task.id },
+        data: {
+          status: SyncTaskStatus.Failed,
+          message: shouldReleaseBatches
+            ? '自动同步失败，已释放批次以便下次重试'
+            : '自动同步失败，已创建 GitHub PR，请管理员检查后重试',
+          error: errorMessage,
+          completedAt: new Date(),
+        },
+      }),
+      ...(shouldReleaseBatches
+        ? [
+            prisma.batch.updateMany({
+              where: {
+                syncTaskId: task.id,
+              },
+              data: {
+                syncTaskId: null,
+              },
+            }),
+          ]
+        : []),
+    ])
     throw error
   }
 }
