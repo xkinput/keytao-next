@@ -83,6 +83,22 @@ describe('pre-submit review client helpers', () => {
     const warning = formatPreSubmitReviewWarning(response(), items)
 
     expect(warning).toContain('#1 同码链顺序待确认')
-    expect(warning).toContain('等待管理员确认')
+    expect(warning).toContain('可提交，但需管理员确认')
+    expect(warning).not.toContain('提交后')
+    expect(warning).not.toContain('等待管理员')
+  })
+
+  it('keeps fallback review status direct and non-temporal', () => {
+    const items = buildPreSubmitReviewItems([formItem], ['field-1'])
+    const warning = formatPreSubmitReviewWarning({
+      ...response(),
+      reviewSource: 'local_fallback',
+      reviewError: '服务超时',
+    }, items)
+
+    expect(warning).toContain('完整审词暂未完成：服务超时')
+    expect(warning).toContain('该批次可提交，但需管理员审核')
+    expect(warning).not.toContain('提交后')
+    expect(warning).not.toContain('等待管理员')
   })
 })

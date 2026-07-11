@@ -883,7 +883,7 @@ export default function CreatePRModal({
       itemsNeedingConfirmation.push(formatPreSubmitReviewWarning(reviewAttempt.response, preSubmitItems))
     } else if (reviewAttempt.error) {
       itemsNeedingConfirmation.push(
-        `▶ 喵喵提交前审词暂不可用：\n   ${reviewAttempt.error}\n   ! 可以继续提交，但该批次将等待管理员审核。`,
+        `▶ 喵喵提交前审词暂不可用：\n   ${reviewAttempt.error}\n   ! 可以继续提交；该批次需管理员审核。`,
       )
     }
 
@@ -1591,7 +1591,7 @@ export default function CreatePRModal({
                                               : reviewItem.status === 'pass'
                                                 ? '本喵：可提交'
                                                 : reviewItem.status === 'manual_review'
-                                                  ? '本喵：提交后需人工审核'
+                                                  ? '本喵：需人工审核'
                                                   : '本喵：建议确认'}
                                           </span>
                                           <span className="text-default-600 ml-1.5">{reviewItem.reasons[0] || reviewItem.title}</span>
@@ -1799,7 +1799,7 @@ export default function CreatePRModal({
                           ? '本喵：暂不可提交'
                           : currentPreSubmitAttempt.response.reviewSource === 'bot_llm'
                             ? '本喵：建议确认'
-                            : '本喵：提交后人工审核'}
+                            : '本喵：需人工审核'}
                     </Chip>
                   )}
                   {!reviewingAll && currentPreSubmitAttempt?.error && (

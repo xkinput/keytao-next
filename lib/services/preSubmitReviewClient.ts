@@ -67,8 +67,8 @@ export function formatPreSubmitReviewWarning(
       return `#${index >= 0 ? index + 1 : item.prId} ${item.title}`
     })
   const sourceNote = response.reviewSource === 'bot_llm'
-    ? '本喵建议提交后等待管理员确认。'
-    : `完整审词暂未完成${response.reviewError ? `：${response.reviewError}` : ''}；提交后将等待管理员。`
+    ? '本喵结论：该批次可提交，但需管理员确认。'
+    : `完整审词暂未完成${response.reviewError ? `：${response.reviewError}` : ''}；该批次可提交，但需管理员审核。`
 
   return [
     '▶ 喵喵提交前审词：',
