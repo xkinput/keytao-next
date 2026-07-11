@@ -17,11 +17,17 @@ type BotBatchReviewResponse = {
   success?: boolean
   message?: string
   detail?: string
+  warning?: string
   aiReview?: BatchAiReviewResult
 }
 
 const MIAOMIAO_REVIEW_BLOCK_PATTERN = /\n?--- miao-review:start ---[\s\S]*?--- miao-review:end ---/g
 const MIAOMIAO_REVIEW_TIMEOUT_MS = 290_000
+
+export interface MiaomiaoBatchReviewResponse {
+  aiReview: BatchAiReviewResult
+  warning?: string
+}
 
 function botReviewUrl(): string {
   const baseUrl = (process.env.BOT_API_URL || 'http://localhost:8080').replace(/\/+$/, '')
@@ -36,13 +42,18 @@ function botReviewHeaders(): HeadersInit {
   }
 }
 
-export async function requestMiaomiaoBatchReview(input: {
+export async function requestMiaomiaoBatchReviewDetailed(input: {
   batch: ReviewableBatch
   localReview: BatchAiReviewResult
   focusPrId?: number
-}): Promise<BatchAiReviewResult> {
+  timeoutMs?: number
+}): Promise<MiaomiaoBatchReviewResponse> {
   const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), MIAOMIAO_REVIEW_TIMEOUT_MS)
+  const timeoutMs = Math.min(
+    Math.max(input.timeoutMs ?? MIAOMIAO_REVIEW_TIMEOUT_MS, 10_000),
+    MIAOMIAO_REVIEW_TIMEOUT_MS,
+  )
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
   let response: Response
   try {
     response = await fetch(botReviewUrl(), {
@@ -65,11 +76,24 @@ export async function requestMiaomiaoBatchReview(input: {
   }
 
   const data = await response.json().catch(() => ({})) as BotBatchReviewResponse
-  if (!response.ok || !data.aiReview) {
+  if (!response.ok || data.success === false || !data.aiReview) {
     throw new Error(data.detail || data.message || `喵喵复审服务返回 ${response.status}`)
   }
 
-  return data.aiReview
+  return {
+    aiReview: data.aiReview,
+    warning: data.warning,
+  }
+}
+
+export async function requestMiaomiaoBatchReview(input: {
+  batch: ReviewableBatch
+  localReview: BatchAiReviewResult
+  focusPrId?: number
+  timeoutMs?: number
+}): Promise<BatchAiReviewResult> {
+  const result = await requestMiaomiaoBatchReviewDetailed(input)
+  return result.aiReview
 }
 
 function statusText(item: BatchAiReviewItem): string {

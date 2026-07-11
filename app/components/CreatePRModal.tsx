@@ -30,6 +30,13 @@ import CodePhrasesPopover from './CodePhrasesPopover'
 import WordCodesPopover from './WordCodesPopover'
 import type { InferResponse } from '@/app/api/phrases/infer/route'
 import type { ContextResponse } from '@/app/api/phrases/context/route'
+import type { PreSubmitReviewResponse } from '@/lib/types/preSubmitReview'
+import {
+  buildPreSubmitFingerprint,
+  buildPreSubmitReviewItems,
+  formatPreSubmitReviewWarning,
+  mapReviewItemsByFieldId,
+} from '@/lib/services/preSubmitReviewClient'
 
 interface CreatePRModalProps {
   isOpen: boolean
@@ -80,6 +87,12 @@ interface ConflictInfo {
 interface BatchConflictCheckResponse {
   results: Array<{ id: string; conflict: ConflictInfo }>
   warnings: BatchSubmitWarning[]
+}
+
+interface PreSubmitReviewAttempt {
+  fingerprint: string
+  response?: PreSubmitReviewResponse
+  error?: string
 }
 
 // Form data managed by react-hook-form
@@ -164,10 +177,17 @@ export default function CreatePRModal({
     type: item.type as PhraseType,
   }))
 
+  const createPreSubmitReviewItems = (items: FormItem[]) => buildPreSubmitReviewItems(
+    items,
+    fields.map(field => field.id),
+  )
+
   // Meta states (conflict detection, checking status)
   const [metaStates, setMetaStates] = useState<Map<string, MetaState>>(new Map())
   const [submitting, setSubmitting] = useState(false)
   const [checkingAll, setCheckingAll] = useState(false)
+  const [reviewingAll, setReviewingAll] = useState(false)
+  const [preSubmitReviewAttempt, setPreSubmitReviewAttempt] = useState<PreSubmitReviewAttempt | null>(null)
   const [showDictParser, setShowDictParser] = useState(false)
   const [dictInput, setDictInput] = useState('')
   const [dictStep, setDictStep] = useState<'input' | 'preview'>('input')
@@ -178,6 +198,7 @@ export default function CreatePRModal({
 
   // Track if we've initialized the form in this modal session
   const hasInitializedRef = useRef(false)
+  const preSubmitReviewRequestRef = useRef(0)
 
   // Track which fields had their code auto-filled (so user edits override auto-fill)
   const autoFilledRef = useRef<Set<string>>(new Set())
@@ -268,6 +289,26 @@ export default function CreatePRModal({
     return { hasChecked: true, conflictCount, warningCount }
   })()
 
+  const currentPreSubmitItems = createPreSubmitReviewItems(watchedItems)
+  const currentPreSubmitFingerprint = buildPreSubmitFingerprint(currentPreSubmitItems)
+  const currentPreSubmitAttempt = preSubmitReviewAttempt?.fingerprint === currentPreSubmitFingerprint
+    ? preSubmitReviewAttempt
+    : null
+  const currentPreSubmitResponse = currentPreSubmitAttempt?.response
+  const reviewItemByFieldId = useMemo(
+    () => mapReviewItemsByFieldId(currentPreSubmitResponse),
+    [currentPreSubmitResponse],
+  )
+  const aiReviewIssueCount = Array.from(reviewItemByFieldId.values())
+    .filter(item => item.status !== 'pass').length
+  const hasUncheckedOrBlockingConflict = fields.some(field => {
+    const meta = getMeta(field.id)
+    const isResolved = meta.conflict?.suggestions?.some(suggestion => suggestion.action === 'Resolved')
+    return !meta.hasChecked || Boolean(meta.conflict?.hasConflict && !isResolved)
+  })
+  const submitPreflightIncomplete = reviewingAll || !currentPreSubmitAttempt
+  const submitDisabled = hasUncheckedOrBlockingConflict || submitPreflightIncomplete
+
   // Reset when modal opens/closes - only initialize once per modal session
   useEffect(() => {
     if (isOpen && !hasInitializedRef.current) {
@@ -306,11 +347,17 @@ export default function CreatePRModal({
         setMetaStates(new Map())
       }
 
+      setPreSubmitReviewAttempt(null)
+      setReviewingAll(false)
+      preSubmitReviewRequestRef.current += 1
       hasInitializedRef.current = true
       setExpandedIndex(0)
     } else if (!isOpen) {
       // Modal closed - reset the initialization flag for next open
       hasInitializedRef.current = false
+      setPreSubmitReviewAttempt(null)
+      setReviewingAll(false)
+      preSubmitReviewRequestRef.current += 1
     }
   }, [isOpen, batchPRs, editPR, reset, defaultFormItem])
 
@@ -621,6 +668,44 @@ export default function CreatePRModal({
     setDictItems(prev => prev.map((item, i) => i === idx ? { ...item, finalCode: code } : item))
   }
 
+  const runPreSubmitReview = async (formItems: FormItem[]): Promise<PreSubmitReviewAttempt> => {
+    const items = createPreSubmitReviewItems(formItems)
+    const fingerprint = buildPreSubmitFingerprint(items)
+    const requestId = ++preSubmitReviewRequestRef.current
+    setPreSubmitReviewAttempt({ fingerprint })
+    setReviewingAll(true)
+
+    try {
+      const response = await apiRequest('/api/pull-requests/pre-submit-review', {
+        method: 'POST',
+        body: { items },
+        withAuth: true,
+      }) as PreSubmitReviewResponse
+      const attempt = { fingerprint, response }
+      const latestFingerprint = buildPreSubmitFingerprint(createPreSubmitReviewItems(getValues().items))
+
+      if (requestId === preSubmitReviewRequestRef.current && latestFingerprint === fingerprint) {
+        response.results.forEach(({ id, conflict }) => {
+          updateMeta(id, { conflict, hasChecked: true, checking: false })
+        })
+        setPreSubmitReviewAttempt(attempt)
+      }
+      return attempt
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '喵喵提交前审词暂时不可用'
+      const attempt = { fingerprint, error: message }
+      const latestFingerprint = buildPreSubmitFingerprint(createPreSubmitReviewItems(getValues().items))
+      if (requestId === preSubmitReviewRequestRef.current && latestFingerprint === fingerprint) {
+        setPreSubmitReviewAttempt(attempt)
+      }
+      return attempt
+    } finally {
+      if (requestId === preSubmitReviewRequestRef.current) {
+        setReviewingAll(false)
+      }
+    }
+  }
+
   // Check all conflicts
   const handleCheckAllConflicts = async () => {
     const formData = getValues()
@@ -669,6 +754,8 @@ export default function CreatePRModal({
         })
       })
 
+      setCheckingAll(false)
+
       // Scroll to first conflict if any
       setTimeout(() => {
         const warningIds = new Set(result.warnings.map(warning => warning.id))
@@ -686,6 +773,7 @@ export default function CreatePRModal({
           }
         }
       }, 100)
+      await runPreSubmitReview(formData.items)
     } catch (err) {
       const error = err as Error
       const message = error.message ? `${error.message}\n请重试` : '检测失败，请重试'
@@ -739,6 +827,8 @@ export default function CreatePRModal({
   // Submit handler renamed to avoid conflict
   const onSubmitForm = handleSubmit(async (data) => {
     const items = buildBatchCheckItems(data.items)
+    const preSubmitItems = createPreSubmitReviewItems(data.items)
+    const fingerprint = buildPreSubmitFingerprint(preSubmitItems)
     let checkResult: BatchConflictCheckResponse
 
     try {
@@ -771,8 +861,31 @@ export default function CreatePRModal({
       }
     }
 
+    let reviewAttempt = preSubmitReviewAttempt?.fingerprint === fingerprint
+      ? preSubmitReviewAttempt
+      : null
+    if (!reviewAttempt || (!reviewAttempt.response && !reviewAttempt.error) || reviewAttempt.response?.recommendation === 'blocked') {
+      reviewAttempt = await runPreSubmitReview(data.items)
+    }
+    if (reviewAttempt.response?.recommendation === 'blocked') {
+      const firstBlocker = reviewAttempt.response.blockers[0]
+      const blockerIndex = preSubmitItems.findIndex(item => item.id === firstBlocker)
+      openAlert(
+        `喵喵预审发现未解决冲突${blockerIndex >= 0 ? `（项目 #${blockerIndex + 1}）` : ''}，请处理后再提交。`,
+        '暂不可提交',
+      )
+      return
+    }
+
     // Collect items that need confirmation
     const itemsNeedingConfirmation: string[] = formatBatchSubmitWarnings(checkResult.warnings, items)
+    if (reviewAttempt.response?.recommendation === 'confirm') {
+      itemsNeedingConfirmation.push(formatPreSubmitReviewWarning(reviewAttempt.response, preSubmitItems))
+    } else if (reviewAttempt.error) {
+      itemsNeedingConfirmation.push(
+        `▶ 喵喵提交前审词暂不可用：\n   ${reviewAttempt.error}\n   ! 可以继续提交，但该批次将等待管理员审核。`,
+      )
+    }
 
     for (let i = 0; i < fields.length; i++) {
       const item = data.items[i]
@@ -923,11 +1036,13 @@ export default function CreatePRModal({
       if (!meta?.hasChecked) return
 
       const isResolved = meta.conflict?.suggestions?.some(sug => sug.action === 'Resolved')
+      const aiReviewItem = reviewItemByFieldId.get(field.id)
 
       // Has conflict or warning
       const hasIssue =
         (meta.conflict?.hasConflict && !isResolved) ||
-        checkedSubmitWarningIds.has(field.id)
+        checkedSubmitWarningIds.has(field.id) ||
+        Boolean(aiReviewItem && aiReviewItem.status !== 'pass')
 
       if (hasIssue) {
         issueIndices.push(index)
@@ -967,10 +1082,12 @@ export default function CreatePRModal({
       if (!meta?.hasChecked) return
 
       const isResolved = meta.conflict?.suggestions?.some(sug => sug.action === 'Resolved')
+      const aiReviewItem = reviewItemByFieldId.get(field.id)
 
       const hasIssue =
         (meta.conflict?.hasConflict && !isResolved) ||
-        checkedSubmitWarningIds.has(field.id)
+        checkedSubmitWarningIds.has(field.id) ||
+        Boolean(aiReviewItem && aiReviewItem.status !== 'pass')
 
       if (hasIssue) {
         issueIndices.push(index)
@@ -984,7 +1101,7 @@ export default function CreatePRModal({
       current: position + 1,
       total: issueIndices.length
     }
-  }, [currentIssueIndex, fields, metaStates, checkedSubmitWarningIds])
+  }, [currentIssueIndex, fields, metaStates, checkedSubmitWarningIds, reviewItemByFieldId])
 
 
   return (
@@ -1017,6 +1134,8 @@ export default function CreatePRModal({
                   const hasWarning = checkedSubmitWarningIds.has(field.id)
                   const isIncomplete = !currentWord || !currentCode
                   const context = contextResults.get(field.id)
+                  const reviewItem = reviewItemByFieldId.get(field.id)
+                  const isReviewBlocker = currentPreSubmitAttempt?.response?.blockers.includes(field.id) ?? false
 
                   return (
                     <div
@@ -1453,6 +1572,35 @@ export default function CreatePRModal({
                                         )}
                                       </div>
                                     )}
+
+                                    {reviewItem && (
+                                      <div className={`flex items-start gap-2 px-2.5 py-1.5 border ${isReviewBlocker
+                                        ? 'bg-danger-50/60 dark:bg-danger-100/5 border-danger-200/60'
+                                        : reviewItem.status === 'pass'
+                                          ? 'bg-success-50/60 dark:bg-success-100/5 border-success-200/60'
+                                          : 'bg-warning-50/60 dark:bg-warning-100/5 border-warning-200/60'
+                                        }`}>
+                                        <WandSparkles className={`w-3.5 h-3.5 mt-0.5 shrink-0 ${isReviewBlocker
+                                          ? 'text-danger'
+                                          : reviewItem.status === 'pass' ? 'text-success' : 'text-warning'
+                                          }`} />
+                                        <div className="min-w-0 text-xs leading-5">
+                                          <span className="font-medium">
+                                            {isReviewBlocker
+                                              ? '本喵：暂不可提交'
+                                              : reviewItem.status === 'pass'
+                                                ? '本喵：可提交'
+                                                : reviewItem.status === 'manual_review'
+                                                  ? '本喵：提交后需人工审核'
+                                                  : '本喵：建议确认'}
+                                          </span>
+                                          <span className="text-default-600 ml-1.5">{reviewItem.reasons[0] || reviewItem.title}</span>
+                                          {reviewItem.suggestions[0] && (
+                                            <div className="text-default-500 truncate">建议：{reviewItem.suggestions[0]}</div>
+                                          )}
+                                        </div>
+                                      </div>
+                                    )}
                                   </>
                                 )
                               }}
@@ -1536,6 +1684,16 @@ export default function CreatePRModal({
                             {hasWarning && <Chip size="sm" variant="flat" color="warning" className="h-4 text-[10px] shrink-0">重码</Chip>}
                             {infer?.wordExists && infer.wordExists.length > 0 && <Chip size="sm" variant="flat" color="warning" className="h-4 text-[10px] shrink-0">词存在</Chip>}
                             {isResolved && <Chip size="sm" variant="flat" color="success" className="h-4 text-[10px] shrink-0">✓</Chip>}
+                            {reviewItem && (
+                              <Chip
+                                size="sm"
+                                variant="flat"
+                                color={isReviewBlocker ? 'danger' : reviewItem.status === 'pass' ? 'success' : 'warning'}
+                                className="h-4 text-[10px] shrink-0"
+                              >
+                                {isReviewBlocker ? '喵阻止' : reviewItem.status === 'pass' ? '喵审✓' : '喵复核'}
+                              </Chip>
+                            )}
                             {/* Hover actions */}
                             {!isEditMode && fields.length > 1 && (
                               <div className="flex gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
@@ -1565,16 +1723,16 @@ export default function CreatePRModal({
                 )}
               </ModalBody>
               <ModalFooter className="flex-col gap-2">
-                <div className="flex gap-2 w-full items-center">
+                <div className="flex flex-wrap gap-2 w-full items-center">
                   <Button
                     color="secondary"
                     variant="flat"
                     size="sm"
                     onPress={handleCheckAllConflicts}
-                    isLoading={checkingAll}
-                    startContent={!checkingAll && <Search className="w-3.5 h-3.5" />}
+                    isLoading={checkingAll || reviewingAll}
+                    startContent={!checkingAll && !reviewingAll && <Search className="w-3.5 h-3.5" />}
                   >
-                    检测冲突
+                    冲突与审词
                   </Button>
                   {conflictStats.hasChecked && (
                     <>
@@ -1592,7 +1750,7 @@ export default function CreatePRModal({
                           {conflictStats.conflictCount} 个冲突
                         </Chip>
                       )}
-                      {(conflictStats.conflictCount > 0 || conflictStats.warningCount > 0) && (
+                      {(conflictStats.conflictCount > 0 || conflictStats.warningCount > 0 || aiReviewIssueCount > 0) && (
                         <div className="flex gap-1 items-center">
                           <Button
                             isIconOnly
@@ -1621,6 +1779,34 @@ export default function CreatePRModal({
                       )}
                     </>
                   )}
+                  {reviewingAll && (
+                    <Chip color="secondary" variant="flat" size="sm" startContent={<WandSparkles className="w-3 h-3" />}>
+                      本喵审词中
+                    </Chip>
+                  )}
+                  {!reviewingAll && currentPreSubmitAttempt?.response && (
+                    <Chip
+                      color={currentPreSubmitAttempt.response.recommendation === 'ready'
+                        ? 'success'
+                        : currentPreSubmitAttempt.response.recommendation === 'blocked' ? 'danger' : 'warning'}
+                      variant="flat"
+                      size="sm"
+                      startContent={<WandSparkles className="w-3 h-3" />}
+                    >
+                      {currentPreSubmitAttempt.response.recommendation === 'ready'
+                        ? '本喵：可提交'
+                        : currentPreSubmitAttempt.response.recommendation === 'blocked'
+                          ? '本喵：暂不可提交'
+                          : currentPreSubmitAttempt.response.reviewSource === 'bot_llm'
+                            ? '本喵：建议确认'
+                            : '本喵：提交后人工审核'}
+                    </Chip>
+                  )}
+                  {!reviewingAll && currentPreSubmitAttempt?.error && (
+                    <Chip color="warning" variant="flat" size="sm" startContent={<WandSparkles className="w-3 h-3" />}>
+                      本喵暂不可用
+                    </Chip>
+                  )}
                 </div>
                 <div className="flex justify-between gap-2 w-full">
                   {!isEditMode && (
@@ -1641,12 +1827,10 @@ export default function CreatePRModal({
                       取消
                     </Button>
                     <Tooltip
-                      content="请先检测并解决冲突"
-                      isDisabled={!fields.some((field) => {
-                        const meta = getMeta(field.id)
-                        const isResolved = meta.conflict?.suggestions?.some(sug => sug.action === 'Resolved')
-                        return !meta.hasChecked || (meta.conflict?.hasConflict && !isResolved)
-                      })}
+                      content={hasUncheckedOrBlockingConflict
+                        ? '请先检查并解决冲突'
+                        : reviewingAll ? '本喵正在审词' : '请先完成冲突与审词检查'}
+                      isDisabled={!submitDisabled}
                       color="warning"
                     >
                       <div>
@@ -1654,11 +1838,7 @@ export default function CreatePRModal({
                           color="primary"
                           onPress={() => onSubmitForm()}
                           isLoading={submitting}
-                          isDisabled={fields.some((field) => {
-                            const meta = getMeta(field.id)
-                            const isResolved = meta.conflict?.suggestions?.some(sug => sug.action === 'Resolved')
-                            return !meta.hasChecked || (meta.conflict?.hasConflict && !isResolved)
-                          })}
+                          isDisabled={submitDisabled}
                           className="w-full"
                         >
                           {isBatchEditMode ? '保存修改' : isEditMode ? '保存' : `批量创建 (${fields.length}个)`}
