@@ -313,6 +313,8 @@ describe('phrase-level pinyin disambiguation', () => {
     ['学着', ['xué', 'zhe']],
     ['着想', ['zhuó', 'xiǎng']],
     ['小藏羚', ['xiǎo', 'zàng', 'líng']],
+    ['复购率', ['fù', 'gòu', 'lǜ']],
+    ['表率', ['biǎo', 'shuài']],
   ])('resolves contextual pinyin for %s', (word, expected) => {
     expect(getPhrasePinyins(word)).toEqual(expected)
   })
@@ -479,6 +481,20 @@ describe('encodePhrase', { timeout: 30000 }, () => {
     expect(r.chars.map(c => c.pinyin)).toEqual(['xiǎo', 'zàng', 'líng'])
     expect(r.chars[1].phoneticCode).toBe('zp')
     expect(r.codes[0]).toBe('xzl')
+  })
+
+  it('encodes 复购率 with the contextual lǜ reading', async () => {
+    const r = await encodePhrase('复购率')
+    expect(r.type).toBe('三字词')
+    expect(r.chars.map(c => c.pinyin)).toEqual(['fù', 'gòu', 'lǜ'])
+    expect(r.chars[2].phoneticCode).toBe('ll')
+    expect(r.codes).toEqual(['fgl', 'fglu', 'fglua', 'fgluao'])
+  })
+
+  it('keeps the shuài reading for 表率', async () => {
+    const r = await encodePhrase('表率')
+    expect(r.chars.map(c => c.pinyin)).toEqual(['biǎo', 'shuài'])
+    expect(r.chars[1].phoneticCode).toBe('eg')
   })
 })
 

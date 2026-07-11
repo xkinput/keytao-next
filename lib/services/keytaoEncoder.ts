@@ -274,17 +274,41 @@ async function getAabbPhrasePinyinsFromZdic(word: string): Promise<string[]> {
     : []
 }
 
-export async function resolvePhrasePinyins(word: string): Promise<{ pinyins: string[]; trusted: boolean }> {
+interface PhrasePinyinResolution {
+  pinyins: string[]
+  trusted: boolean
+  trustedIndexes: number[]
+}
+
+function getTrustedContextPinyinIndexes(word: string, pinyins: string[]): number[] {
+  const chars = [...word]
+  const lastIndex = chars.length - 1
+  if (
+    chars.length > 1
+    && chars[lastIndex] === '率'
+    && normalizePinyin(pinyins[lastIndex] || '') === 'lü'
+  ) {
+    return [lastIndex]
+  }
+  return []
+}
+
+export async function resolvePhrasePinyins(word: string): Promise<PhrasePinyinResolution> {
   const chars = [...word]
   if (chars.length > 1) {
     const exact = await getPinyinsFromZdicEntry(word)
-    if (exact.length === chars.length) return { pinyins: exact, trusted: true }
+    if (exact.length === chars.length) return { pinyins: exact, trusted: true, trustedIndexes: [] }
 
     const aabb = await getAabbPhrasePinyinsFromZdic(word)
-    if (aabb.length === chars.length) return { pinyins: aabb, trusted: true }
+    if (aabb.length === chars.length) return { pinyins: aabb, trusted: true, trustedIndexes: [] }
   }
 
-  return { pinyins: getPhrasePinyins(word), trusted: false }
+  const pinyins = getPhrasePinyins(word)
+  return {
+    pinyins,
+    trusted: false,
+    trustedIndexes: getTrustedContextPinyinIndexes(word, pinyins),
+  }
 }
 
 export async function getPinyinFromZdic(char: string): Promise<string[]> {
@@ -614,7 +638,10 @@ export function buildPhraseEncodingFromChars(word: string, chars: CharEncoding[]
 }
 
 export async function encodePhrase(word: string): Promise<PhraseEncoding> {
-  const { pinyins: phrasePinyins, trusted } = await resolvePhrasePinyins(word)
-  const chars = await Promise.all([...word].map((char, index) => encodeChar(char, phrasePinyins[index], { trustPreferred: trusted })))
+  const { pinyins: phrasePinyins, trusted, trustedIndexes } = await resolvePhrasePinyins(word)
+  const trustedIndexSet = new Set(trustedIndexes)
+  const chars = await Promise.all([...word].map((char, index) => encodeChar(char, phrasePinyins[index], {
+    trustPreferred: trusted || trustedIndexSet.has(index),
+  })))
   return buildPhraseEncodingFromChars(word, chars)
 }
