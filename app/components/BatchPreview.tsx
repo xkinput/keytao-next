@@ -1,7 +1,8 @@
 'use client'
 import { Chip, Spinner } from '@/lib/heroui-compat'
-import { AlertTriangle, X } from 'lucide-react'
+import { AlertTriangle, Bot, CheckCircle2, X } from 'lucide-react'
 import { useAPI } from '@/lib/hooks/useSWR'
+import { parseMiaomiaoReviewRemark, type MiaomiaoReviewRemarkBlock } from '@/lib/services/miaomiaoReviewRemark'
 
 interface PreviewPhrase {
     word: string
@@ -221,9 +222,71 @@ function buildHunk(lines: UnifiedLine[]): Hunk {
 }
 
 function formatPhraseLine(p: PreviewPhrase): string {
-    const parts = [p.word.padEnd(12), p.code.padEnd(8), String(p.weight).padEnd(6)]
-    if (p.remark) parts.push(p.remark)
-    return parts.join('  ')
+    return [p.word.padEnd(12), p.code.padEnd(8), String(p.weight).padEnd(6)].join('  ')
+}
+
+function formatReviewTime(value: string): string {
+    return value
+        .replace('T', ' ')
+        .replace(/\.\d+(?=Z|[+-]\d{2}:\d{2}$)/, '')
+        .replace(/Z$/, ' UTC')
+        .replace(/\+00:00$/, ' UTC')
+}
+
+function MiaomiaoDiffReview({ review }: { review: MiaomiaoReviewRemarkBlock }) {
+    const passed = Boolean(review.status?.includes('通过') && !review.status.includes('不通过'))
+    const fields = [
+        { label: '结论', value: review.conclusion },
+        { label: '理由', value: review.reason },
+        { label: '建议', value: review.suggestion },
+        { label: '读音', value: review.pronunciation },
+        { label: '来源', value: review.sources.join('、') || undefined },
+        { label: '证据', value: review.evidence.join('；') || undefined },
+    ].filter((field): field is { label: string; value: string } => Boolean(field.value))
+
+    return (
+        <div className="mt-2 max-w-5xl border-l-2 border-[#7aa2f7] bg-[#16192a] px-3 py-2 font-sans text-xs text-[#a9b1d6]">
+            <div className="mb-1.5 flex flex-wrap items-center gap-2">
+                <Bot className="h-3.5 w-3.5 text-[#7dcfff]" />
+                <span className="font-medium text-[#c0caf5]">本喵复审</span>
+                {review.status && (
+                    <span className={`inline-flex items-center gap-1 ${passed ? 'text-[#9ece6a]' : 'text-[#e0af68]'}`}>
+                        {passed ? <CheckCircle2 className="h-3 w-3" /> : <AlertTriangle className="h-3 w-3" />}
+                        {review.status}
+                    </span>
+                )}
+                {review.generatedAt && (
+                    <span className="ml-auto text-[#565f89]">{formatReviewTime(review.generatedAt)}</span>
+                )}
+            </div>
+            {fields.length > 0 && (
+                <div className="grid grid-cols-[2.5rem_minmax(0,1fr)] gap-x-2 gap-y-1 leading-5">
+                    {fields.map(field => (
+                        <div key={field.label} className="contents">
+                            <span className="text-[#7dcfff]">{field.label}</span>
+                            <span className="min-w-0 whitespace-normal break-words text-[#a9b1d6]">{field.value}</span>
+                        </div>
+                    ))}
+                </div>
+            )}
+        </div>
+    )
+}
+
+function PhraseLineContent({ phrase, colorClass }: { phrase: PreviewPhrase; colorClass: string }) {
+    const parsedRemark = parseMiaomiaoReviewRemark(phrase.remark)
+
+    return (
+        <div className="min-w-0 flex-1 px-3 py-1.5">
+            <div className={`whitespace-pre ${colorClass}`}>{formatPhraseLine(phrase)}</div>
+            {parsedRemark.baseRemark && (
+                <div className="mt-1 whitespace-pre-wrap break-words font-sans text-xs text-[#737aa2]">
+                    {parsedRemark.baseRemark}
+                </div>
+            )}
+            {parsedRemark.review && <MiaomiaoDiffReview review={parsedRemark.review} />}
+        </div>
+    )
 }
 
 function DiffView({ group }: { group: TypeChangeGroup }) {
@@ -249,7 +312,7 @@ function DiffView({ group }: { group: TypeChangeGroup }) {
                                         <span className="w-12 text-right pr-3 py-1.5 select-none border-r border-[#2a2d3e] shrink-0 text-[#3b4261]">{line.oldLine}</span>
                                         <span className="w-12 text-right pr-3 py-1.5 select-none border-r border-[#2a2d3e] shrink-0 text-[#3b4261]">{line.newLine}</span>
                                         <span className="px-3 py-1.5 select-none w-6 shrink-0"> </span>
-                                        <span className="px-3 py-1.5 text-[#565f89]">{formatPhraseLine(line.phrase)}</span>
+                                        <PhraseLineContent phrase={line.phrase} colorClass="text-[#565f89]" />
                                     </div>
                                 )
                             }
@@ -259,7 +322,7 @@ function DiffView({ group }: { group: TypeChangeGroup }) {
                                         <span className="w-12 text-right pr-3 py-1.5 select-none border-r border-[#5a2020] shrink-0 text-[#f7768e] font-semibold">{line.oldLine}</span>
                                         <span className="w-12 text-right pr-3 py-1.5 select-none border-r border-[#5a2020] shrink-0 text-[#3b4261]"> </span>
                                         <span className="px-3 py-1.5 text-[#f7768e] select-none w-6 shrink-0">-</span>
-                                        <span className="px-3 py-1.5 text-[#f7768e]">{formatPhraseLine(line.phrase)}</span>
+                                        <PhraseLineContent phrase={line.phrase} colorClass="text-[#f7768e]" />
                                     </div>
                                 )
                             }
@@ -269,7 +332,7 @@ function DiffView({ group }: { group: TypeChangeGroup }) {
                                     <span className="w-12 text-right pr-3 py-1.5 select-none border-r border-[#2a5a2a] shrink-0 text-[#3b4261]"> </span>
                                     <span className="w-12 text-right pr-3 py-1.5 select-none border-r border-[#2a5a2a] shrink-0 text-[#9ece6a] font-semibold">{line.newLine}</span>
                                     <span className="px-3 py-1.5 text-[#9ece6a] select-none w-6 shrink-0">+</span>
-                                    <span className="px-3 py-1.5 text-[#9ece6a]">{formatPhraseLine(line.phrase)}</span>
+                                    <PhraseLineContent phrase={line.phrase} colorClass="text-[#9ece6a]" />
                                 </div>
                             )
                         })}
@@ -286,7 +349,7 @@ function DiffView({ group }: { group: TypeChangeGroup }) {
                             return (
                                 <div key={i} className="flex gap-0 bg-[#3d1515]/40">
                                     <span className="px-3 py-1.5 text-[#f7768e] select-none w-6 shrink-0">-</span>
-                                    <span className="px-3 py-1.5 text-[#f7768e]">{formatPhraseLine(diff.phrase)}</span>
+                                    <PhraseLineContent phrase={diff.phrase} colorClass="text-[#f7768e]" />
                                 </div>
                             )
                         }
@@ -294,7 +357,7 @@ function DiffView({ group }: { group: TypeChangeGroup }) {
                             return (
                                 <div key={i} className="flex gap-0 bg-[#1a3a1a]/40">
                                     <span className="px-3 py-1.5 text-[#9ece6a] select-none w-6 shrink-0">+</span>
-                                    <span className="px-3 py-1.5 text-[#9ece6a]">{formatPhraseLine(diff.phrase)}</span>
+                                    <PhraseLineContent phrase={diff.phrase} colorClass="text-[#9ece6a]" />
                                 </div>
                             )
                         }
@@ -303,11 +366,11 @@ function DiffView({ group }: { group: TypeChangeGroup }) {
                                 <div key={i}>
                                     <div className="flex gap-0 bg-[#3d1515]/40">
                                         <span className="px-3 py-1.5 text-[#f7768e] select-none w-6 shrink-0">-</span>
-                                        <span className="px-3 py-1.5 text-[#f7768e]">{formatPhraseLine(diff.before)}</span>
+                                        <PhraseLineContent phrase={diff.before} colorClass="text-[#f7768e]" />
                                     </div>
                                     <div className="flex gap-0 bg-[#1a3a1a]/40">
                                         <span className="px-3 py-1.5 text-[#9ece6a] select-none w-6 shrink-0">+</span>
-                                        <span className="px-3 py-1.5 text-[#9ece6a]">{formatPhraseLine(diff.after)}</span>
+                                        <PhraseLineContent phrase={diff.after} colorClass="text-[#9ece6a]" />
                                     </div>
                                 </div>
                             )

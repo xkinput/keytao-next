@@ -547,6 +547,11 @@ describe('API abuse guards', () => {
         remark: expect.stringContaining('本喵复审：通过'),
       }),
     }))
+    const persistedRemark = mockPrisma.pullRequest.update.mock.calls[0]?.[0]?.data?.remark
+    expect(persistedRemark).toContain('读音：an bo')
+    expect(persistedRemark).toContain('来源：汉典')
+    expect(persistedRemark).not.toContain('证据：读音：an bo')
+    expect(persistedRemark).not.toContain('证据：来源：汉典')
     expect(mockPrisma.batch.update).toHaveBeenCalledWith(expect.objectContaining({
       where: { id: 'batch-1' },
       data: { reviewNote: '本喵复审：可通过。' },

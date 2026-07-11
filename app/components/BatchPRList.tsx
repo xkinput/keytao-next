@@ -12,6 +12,7 @@ import { AlertTriangle, Bot } from 'lucide-react'
 import CodePhrasesPopover from './CodePhrasesPopover'
 import { getPhraseTypeLabel, type PhraseType } from '@/lib/constants/phraseTypes'
 import type { BatchAiReviewItem, BatchAiReviewStatus } from '@/lib/types/batchAiReview'
+import { getMiaomiaoEvidenceHighlights } from '@/lib/services/miaomiaoReviewRemark'
 
 interface PullRequest {
     id: number
@@ -218,8 +219,8 @@ export default function BatchPRList({
                                     <Bot className="h-3 w-3" />
                                     喵备注
                                 </span>
-                                {pr.aiReview.reviewRecord.evidence.slice(0, 2).map((evidence, index) => (
-                                    <span key={index} className="rounded-md bg-default-100 px-2 py-1 dark:bg-default-100/10">
+                                {getMiaomiaoEvidenceHighlights(pr.aiReview.reviewRecord).slice(0, 2).map((evidence) => (
+                                    <span key={evidence} className="rounded-md bg-default-100 px-2 py-1 dark:bg-default-100/10">
                                         {evidence}
                                     </span>
                                 ))}

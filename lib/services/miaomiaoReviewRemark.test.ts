@@ -1,0 +1,70 @@
+import { describe, expect, it } from 'vitest'
+import {
+  getMiaomiaoEvidenceHighlights,
+  getMiaomiaoSemanticEvidence,
+  parseMiaomiaoReviewRemark,
+} from './miaomiaoReviewRemark'
+
+describe('miaomiaoReviewRemark', () => {
+  it('removes pronunciation duplicated as evidence from persisted reviews', () => {
+    const parsed = parseMiaomiaoReviewRemark([
+      '--- miao-review:start ---',
+      '本喵复审：通过',
+      '结论：新增「欧标」至 xdbcv',
+      '读音：ōu biāo',
+      '证据：读音：ōu biāo',
+      '证据：本喵语言常识：欧标即欧洲标准，大众通行。',
+      '--- miao-review:end ---',
+    ].join('\n'))
+
+    expect(parsed.review?.evidence).toEqual(['本喵语言常识：欧标即欧洲标准，大众通行。'])
+    expect(getMiaomiaoEvidenceHighlights({
+      pronunciation: parsed.review?.pronunciation,
+      sources: parsed.review?.sources ?? [],
+      evidence: parsed.review?.evidence ?? [],
+    })).toEqual([
+      '读音：ōu biāo',
+      '本喵语言常识：欧标即欧洲标准，大众通行。',
+    ])
+  })
+
+  it('keeps ordinary remarks outside the latest structured review block', () => {
+    const parsed = parseMiaomiaoReviewRemark([
+      '用户备注：补充常用标准简称。',
+      '',
+      '--- miao-review:start ---',
+      '本喵复审：需人工确认',
+      '结论：编码需要复核',
+      '理由：候选链不一致',
+      '建议：管理员确认编码',
+      '来源：汉典、维基百科',
+      '时间：2026-07-11T08:40:49.119263+00:00',
+      '--- miao-review:end ---',
+    ].join('\n'))
+
+    expect(parsed.baseRemark).toBe('用户备注：补充常用标准简称。')
+    expect(parsed.review).toMatchObject({
+      status: '需人工确认',
+      conclusion: '编码需要复核',
+      reason: '候选链不一致',
+      suggestion: '管理员确认编码',
+      sources: ['汉典', '维基百科'],
+    })
+  })
+
+  it('filters metadata before limiting semantic evidence', () => {
+    expect(getMiaomiaoSemanticEvidence({
+      pronunciation: 'měi biāo',
+      sources: ['语言常识'],
+      evidence: [
+        '读音：měi biāo',
+        '本喵语言常识：美标即美国标准，大众通行。',
+        '来源：语言常识',
+        '编码 mwbc 位于候选链中。',
+      ],
+    })).toEqual([
+      '本喵语言常识：美标即美国标准，大众通行。',
+      '编码 mwbc 位于候选链中。',
+    ])
+  })
+})

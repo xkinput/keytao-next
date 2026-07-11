@@ -1,5 +1,6 @@
 import { prisma } from '@/lib/prisma'
 import type { BatchAiReviewItem, BatchAiReviewResult } from '@/lib/types/batchAiReview'
+import { getMiaomiaoSemanticEvidence, stripMiaomiaoReviewRemark } from './miaomiaoReviewRemark'
 
 type ReviewableBatch = {
   id: string
@@ -21,7 +22,6 @@ type BotBatchReviewResponse = {
   aiReview?: BatchAiReviewResult
 }
 
-const MIAOMIAO_REVIEW_BLOCK_PATTERN = /\n?--- miao-review:start ---[\s\S]*?--- miao-review:end ---/g
 const MIAOMIAO_REVIEW_TIMEOUT_MS = 290_000
 
 export interface MiaomiaoBatchReviewResponse {
@@ -102,10 +102,6 @@ function statusText(item: BatchAiReviewItem): string {
   return '需复核'
 }
 
-function stripExistingMiaomiaoReview(remark: string | null): string {
-  return (remark || '').replace(MIAOMIAO_REVIEW_BLOCK_PATTERN, '').trim()
-}
-
 function formatMiaomiaoReviewRemark(item: BatchAiReviewItem, generatedAt: string): string {
   const record = item.reviewRecord
   const lines = [
@@ -128,7 +124,7 @@ function formatMiaomiaoReviewRemark(item: BatchAiReviewItem, generatedAt: string
   if (record?.sources.length) {
     lines.push(`来源：${record.sources.join('、')}`)
   }
-  for (const evidence of record?.evidence.slice(0, 3) ?? []) {
+  for (const evidence of record ? getMiaomiaoSemanticEvidence(record).slice(0, 3) : []) {
     lines.push(`证据：${evidence}`)
   }
   lines.push(`时间：${generatedAt}`)
@@ -147,7 +143,7 @@ export async function writeMiaomiaoBatchReview(input: {
     const item = reviewByPrId.get(pr.id)
     if (!item) continue
 
-    const baseRemark = stripExistingMiaomiaoReview(pr.remark)
+    const baseRemark = stripMiaomiaoReviewRemark(pr.remark)
     const nextRemark = [
       baseRemark,
       formatMiaomiaoReviewRemark(item, input.aiReview.generatedAt),

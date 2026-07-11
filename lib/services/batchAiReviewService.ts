@@ -10,6 +10,7 @@ import type {
   BatchAiReviewStatus,
 } from '@/lib/types/batchAiReview'
 import type { ConflictInfo } from './conflictDetector'
+import { getMiaomiaoEvidenceHighlights, parseMiaomiaoReviewRemark as parseStructuredRemark } from './miaomiaoReviewRemark'
 
 type PullRequestAction = 'Create' | 'Change' | 'Delete'
 
@@ -72,7 +73,6 @@ const AUTHORITY_SOURCE_NAMES = [
 ]
 
 const BOT_REVIEW_PATTERN = /(Bot审词|Bot 自动审词|喵喵审词|本喵|自动审词|喵喵|Miaomiao|Miao)/i
-const MIAOMIAO_REVIEW_BLOCK_PATTERN = /--- miao-review:start ---([\s\S]*?)--- miao-review:end ---/g
 const CHINESE_PATTERN = /[\u3400-\u9fff]/
 const URL_PATTERN = /^https?:\/\//i
 const ENGLISH_PATTERN = /^[A-Za-z][A-Za-z0-9 ._+\-'/]*$/
@@ -141,11 +141,6 @@ function extractReviewRecord(remark: string | null): BatchAiReviewRecord | undef
   }
 }
 
-function getLineValue(text: string, label: string): string | undefined {
-  const match = text.match(new RegExp(`^${label}[：:]\\s*(.+)$`, 'm'))
-  return match?.[1]?.trim()
-}
-
 function parseMiaomiaoReviewStatus(value: string | undefined): BatchAiReviewStatus {
   const normalized = value || ''
   if (normalized.includes('通过')) return 'pass'
@@ -160,44 +155,30 @@ function severityForStatus(status: BatchAiReviewStatus): BatchAiReviewSeverity {
 }
 
 function parseMiaomiaoReviewRemark(remark: string | null): ParsedMiaomiaoReview | undefined {
-  if (!remark) return undefined
+  const parsed = parseStructuredRemark(remark)
+  const structured = parsed.review
+  if (!structured) return undefined
 
-  const blocks = Array.from(remark.matchAll(MIAOMIAO_REVIEW_BLOCK_PATTERN))
-  const latestBlock = blocks.length > 0 ? blocks[blocks.length - 1]?.[1] : undefined
-  if (!latestBlock) return undefined
-
-  const status = parseMiaomiaoReviewStatus(getLineValue(latestBlock, '本喵复审'))
-  const title = getLineValue(latestBlock, '结论') || (status === 'pass' ? '本喵建议通过' : '本喵建议复核')
-  const reason = getLineValue(latestBlock, '理由')
-  const suggestion = getLineValue(latestBlock, '建议')
-  const pronunciation = getLineValue(latestBlock, '读音')
-  const sources = (getLineValue(latestBlock, '来源') || '')
-    .split(/[、,，]/)
-    .map(source => source.trim())
-    .filter(Boolean)
-  const evidence = Array.from(latestBlock.matchAll(/^证据[：:]\s*(.+)$/gm))
-    .map(match => match[1].trim())
-    .filter(Boolean)
-
-  if (pronunciation) {
-    evidence.unshift(`读音：${pronunciation}`)
-  }
-  if (sources.length > 0) {
-    evidence.push(`来源：${sources.join('、')}`)
-  }
+  const status = parseMiaomiaoReviewStatus(structured.status)
+  const title = structured.conclusion || (status === 'pass' ? '本喵建议通过' : '本喵建议复核')
+  const evidence = getMiaomiaoEvidenceHighlights({
+    pronunciation: structured.pronunciation,
+    sources: structured.sources,
+    evidence: structured.evidence,
+  })
 
   return {
     status,
     severity: severityForStatus(status),
     title,
-    reasons: reason ? [reason] : [title],
-    suggestions: suggestion ? [suggestion] : ['按本喵复审结论处理；如有歧义，保留给管理员确认。'],
+    reasons: structured.reason ? [structured.reason] : [title],
+    suggestions: structured.suggestion ? [structured.suggestion] : ['按本喵复审结论处理；如有歧义，保留给管理员确认。'],
     reviewRecord: {
       reviewedBy: 'Miaomiao',
       source: 'bot-llm',
       summary: compactText(title),
-      pronunciation,
-      sources,
+      pronunciation: structured.pronunciation,
+      sources: structured.sources,
       evidence: evidence.length > 0 ? evidence : ['本喵已调用 LLM 完成复审。'],
     },
   }
