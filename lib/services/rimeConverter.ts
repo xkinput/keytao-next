@@ -24,6 +24,23 @@ interface ConvertPhrasesOptions {
   includeEmptyTypes?: boolean;
 }
 
+export interface SyncSummaryTypeStat {
+  type: string;
+  create: number;
+  change: number;
+  delete: number;
+}
+
+export interface SyncSummaryData {
+  contributors: string[];
+  totalEntries: number;
+  stats: SyncSummaryTypeStat[];
+}
+
+type SyncSummaryBatch = {
+  creator: { name: string | null; nickname: string | null; email: string | null };
+};
+
 /**
  * Convert PhraseType enum to file suffix
  * Aligned with KeyTao rime dictionary naming convention
@@ -383,57 +400,29 @@ export function mergeRimeEntries(
  */
 export function generateSyncSummary(
   pullRequests: PullRequest[],
-  batches?: Array<{ creator: { name: string | null; nickname: string | null; email: string | null } }>
+  batches?: SyncSummaryBatch[]
 ): string {
-  const grouped = groupPullRequestsByType(pullRequests);
+  const summaryData = generateSyncSummaryData(pullRequests, batches);
   const lines: string[] = [];
 
   lines.push('## 词库同步更新');
   lines.push('');
 
   // Add contributors section
-  if (batches && batches.length > 0) {
-    const contributors = new Set<string>();
-    for (const batch of batches) {
-      const displayName = batch.creator.nickname || batch.creator.name || '匿名用户';
-      contributors.add(displayName);
-    }
-
-    if (contributors.size > 0) {
+  if (summaryData.contributors.length > 0) {
       lines.push('### 本次词库贡献者');
       lines.push('');
-      lines.push(Array.from(contributors).join('、'));
+      lines.push(summaryData.contributors.join('、'));
       lines.push('');
-    }
   }
 
   lines.push('### 更新统计');
   lines.push('');
 
-  let totalEntries = 0;
-  const stats: Record<string, { create: number; change: number; delete: number }> = {};
-
-  for (const [type, prs] of grouped.entries()) {
-    const displayName = phraseTypeToDisplayName(type);
-    stats[displayName] = { create: 0, change: 0, delete: 0 };
-
-    for (const pr of prs) {
-      if (pr.action === PullRequestType.Create) {
-        stats[displayName].create++;
-        totalEntries++;
-      } else if (pr.action === PullRequestType.Change) {
-        stats[displayName].change++;
-        totalEntries++;
-      } else if (pr.action === PullRequestType.Delete) {
-        stats[displayName].delete++;
-      }
-    }
-  }
-
-  lines.push(`- 总计: **${totalEntries}** 条词条`);
+  lines.push(`- 总计: **${summaryData.totalEntries}** 条词条`);
   lines.push('');
 
-  for (const [typeName, stat] of Object.entries(stats)) {
+  for (const stat of summaryData.stats) {
     const total = stat.create + stat.change + stat.delete;
     if (total === 0) continue;
 
@@ -442,7 +431,7 @@ export function generateSyncSummary(
     if (stat.change > 0) parts.push(`修改 ${stat.change}`);
     if (stat.delete > 0) parts.push(`删除 ${stat.delete}`);
 
-    lines.push(`- **${typeName}**: ${parts.join(', ')}`);
+    lines.push(`- **${stat.type}**: ${parts.join(', ')}`);
   }
 
   lines.push('');
@@ -467,4 +456,43 @@ export function generateSyncSummary(
   }
 
   return lines.join('\n');
+}
+
+export function generateSyncSummaryData(
+  pullRequests: PullRequest[],
+  batches?: SyncSummaryBatch[]
+): SyncSummaryData {
+  const contributors = new Set<string>();
+  for (const batch of batches ?? []) {
+    contributors.add(batch.creator.nickname || batch.creator.name || '匿名用户');
+  }
+
+  let totalEntries = 0;
+  const stats: SyncSummaryTypeStat[] = [];
+  for (const [type, prs] of groupPullRequestsByType(pullRequests).entries()) {
+    const stat: SyncSummaryTypeStat = {
+      type: phraseTypeToDisplayName(type),
+      create: 0,
+      change: 0,
+      delete: 0,
+    };
+    for (const pr of prs) {
+      if (pr.action === PullRequestType.Create) {
+        stat.create++;
+        totalEntries++;
+      } else if (pr.action === PullRequestType.Change) {
+        stat.change++;
+        totalEntries++;
+      } else if (pr.action === PullRequestType.Delete) {
+        stat.delete++;
+      }
+    }
+    stats.push(stat);
+  }
+
+  return {
+    contributors: Array.from(contributors),
+    totalEntries,
+    stats,
+  };
 }

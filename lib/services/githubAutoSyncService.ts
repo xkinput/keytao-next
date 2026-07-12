@@ -2,8 +2,10 @@ import { prisma } from '@/lib/prisma'
 import {
   convertPhrasesToRimeDicts,
   generateSyncSummary,
+  generateSyncSummaryData,
   getAffectedPhraseTypesFromPullRequests,
 } from '@/lib/services/rimeConverter'
+import type { SyncSummaryData } from '@/lib/services/rimeConverter'
 import { createGithubSyncService } from '@/lib/services/githubSync'
 import { PhraseStatus, SyncTaskStatus } from '@prisma/client'
 
@@ -26,6 +28,7 @@ export interface GithubAutoSyncResult {
   releaseTag?: string | null
   previousReleaseTag?: string | null
   releaseUrl?: string | null
+  syncSummary?: SyncSummaryData
   noChanges?: boolean
   releasedFailedBatches?: number
   skippedReason?: string
@@ -220,6 +223,7 @@ export async function runGithubAutoSync(options: GithubAutoSyncOptions = {}): Pr
 
   const fileNames = changedFiles.map((file) => file.path.replace(/^rime\//, ''))
   const summary = generateSyncSummary(allPullRequests, batches)
+  const syncSummary = generateSyncSummaryData(allPullRequests, batches)
 
   const task = await prisma.syncTask.create({
     data: {
@@ -354,6 +358,7 @@ export async function runGithubAutoSync(options: GithubAutoSyncOptions = {}): Pr
       previousReleaseTag: latestTag,
       releaseTag: release.tagName,
       releaseUrl: release.htmlUrl,
+      syncSummary,
       message: `GitHub 词库自动同步完成，已发布 ${release.tagName}`,
     }
   } catch (error) {
