@@ -11,6 +11,8 @@ export interface BotPRItem {
   type?: string // PhraseType, defaults to 'Phrase'
   weight?: number
   remark?: string
+  /** Blocks bot auto-approval when upstream review requires a human. */
+  needsManualReview?: boolean
 }
 
 export interface BotCreatePRRequest {
@@ -19,6 +21,9 @@ export interface BotCreatePRRequest {
   items: BotPRItem[]
   confirmed?: boolean // Set to true to confirm warnings
   batchId?: string // Optional batch ID to append to existing batch
+  expectedContentVersion?: number
+  expectedWarningDigest?: string
+  previewOnly?: boolean
 }
 
 export interface BotConflictInfo {
@@ -65,6 +70,8 @@ export interface BotCreatePRResponse {
   // On success
   batchId?: string
   pullRequestCount?: number
+  contentVersion?: number
+  warningDigest?: string
 
   // Informational notes about Delete operations (non-blocking)
   notes?: BotDeleteNoteInfo[]
@@ -127,6 +134,8 @@ export interface BotBatchDraftItem {
   type?: string
   weight?: number
   remark?: string
+  /** Blocks bot auto-approval when upstream review requires a human. */
+  needsManualReview?: boolean
 }
 
 export interface BotBatchDraftRequest {
@@ -135,6 +144,9 @@ export interface BotBatchDraftRequest {
   items: BotBatchDraftItem[]
   batchId?: string
   confirmed?: boolean
+  expectedContentVersion?: number
+  expectedWarningDigest?: string
+  previewOnly?: boolean
 }
 
 export interface BotBatchDraftFailedItem {
@@ -152,6 +164,7 @@ export interface BotDraftSnapshotItem {
   type: string
   weight?: number | null
   status: string
+  needsManualReview?: boolean
   hasWarning?: boolean
   warningNote?: string
 }
@@ -160,6 +173,8 @@ export interface BotBatchDraftResponse {
   success: boolean
   message: string
   batchId?: string
+  contentVersion?: number
+  warningDigest?: string
   successCount: number
   failedCount: number
   skippedCount: number
@@ -177,6 +192,15 @@ export interface BotBatchDeleteDraftRequest {
   platform: 'qq' | 'telegram'
   platformId: string
   ids: number[]
+  batchId: string
+  expectedContentVersion: number
+  expectedTargets: Array<{
+    id: number
+    word: string
+    code: string
+    action: string
+    type: string
+  }>
 }
 
 export interface BotBatchDeleteDraftDeletedItem {
@@ -195,6 +219,7 @@ export interface BotBatchDeleteDraftResponse {
   success: boolean
   message: string
   batchId?: string
+  contentVersion?: number
   successCount: number
   failedCount: number
   deleted: BotBatchDeleteDraftDeletedItem[]

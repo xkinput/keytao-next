@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/prisma'
+import type { Prisma } from '@prisma/client'
 import { checkBatchConflictsWithWeight, type BatchPRItem } from './batchConflictService'
 import type { PhraseType } from '@/lib/constants/phraseTypes'
 type TransactionClient = Omit<
@@ -44,7 +45,11 @@ export async function buildDependencies(
  * Rebuild all dependencies for a batch.
  * Deletes existing ones and recomputes from current PR state.
  */
-export async function rebuildBatchDependencies(batchId: string) {
+export async function rebuildBatchDependencies(
+    batchId: string,
+    expectedContentVersion: number,
+    allowedStatuses: readonly string[]
+): Promise<boolean> {
     const batch = await prisma.batch.findUnique({
         where: { id: batchId },
         include: {
@@ -52,7 +57,11 @@ export async function rebuildBatchDependencies(batchId: string) {
         }
     })
 
-    if (!batch) return
+    if (
+        !batch
+        || batch.contentVersion !== expectedContentVersion
+        || !allowedStatuses.includes(batch.status)
+    ) return false
 
     const items: BatchPRItem[] = batch.pullRequests
         .filter(pr => pr.word && pr.code)
@@ -71,7 +80,19 @@ export async function rebuildBatchDependencies(batchId: string) {
     // prs in same order as items (filtered PRs only)
     const filteredPRs = batch.pullRequests.filter(pr => pr.word && pr.code)
 
-    await prisma.$transaction(async (tx) => {
+    return prisma.$transaction(async (tx) => {
+        // Take the same batch-row lock used by content producers without
+        // advancing the version for this derived metadata refresh.
+        const locked = await tx.batch.updateMany({
+            where: {
+                id: batchId,
+                contentVersion: expectedContentVersion,
+                status: { in: [...allowedStatuses] as Prisma.EnumBatchStatusFilter['in'] },
+            },
+            data: { contentVersion: { increment: 0 } },
+        })
+        if (locked.count !== 1) return false
+
         // Delete all existing dependencies for PRs in this batch
         await tx.pullRequestDependency.deleteMany({
             where: {
@@ -83,5 +104,6 @@ export async function rebuildBatchDependencies(batchId: string) {
         })
 
         await buildDependencies(filteredPRs, results, tx)
+        return true
     })
 }

@@ -6,6 +6,11 @@ import { buildBatchSubmitWarnings } from '@/lib/services/batchSubmitWarnings'
 import { buildSkippedCandidateSlotWarnings } from '@/lib/services/batchSkippedCodeWarnings'
 import { buildPriorityOrderWarnings } from '@/lib/services/batchPriorityOrderWarnings'
 import { PhraseType } from '@/lib/constants/phraseTypes'
+import {
+  buildBotWarningDigest,
+  createCanonicalDigest,
+  lockPhraseTableForWarningSnapshot,
+} from '@/lib/services/botWarningSnapshot'
 
 function getErrorCode(error: unknown): string | undefined {
   return typeof error === 'object' && error !== null && 'code' in error
@@ -28,10 +33,63 @@ export async function POST(
 ) {
   try {
     const { id } = await params
-    const body = await request.json()
-    const { platform, platformId, confirmed = false } = body
+    const rawBody = await request.clone().text()
+    const body: unknown = await request.json().catch(() => null)
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ success: false, message: '请求格式错误' }, { status: 400 })
+    }
 
-    const auth = await requireVerifiedBotUser(platform, platformId)
+    const allowedKeys = new Set([
+      'platform', 'platformId', 'confirmed', 'expectedContentVersion', 'previewOnly',
+      'expectedWarningDigest',
+      'expectedSnapshotDigest',
+    ])
+    if (Object.keys(body).some(key => !allowedKeys.has(key))) {
+      return NextResponse.json({ success: false, message: '请求包含不支持的字段' }, { status: 400 })
+    }
+
+    const payload = body as Record<string, unknown>
+    const { platform, platformId } = payload
+    const confirmed = payload.confirmed ?? false
+    const previewOnly = payload.previewOnly ?? false
+    const expectedContentVersion = payload.expectedContentVersion
+    const expectedWarningDigest = payload.expectedWarningDigest
+    const expectedSnapshotDigest = payload.expectedSnapshotDigest
+    if (
+      typeof platform !== 'string'
+      || typeof platformId !== 'string'
+      || typeof confirmed !== 'boolean'
+      || typeof previewOnly !== 'boolean'
+      || !Number.isInteger(expectedContentVersion)
+      || (expectedContentVersion as number) < 0
+    ) {
+      return NextResponse.json(
+        { success: false, message: 'platform、platformId、confirmed 或 expectedContentVersion 类型错误' },
+        { status: 400 }
+      )
+    }
+    if (confirmed && previewOnly) {
+      return NextResponse.json(
+        { success: false, message: 'confirmed 与 previewOnly 不能同时为 true' },
+        { status: 400 }
+      )
+    }
+    if (
+      confirmed
+      && (
+        typeof expectedWarningDigest !== 'string'
+        || !/^[a-f0-9]{64}$/.test(expectedWarningDigest)
+        || typeof expectedSnapshotDigest !== 'string'
+        || !/^[a-f0-9]{64}$/.test(expectedSnapshotDigest)
+      )
+    ) {
+      return NextResponse.json(
+        { success: false, message: '确认提交必须包含 expectedWarningDigest' },
+        { status: 400 }
+      )
+    }
+
+    const auth = await requireVerifiedBotUser(platform, platformId, { request, rawBody })
     if (!auth.authorized) {
       return NextResponse.json(
         { success: false, message: auth.message },
@@ -75,6 +133,13 @@ export async function POST(
       )
     }
 
+    if (batch.contentVersion !== expectedContentVersion) {
+      return NextResponse.json(
+        { success: false, message: '批次内容已被修改，请刷新后重试' },
+        { status: 409 }
+      )
+    }
+
     // Check if batch has PRs
     if (batch.pullRequests.length === 0) {
       return NextResponse.json(
@@ -115,42 +180,97 @@ export async function POST(
       )
     }
 
-    // Check for warnings (重码/多编码) — block until confirmed
-    if (!confirmed) {
-      const warnings = [
-        ...buildBatchSubmitWarnings(items, results),
-        ...await buildSkippedCandidateSlotWarnings(items),
-        ...await buildPriorityOrderWarnings(items),
-      ]
+    const warnings = [
+      ...buildBatchSubmitWarnings(items, results),
+      ...await buildSkippedCandidateSlotWarnings(items),
+      ...await buildPriorityOrderWarnings(items),
+    ]
+    const warningState = { results, warnings }
+    const warningDigest = await buildBotWarningDigest(prisma, items, warningState)
+    const snapshotDigest = createCanonicalDigest({
+      batchId: batch.id,
+      contentVersion: batch.contentVersion,
+      pullRequests: batch.pullRequests,
+      warnings,
+      warningDigest,
+    })
 
-      if (warnings.length > 0) {
-        return NextResponse.json(
-          {
-            success: false,
-            warnings,
-            requiresConfirmation: true,
-            message: `批次中存在 ${warnings.length} 个重码/多编码/跳过编码空位/同码链优先级警告，确认后可继续提交`
-          },
-          { status: 400 }
-        )
-      }
+    if (previewOnly || !confirmed) {
+      return NextResponse.json(
+        {
+          success: false,
+          warnings,
+          requiresConfirmation: true,
+          batchId: batch.id,
+          contentVersion: batch.contentVersion,
+          warningDigest,
+          snapshotDigest,
+          message: warnings.length > 0
+            ? `批次中存在 ${warnings.length} 个警告，确认后可继续提交`
+            : '批次检查完成，请确认后提交',
+        },
+        { status: 400 }
+      )
+    }
+
+    if (warningDigest !== expectedWarningDigest) {
+      return NextResponse.json(
+        { success: false, message: '警告快照已变化，请重新确认' },
+        { status: 409 }
+      )
+    }
+    if (snapshotDigest !== expectedSnapshotDigest) {
+      return NextResponse.json(
+        { success: false, message: '批次提交快照已变化，请重新确认' },
+        { status: 409 }
+      )
     }
 
     // Update batch status to Submitted
-    const updated = await prisma.batch.update({
-      where: { id },
-      data: {
-        status: 'Submitted',
-        reviewNote: null
-      }
+    const transitioned = await prisma.$transaction(async (tx) => {
+      await lockPhraseTableForWarningSnapshot(tx)
+      const lockedDigest = await buildBotWarningDigest(tx, items, warningState)
+      if (lockedDigest !== expectedWarningDigest) return { count: 0 }
+      const lockedPullRequests = await tx.pullRequest.findMany({
+        where: { batchId: id },
+        orderBy: { createAt: 'asc' },
+      })
+      const lockedSnapshotDigest = createCanonicalDigest({
+        batchId: batch.id,
+        contentVersion: batch.contentVersion,
+        pullRequests: lockedPullRequests,
+        warnings,
+        warningDigest: lockedDigest,
+      })
+      if (lockedSnapshotDigest !== expectedSnapshotDigest) return { count: 0 }
+      return tx.batch.updateMany({
+        where: {
+          id,
+          creatorId: user.id,
+          status: { in: ['Draft', 'Rejected'] },
+          contentVersion: expectedContentVersion as number,
+        },
+        data: {
+          status: 'Submitted',
+          reviewNote: null,
+        },
+      })
     })
+
+    if (transitioned.count !== 1) {
+      return NextResponse.json(
+        { success: false, message: '批次内容或状态已被其他操作修改，请刷新后重试' },
+        { status: 409 }
+      )
+    }
 
     return NextResponse.json({
       success: true,
       message: '批次已提交审核',
       batch: {
-        id: updated.id,
-        status: updated.status
+        id,
+        status: 'Submitted',
+        contentVersion: expectedContentVersion,
       }
     })
   } catch (error: unknown) {

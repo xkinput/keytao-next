@@ -1,6 +1,8 @@
 import { prisma } from '@/lib/prisma'
 import type { Batch } from '@prisma/client'
 import type { BatchConflictResult } from '@/lib/services/batchConflictService'
+import { buildBotWarningDigest } from '@/lib/services/botWarningSnapshot'
+import { createPhraseTargetFingerprint } from '@/lib/services/phraseTargetBinding'
 
 export type BatchApprovalMode = 'admin' | 'bot-auto'
 
@@ -9,10 +11,29 @@ export interface ApproveSubmittedBatchOptions {
   reviewNote?: string | null
   mode?: BatchApprovalMode
   allowDelete?: boolean
+  expectedContentVersion?: number
 }
 
 export interface ApproveSubmittedBatchResult {
   batch: Batch
+}
+
+export class BatchConcurrentUpdateError extends Error {
+  readonly status = 409
+
+  constructor(message = '批次内容或状态已被其他操作修改，请刷新后重试') {
+    super(message)
+    this.name = 'BatchConcurrentUpdateError'
+  }
+}
+
+export class BatchApprovalTargetChangedError extends Error {
+  readonly status = 409
+
+  constructor(message = '审批目标词条已变化或缺少实体绑定，请重新创建批次') {
+    super(message)
+    this.name = 'BatchApprovalTargetChangedError'
+  }
 }
 
 export function orderPullRequestsForApproval<T extends { id: number }>(
@@ -112,6 +133,7 @@ export async function approveSubmittedBatch({
   reviewNote,
   mode = 'admin',
   allowDelete = true,
+  expectedContentVersion,
 }: ApproveSubmittedBatchOptions): Promise<ApproveSubmittedBatchResult> {
   const batch = await prisma.batch.findUnique({
     where: { id: batchId },
@@ -133,6 +155,14 @@ export async function approveSubmittedBatch({
 
   if (batch.status !== 'Submitted') {
     throw new Error('只能审核待审核状态的批次')
+  }
+
+  const snapshotContentVersion = batch.contentVersion
+  if (
+    expectedContentVersion !== undefined
+    && expectedContentVersion !== snapshotContentVersion
+  ) {
+    throw new BatchConcurrentUpdateError()
   }
 
   if (!allowDelete) {
@@ -169,9 +199,49 @@ export async function approveSubmittedBatch({
   })
 
   const executionOrder = orderPullRequestsForApproval(batch.pullRequests, conflictResults)
+  const approvalDigest = await buildBotWarningDigest(prisma, prItems, conflictResults)
 
   const updated = await prisma.$transaction(async (tx) => {
+    const transitioned = await tx.batch.updateMany({
+      where: {
+        id: batchId,
+        status: 'Submitted',
+        contentVersion: snapshotContentVersion,
+      },
+      data: {
+        status: 'Approved',
+        reviewNote: reviewNote || (mode === 'bot-auto' ? '本喵自动审词通过' : null),
+      },
+    })
+
+    if (transitioned.count !== 1) {
+      throw new BatchConcurrentUpdateError()
+    }
+
+    await tx.$executeRawUnsafe('LOCK TABLE "phrases" IN SHARE ROW EXCLUSIVE MODE')
+    const lockedApprovalDigest = await buildBotWarningDigest(tx, prItems, conflictResults)
+    if (lockedApprovalDigest !== approvalDigest) {
+      throw new BatchConcurrentUpdateError('词库内容已变化，请重新检查批次')
+    }
+
     for (const pr of executionOrder) {
+      const boundTargetId = pr.targetPhraseId ?? pr.phraseId
+      const target = pr.action === 'Change' || pr.action === 'Delete'
+        ? await tx.phrase.findUnique({ where: { id: boundTargetId ?? -1 } })
+        : null
+      const expectedTargetFingerprint = pr.targetFingerprint
+      if (
+        (pr.action === 'Change' || pr.action === 'Delete')
+        && (
+          !boundTargetId
+          || !expectedTargetFingerprint
+          || !target
+          || createPhraseTargetFingerprint(target) !== expectedTargetFingerprint
+        )
+      ) {
+        throw new BatchApprovalTargetChangedError()
+      }
+
       switch (pr.action) {
         case 'Create':
           if (pr.word && pr.code) {
@@ -192,56 +262,29 @@ export async function approveSubmittedBatch({
           break
 
         case 'Change':
-          if (pr.oldWord && pr.code && pr.word) {
-            const oldPhrase = await tx.phrase.findFirst({
-              where: {
-                word: pr.oldWord,
-                code: pr.code,
-                type: pr.type || undefined,
-              },
-            })
-
-            if (oldPhrase) {
-              const finalWeight = weightMap.get(pr.id)
-
-              await tx.phrase.update({
-                where: { id: oldPhrase.id },
-                data: {
-                  word: pr.word,
-                  type: pr.type || undefined,
-                  weight: finalWeight !== undefined ? finalWeight : (pr.weight !== null ? pr.weight : undefined),
-                  remark: pr.remark || undefined,
-                },
-              })
-            }
-          } else if (pr.phraseId) {
+          if (target && pr.word) {
             const finalWeight = weightMap.get(pr.id)
-
             await tx.phrase.update({
-              where: { id: pr.phraseId },
+              where: { id: target.id },
               data: {
-                word: pr.word || undefined,
+                word: pr.word,
                 type: pr.type || undefined,
                 weight: finalWeight !== undefined ? finalWeight : (pr.weight !== null ? pr.weight : undefined),
                 remark: pr.remark || undefined,
               },
             })
+          } else {
+            throw new BatchApprovalTargetChangedError()
           }
           break
 
         case 'Delete':
-          if (pr.phraseId) {
+          if (target) {
             await tx.phrase.delete({
-              where: { id: pr.phraseId },
+              where: { id: target.id },
             })
-          } else if (pr.word && pr.code) {
-            await tx.phrase.deleteMany({
-              where: {
-                word: pr.word,
-                code: pr.code,
-                type: pr.type || undefined,
-              },
-            })
+          } else {
+            throw new BatchApprovalTargetChangedError()
           }
           break
       }
@@ -254,13 +297,7 @@ export async function approveSubmittedBatch({
       })
     }
 
-    return tx.batch.update({
-      where: { id: batchId },
-      data: {
-        status: 'Approved',
-        reviewNote: reviewNote || (mode === 'bot-auto' ? '本喵自动审词通过' : null),
-      },
-    })
+    return tx.batch.findUniqueOrThrow({ where: { id: batchId } })
   })
 
   return { batch: updated }

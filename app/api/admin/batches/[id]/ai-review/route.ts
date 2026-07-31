@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { checkAdminPermission } from '@/lib/adminAuth'
 import { getAdminBatchReviewDetail } from '@/lib/services/adminBatchReviewDetailService'
-import { requestMiaomiaoBatchReview, writeMiaomiaoBatchReview } from '@/lib/services/batchBotReviewService'
+import {
+  requestMiaomiaoBatchReview,
+  StaleBatchReviewError,
+  writeMiaomiaoBatchReview,
+} from '@/lib/services/batchBotReviewService'
 
 export const runtime = 'nodejs'
 export const maxDuration = 300
@@ -24,6 +28,7 @@ export async function POST(
     if (!batch) {
       return NextResponse.json({ error: '批次不存在' }, { status: 404 })
     }
+    const reviewedContentVersion = batch.contentVersion
 
     const aiReview = await requestMiaomiaoBatchReview({
       batch,
@@ -34,6 +39,7 @@ export async function POST(
     await writeMiaomiaoBatchReview({
       batch,
       aiReview,
+      expectedContentVersion: reviewedContentVersion,
     })
 
     const focusItem = Number.isInteger(prId)
@@ -46,6 +52,9 @@ export async function POST(
       reviewedAt: aiReview.generatedAt,
     })
   } catch (error) {
+    if (error instanceof StaleBatchReviewError) {
+      return NextResponse.json({ error: error.message }, { status: error.status })
+    }
     console.error('Manual admin AI review error:', error)
     return NextResponse.json({ error: '喵喵复查失败' }, { status: 500 })
   }

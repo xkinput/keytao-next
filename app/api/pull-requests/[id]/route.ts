@@ -6,6 +6,8 @@ import { rebuildBatchDependencies } from '@/lib/services/batchDependencyService'
 import { Prisma, PullRequestType } from '@prisma/client'
 import { checkIsAdmin } from '@/lib/adminAuth'
 import { isValidPhraseType } from '@/lib/constants/phraseTypes'
+import { resolvePhraseTargetBinding } from '@/lib/services/phraseTargetBinding'
+import { BatchContentLockedError, claimBatchContentMutation } from '@/lib/services/batchContentGuard'
 
 const ALLOWED_ACTIONS = ['Create', 'Change', 'Delete'] as const
 const MAX_WORD_LENGTH = 100
@@ -149,7 +151,7 @@ export async function PATCH(
     }
 
     const body = await request.json()
-    const { word, oldWord, code, action, type, weight, remark } = body
+    const { word, oldWord, code, action, type, weight, remark, expectedContentVersion } = body
     const normalizedWord = typeof word === 'string' ? word.trim() : ''
     const normalizedCode = typeof code === 'string' ? code.trim() : ''
     const normalizedOldWord = typeof oldWord === 'string' ? oldWord.trim() : undefined
@@ -181,6 +183,13 @@ export async function PATCH(
       return NextResponse.json({ error: '备注格式错误' }, { status: 400 })
     }
 
+    if (!Number.isInteger(expectedContentVersion) || expectedContentVersion < 0) {
+      return NextResponse.json({ error: '批次版本缺失或无效，请刷新后重试' }, { status: 409 })
+    }
+    if (pr.batch.contentVersion !== expectedContentVersion) {
+      return NextResponse.json({ error: '批次内容已被修改，请刷新后重试' }, { status: 409 })
+    }
+
     // Check for conflicts with updated data
     const conflict = await conflictDetector.checkConflict({
       action: action as PullRequestType,
@@ -203,6 +212,15 @@ export async function PATCH(
       )
     }
 
+    const targetBinding = await resolvePhraseTargetBinding(prisma.phrase, {
+      action,
+      word: normalizedWord,
+      oldWord: normalizedOldWord,
+      code: normalizedCode,
+      type,
+      phraseId: pr.phraseId,
+    })
+
     // Update PR
     const updateData: Prisma.PullRequestUpdateInput = {
       word: normalizedWord,
@@ -213,46 +231,62 @@ export async function PATCH(
       weight: weight || undefined,
       remark: remark !== undefined ? (remark || null) : undefined,
       hasConflict: conflict.hasConflict,
-      conflictReason: conflict.hasConflict ? conflict.impact : null
+      conflictReason: conflict.hasConflict ? conflict.impact : null,
+      targetPhraseId: targetBinding.targetPhraseId,
+      targetFingerprint: targetBinding.targetFingerprint,
     }
 
-    const updated = await prisma.pullRequest.update({
-      where: { id: prId },
-      data: updateData,
-      include: {
-        phrase: true,
-        batch: true,
-        user: {
-          select: {
-            id: true,
-            name: true,
-            nickname: true
+    const batchIdOfPr = pr.batch.id
+    const updated = await prisma.$transaction(async (tx) => {
+      await claimBatchContentMutation(tx, batchIdOfPr, {
+        expectedContentVersion,
+        allowedStatuses,
+      })
+      const result = await tx.pullRequest.update({
+        where: { id: prId, batchId: batchIdOfPr },
+        data: updateData,
+        include: {
+          phrase: true,
+          batch: true,
+          user: {
+            select: {
+              id: true,
+              name: true,
+              nickname: true
+            }
           }
         }
-      }
-    })
-
-    // Update conflict records
-    await prisma.codeConflict.deleteMany({
-      where: { pullRequestId: pr.id }
-    })
-
-    if (conflict.hasConflict && conflict.currentPhrase) {
-      await prisma.codeConflict.create({
-        data: {
-          code: conflict.code,
-          currentWord: conflict.currentPhrase.word,
-          proposedWord: normalizedWord,
-          pullRequestId: pr.id
-        }
       })
-    }
+
+      await tx.codeConflict.deleteMany({
+        where: { pullRequestId: pr.id }
+      })
+
+      if (conflict.hasConflict && conflict.currentPhrase) {
+        await tx.codeConflict.create({
+          data: {
+            code: conflict.code,
+            currentWord: conflict.currentPhrase.word,
+            proposedWord: normalizedWord,
+            pullRequestId: pr.id
+          }
+        })
+      }
+      return result
+    })
 
     // Rebuild all batch dependencies since changing one PR can affect the whole batch
-    await rebuildBatchDependencies(pr.batch.id)
+    await rebuildBatchDependencies(
+      pr.batch.id,
+      expectedContentVersion + 1,
+      allowedStatuses,
+    )
 
-    return NextResponse.json({ pullRequest: updated })
+    return NextResponse.json({ pullRequest: updated, contentVersion: expectedContentVersion + 1 })
   } catch (error) {
+    if (error instanceof BatchContentLockedError) {
+      return NextResponse.json({ error: error.message }, { status: error.status })
+    }
     console.error('Update PR error:', error)
     return NextResponse.json({ error: '更新 PR 失败' }, { status: 500 })
   }
@@ -311,12 +345,37 @@ export async function DELETE(
       )
     }
 
-    await prisma.pullRequest.delete({
-      where: { id: prId }
+    const body = await request.json().catch(() => ({})) as { expectedContentVersion?: unknown }
+    const expectedContentVersion = body.expectedContentVersion
+    if (!Number.isInteger(expectedContentVersion) || (expectedContentVersion as number) < 0) {
+      return NextResponse.json({ error: '批次版本缺失或无效，请刷新后重试' }, { status: 409 })
+    }
+    if (pr.batch.contentVersion !== expectedContentVersion) {
+      return NextResponse.json({ error: '批次内容已被修改，请刷新后重试' }, { status: 409 })
+    }
+
+    const batchIdOfPr = pr.batch.id
+    await prisma.$transaction(async (tx) => {
+      await claimBatchContentMutation(tx, batchIdOfPr, {
+        expectedContentVersion: expectedContentVersion as number,
+        allowedStatuses,
+      })
+      const removed = await tx.pullRequest.deleteMany({
+        where: { id: prId, batchId: batchIdOfPr }
+      })
+      if (removed.count !== 1) {
+        throw new BatchContentLockedError('条目已被其他操作移除，请刷新后重试')
+      }
     })
 
-    return NextResponse.json({ success: true })
+    return NextResponse.json({
+      success: true,
+      contentVersion: (expectedContentVersion as number) + 1,
+    })
   } catch (error) {
+    if (error instanceof BatchContentLockedError) {
+      return NextResponse.json({ error: error.message }, { status: error.status })
+    }
     console.error('Delete PR error:', error)
     return NextResponse.json({ error: '删除 PR 失败' }, { status: 500 })
   }

@@ -1,6 +1,11 @@
 import { prisma } from '@/lib/prisma'
 import type { BatchAiReviewItem, BatchAiReviewResult } from '@/lib/types/batchAiReview'
 import { getMiaomiaoSemanticEvidence, stripMiaomiaoReviewRemark } from './miaomiaoReviewRemark'
+import {
+  BatchContentLockedError,
+  claimBatchContentMutation,
+  EDITABLE_BATCH_STATUSES,
+} from './batchContentGuard'
 
 type ReviewableBatch = {
   id: string
@@ -132,12 +137,22 @@ function formatMiaomiaoReviewRemark(item: BatchAiReviewItem, generatedAt: string
   return lines.join('\n')
 }
 
+export class StaleBatchReviewError extends Error {
+  readonly status = 409
+
+  constructor() {
+    super('批次内容在复审期间已被修改，本次复审结果已作废，请重新发起复审')
+    this.name = 'StaleBatchReviewError'
+  }
+}
+
 export async function writeMiaomiaoBatchReview(input: {
   batch: ReviewableBatch
   aiReview: BatchAiReviewResult
+  expectedContentVersion: number
 }): Promise<void> {
   const reviewByPrId = new Map(input.aiReview.items.map(item => [item.prId, item]))
-  const updates: PromiseLike<unknown>[] = []
+  const remarkUpdates: Array<{ id: number; remark: string }> = []
 
   for (const pr of input.batch.pullRequests) {
     const item = reviewByPrId.get(pr.id)
@@ -149,18 +164,37 @@ export async function writeMiaomiaoBatchReview(input: {
       formatMiaomiaoReviewRemark(item, input.aiReview.generatedAt),
     ].filter(Boolean).join('\n\n')
 
-    updates.push(prisma.pullRequest.update({
-      where: { id: pr.id },
-      data: { remark: nextRemark },
-    }))
+    remarkUpdates.push({ id: pr.id, remark: nextRemark })
   }
 
-  if (input.batch.status === 'Submitted') {
-    updates.push(prisma.batch.update({
+  await prisma.$transaction(async (tx) => {
+    try {
+      await claimBatchContentMutation(tx, input.batch.id, {
+        expectedContentVersion: input.expectedContentVersion,
+        allowedStatuses: [...EDITABLE_BATCH_STATUSES, 'Submitted'],
+      })
+    } catch (error) {
+      if (error instanceof BatchContentLockedError) throw new StaleBatchReviewError()
+      throw error
+    }
+
+    for (const update of remarkUpdates) {
+      const updated = await tx.pullRequest.updateMany({
+        where: { id: update.id, batchId: input.batch.id },
+        data: { remark: update.remark },
+      })
+      if (updated.count !== 1) throw new StaleBatchReviewError()
+    }
+
+    const fresh = await tx.batch.findUniqueOrThrow({
       where: { id: input.batch.id },
-      data: { reviewNote: input.aiReview.suggestedReviewNote },
-    }))
-  }
-
-  await Promise.all(updates)
+      select: { status: true },
+    })
+    if (fresh.status === 'Submitted') {
+      await tx.batch.update({
+        where: { id: input.batch.id },
+        data: { reviewNote: input.aiReview.suggestedReviewNote },
+      })
+    }
+  })
 }

@@ -33,12 +33,26 @@ export async function POST(
       )
     }
 
-    const updated = await prisma.batch.update({
-      where: { id },
-      data: {
-        status: 'Draft'
-      }
+    const updated = await prisma.$transaction(async (tx) => {
+      const transitioned = await tx.batch.updateMany({
+        where: {
+          id,
+          creatorId: session.id,
+          status: 'Submitted',
+          contentVersion: batch.contentVersion,
+        },
+        data: { status: 'Draft' },
+      })
+      if (transitioned.count !== 1) return null
+      return tx.batch.findUniqueOrThrow({ where: { id } })
     })
+
+    if (!updated) {
+      return NextResponse.json(
+        { error: '批次内容或状态已被其他操作修改，请刷新后重试' },
+        { status: 409 }
+      )
+    }
 
     return NextResponse.json({ batch: updated })
   } catch (error) {

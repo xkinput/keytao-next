@@ -3,6 +3,9 @@ import { NextRequest } from 'next/server'
 
 const mocks = vi.hoisted(() => {
   const tx = {
+    batch: {
+      updateMany: vi.fn(),
+    },
     pullRequest: {
       deleteMany: vi.fn(),
       updateMany: vi.fn(),
@@ -71,10 +74,12 @@ beforeEach(() => {
     id: 'batch-1',
     creatorId: 2,
     status: 'Submitted',
+    contentVersion: 7,
     pullRequests: [{ id: 10 }],
   })
   mocks.prisma.phrase.findMany.mockResolvedValue([])
   mocks.prisma.$transaction.mockImplementation(async (callback) => callback(mocks.tx))
+  mocks.tx.batch.updateMany.mockResolvedValue({ count: 1 })
   mocks.tx.pullRequest.deleteMany.mockResolvedValue({ count: 0 })
   mocks.tx.pullRequest.updateMany.mockResolvedValue({ count: 1 })
   mocks.tx.pullRequest.create.mockResolvedValue({ id: 11 })
@@ -87,6 +92,7 @@ describe('PUT /api/batches/[id]/pull-requests', () => {
 
     const res = await PUT(
       putRequest({
+        expectedContentVersion: 7,
         items: [
           {
             id: 10,
@@ -109,6 +115,7 @@ describe('PUT /api/batches/[id]/pull-requests', () => {
     )
 
     expect(res.status).toBe(200)
+    await expect(res.json()).resolves.toMatchObject({ success: true, contentVersion: 8 })
     expect(mocks.tx.pullRequest.updateMany).toHaveBeenCalledWith(expect.objectContaining({
       where: { id: 10, batchId: 'batch-1' },
       data: expect.objectContaining({ remark: null }),
@@ -127,6 +134,7 @@ describe('PUT /api/batches/[id]/pull-requests', () => {
 
     const res = await PUT(
       putRequest({
+        expectedContentVersion: 7,
         items: [{
           id: 99,
           action: 'Create',
@@ -141,6 +149,18 @@ describe('PUT /api/batches/[id]/pull-requests', () => {
 
     expect(res.status).toBe(400)
     await expect(res.json()).resolves.toEqual({ error: '修改项不存在或不属于此批次' })
+    expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
+  })
+
+  it('fails closed when the desired-state batch version is omitted', async () => {
+    const { PUT } = await import('./route')
+
+    const res = await PUT(
+      putRequest({ items: [] }),
+      { params: Promise.resolve({ id: 'batch-1' }) }
+    )
+
+    expect(res.status).toBe(409)
     expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
   })
 })

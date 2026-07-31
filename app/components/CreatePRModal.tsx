@@ -42,6 +42,7 @@ interface CreatePRModalProps {
   isOpen: boolean
   onClose: () => void
   batchId?: string
+  batchContentVersion?: number
   editPR?: {
     id: number
     word: string
@@ -132,6 +133,7 @@ export default function CreatePRModal({
   isOpen,
   onClose,
   batchId,
+  batchContentVersion,
   editPR,
   batchPRs,
   onSuccess
@@ -927,6 +929,7 @@ export default function CreatePRModal({
         await apiRequest(`/api/batches/${batchId}/pull-requests`, {
           method: 'PUT',
           body: {
+            expectedContentVersion: batchContentVersion,
             items: data.items.map((item, idx) => ({
               id: item.pullRequestId ?? (fields[idx] as typeof fields[number] & { pullRequestId?: number } | undefined)?.pullRequestId,
               action: item.action,
@@ -947,6 +950,7 @@ export default function CreatePRModal({
         await apiRequest(`/api/pull-requests/${editPR.id}`, {
           method: 'PATCH',
           body: {
+            expectedContentVersion: batchContentVersion,
             action: item.action,
             word: item.word,
             oldWord: item.action === 'Change' ? item.oldWord : undefined,
@@ -971,7 +975,8 @@ export default function CreatePRModal({
               weight: item.weight ? parseInt(item.weight) : (item.action !== 'Delete' ? getDefaultWeight(item.type as PhraseType) : undefined),
               remark: item.remark || null
             })),
-            batchId
+            batchId,
+            expectedContentVersion: batchContentVersion,
           },
           withAuth: true
         })

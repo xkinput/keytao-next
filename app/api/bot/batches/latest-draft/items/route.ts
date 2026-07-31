@@ -13,8 +13,9 @@ export async function GET(request: NextRequest) {
     const searchParams = request.nextUrl.searchParams
     const platform = searchParams.get('platform') as 'qq' | 'telegram' | null
     const platformId = searchParams.get('platformId')
+    const requestedBatchId = searchParams.get('batchId')
 
-    const auth = await requireVerifiedBotUser(platform, platformId)
+    const auth = await requireVerifiedBotUser(platform, platformId, { request, rawBody: '' })
     if (!auth.authorized) {
       return NextResponse.json({ success: false, message: auth.message }, { status: auth.status })
     }
@@ -22,8 +23,9 @@ export async function GET(request: NextRequest) {
 
     const batch = await prisma.batch.findFirst({
       where: {
+        ...(requestedBatchId ? { id: requestedBatchId } : {}),
         creatorId: user.id,
-        status: 'Draft',
+        status: requestedBatchId ? { in: ['Draft', 'Rejected'] } : 'Draft',
         description: { startsWith: '键道助手' }
       },
       orderBy: { createAt: 'desc' },
@@ -31,6 +33,7 @@ export async function GET(request: NextRequest) {
         id: true,
         description: true,
         createAt: true,
+        contentVersion: true,
         pullRequests: {
           orderBy: { createAt: 'asc' },
           select: {
@@ -54,6 +57,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({
         success: true,
         batchId: null,
+        contentVersion: null,
         items: [],
         message: '当前没有草稿批次'
       })
@@ -84,6 +88,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       success: true,
       batchId: batch.id,
+      contentVersion: batch.contentVersion,
       items: enrichedItems,
       count: enrichedItems.length,
       message: enrichedItems.length > 0
@@ -107,68 +112,13 @@ export async function GET(request: NextRequest) {
  * Requires a valid Bot token and a bound platform user
  */
 export async function POST(request: NextRequest) {
-  try {
-    const body = await request.json()
-    const { platform, platformId, word, code, type = 'Phrase', weight, remark } = body
-    const parsedWeight = weight === undefined || weight === null || weight === ''
-      ? undefined
-      : Number(weight)
-
-    const auth = await requireVerifiedBotUser(platform, platformId)
-    if (!auth.authorized) {
-      return NextResponse.json({ success: false, message: auth.message }, { status: auth.status })
-    }
-    const user = auth.user
-
-    if (!word || !code) {
-      return NextResponse.json({ success: false, message: '缺少必需参数: word, code' }, { status: 400 })
-    }
-
-    if (parsedWeight !== undefined && (!Number.isInteger(parsedWeight) || parsedWeight < 0)) {
-      return NextResponse.json({ success: false, message: '权重必须是非负整数' }, { status: 400 })
-    }
-
-    // Find or create draft batch
-    let batch = await prisma.batch.findFirst({
-      where: { creatorId: user.id, status: 'Draft', description: { startsWith: '键道助手' } },
-      orderBy: { createAt: 'desc' },
-      select: { id: true }
-    })
-
-    if (!batch) {
-      batch = await prisma.batch.create({
-        data: { description: '键道助手草稿批次', creatorId: user.id, status: 'Draft' },
-        select: { id: true }
-      })
-    }
-
-    // Add PR to batch
-    const pr = await prisma.pullRequest.create({
-      data: {
-        word,
-        code,
-        action: 'Create',
-        type: type as PhraseType,
-        weight: parsedWeight,
-        remark: remark || null,
-        batchId: batch.id,
-        userId: user.id,
-      },
-      select: { id: true, word: true, code: true, type: true, weight: true }
-    })
-
-    return NextResponse.json({
-      success: true,
-      batchId: batch.id,
-      item: pr,
-      message: `已将「${word}」(${code}) 添加到草稿批次`
-    })
-  } catch (error) {
-    console.error('[Bot API] Add draft item error:', error)
-    const errorMessage = error instanceof Error ? error.message : '未知错误'
-    return NextResponse.json(
-      { success: false, message: `添加失败：${errorMessage}` },
-      { status: 500 }
-    )
-  }
+  // This legacy endpoint performed a direct write without a server preview
+  // ticket and selected/created the batch before taking the per-user lock.
+  // Keep it unavailable so every bot mutation goes through the transactional
+  // `/api/bot/pull-requests/batch` preview-confirm flow.
+  void request
+  return NextResponse.json(
+    { success: false, message: '此旧版直写接口已停用，请使用带确认票据的批量草稿接口' },
+    { status: 410 }
+  )
 }

@@ -5,6 +5,8 @@ import { checkBatchConflictsWithWeight } from '@/lib/services/batchConflictServi
 import { buildDependencies } from '@/lib/services/batchDependencyService'
 import { PullRequestType } from '@prisma/client'
 import { PhraseType } from '@/lib/constants/phraseTypes'
+import { resolvePhraseTargetBinding } from '@/lib/services/phraseTargetBinding'
+import { BatchContentLockedError, claimBatchContentMutation } from '@/lib/services/batchContentGuard'
 
 type BatchPullRequestItem = {
   action: PullRequestType
@@ -26,7 +28,17 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json()
-    const { changes, items, batchDescription, batchId, issueId } = body
+    const { changes, items, batchDescription, batchId, issueId, expectedContentVersion } = body
+
+    if (
+      batchId
+      && (!Number.isInteger(expectedContentVersion) || expectedContentVersion < 0)
+    ) {
+      return NextResponse.json(
+        { error: '批次版本缺失或无效，请刷新后重试' },
+        { status: 409 }
+      )
+    }
 
     // Support both 'changes' and 'items' for backward compatibility
     const prItems = items || changes
@@ -84,6 +96,10 @@ export async function POST(request: NextRequest) {
         if (batch.status !== 'Draft' && batch.status !== 'Rejected') {
           throw new Error('只能编辑草稿或已拒绝状态的批次')
         }
+        await claimBatchContentMutation(tx, batch.id, {
+          creatorId: session.id,
+          expectedContentVersion,
+        })
       } else {
         batch = await tx.batch.create({
           data: {
@@ -95,18 +111,25 @@ export async function POST(request: NextRequest) {
             status: 'Draft'
           }
         })
+        await claimBatchContentMutation(tx, batch.id, {
+          creatorId: session.id,
+          expectedContentVersion: batch.contentVersion,
+        })
       }
 
       // Create all PRs
       const prs = await Promise.all(
-        (prItems as BatchPullRequestItem[]).map((change) =>
-          tx.pullRequest.create({
+        (prItems as BatchPullRequestItem[]).map(async (change) => {
+          const binding = await resolvePhraseTargetBinding(tx.phrase, change)
+          return tx.pullRequest.create({
             data: {
               word: change.word,
               oldWord: change.oldWord || undefined,
               code: change.code,
               action: change.action as PullRequestType,
               phraseId: change.phraseId || undefined,
+              targetPhraseId: binding.targetPhraseId,
+              targetFingerprint: binding.targetFingerprint,
               weight: change.weight || undefined,
               remark: change.remark || null,
               type: change.type || undefined,
@@ -115,23 +138,27 @@ export async function POST(request: NextRequest) {
               hasConflict: false
             }
           })
-        )
+        })
       )
 
       // Build dependencies if conflicts are resolved within batch
       await buildDependencies(prs, results, tx)
 
-      return { batch, prs }
+      return { batch, prs, contentVersion: batch.contentVersion + 1 }
     })
 
     return NextResponse.json({
       batch: result.batch,
+      contentVersion: result.contentVersion,
       pullRequests: result.prs,
       conflictsResolved: results.filter(r =>
         r.conflict.suggestions?.some(sug => sug.action === 'Resolved')
       ).length
     })
   } catch (error) {
+    if (error instanceof BatchContentLockedError) {
+      return NextResponse.json({ error: error.message }, { status: error.status })
+    }
     console.error('Create batch PRs error:', error)
     return NextResponse.json(
       { error: '批量创建 PR 失败' },

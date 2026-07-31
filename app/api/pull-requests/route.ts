@@ -4,6 +4,8 @@ import { prisma } from '@/lib/prisma'
 import { conflictDetector } from '@/lib/services/conflictDetector'
 import { Prisma, PullRequestStatus, PullRequestType } from '@prisma/client'
 import { isValidPhraseType } from '@/lib/constants/phraseTypes'
+import { resolvePhraseTargetBinding } from '@/lib/services/phraseTargetBinding'
+import { BatchContentLockedError, claimBatchContentMutation } from '@/lib/services/batchContentGuard'
 
 // POST /api/pull-requests - Create a single PR
 export async function POST(request: NextRequest) {
@@ -27,7 +29,8 @@ export async function POST(request: NextRequest) {
       weight,
       remark,
       type,
-      batchId
+      batchId,
+      expectedContentVersion,
     } = body
 
     if (!word || !code || !action) {
@@ -100,13 +103,22 @@ export async function POST(request: NextRequest) {
         finalPhraseId = existingPhrase.id
       }
     }
+    const targetBinding = await resolvePhraseTargetBinding(prisma.phrase, {
+      action,
+      word: word.trim(),
+      oldWord: action === 'Change' ? oldWord.trim() : undefined,
+      code: code.trim(),
+      type,
+      phraseId: finalPhraseId,
+    })
 
     // If no batchId provided, create a new batch
     let finalBatchId = batchId
+    let claimedContentVersion: number
     if (finalBatchId) {
       const batch = await prisma.batch.findUnique({
         where: { id: finalBatchId },
-        select: { id: true, creatorId: true, status: true }
+        select: { id: true, creatorId: true, status: true, contentVersion: true }
       })
 
       if (!batch) {
@@ -120,6 +132,13 @@ export async function POST(request: NextRequest) {
       if (batch.status !== 'Draft' && batch.status !== 'Rejected') {
         return NextResponse.json({ error: '只能编辑草稿或已拒绝状态的批次' }, { status: 400 })
       }
+      if (!Number.isInteger(expectedContentVersion) || expectedContentVersion < 0) {
+        return NextResponse.json({ error: '批次版本缺失或无效，请刷新后重试' }, { status: 409 })
+      }
+      if (batch.contentVersion !== expectedContentVersion) {
+        return NextResponse.json({ error: '批次内容已被修改，请刷新后重试' }, { status: 409 })
+      }
+      claimedContentVersion = expectedContentVersion
     } else {
       const batch = await prisma.batch.create({
         data: {
@@ -129,6 +148,7 @@ export async function POST(request: NextRequest) {
         }
       })
       finalBatchId = batch.id
+      claimedContentVersion = batch.contentVersion
     }
 
     // Calculate weight for Create action with duplicate codes
@@ -139,52 +159,63 @@ export async function POST(request: NextRequest) {
       finalWeight = undefined
     }
 
-    // Create PR
-    const pr = await prisma.pullRequest.create({
-      data: {
-        word: word.trim(),
-        oldWord: action === 'Change' ? oldWord.trim() : undefined,
-        code: code.trim(),
-        action: action as PullRequestType,
-        phraseId: finalPhraseId || undefined,
-        weight: finalWeight || undefined,
-        remark: remark || null,
-        type: type || undefined,
-        userId: session.id,
-        batchId: finalBatchId,
-        hasConflict: conflict.hasConflict,
-        conflictReason: conflict.hasConflict ? conflict.impact : undefined
-      },
-      include: {
-        phrase: true,
-        batch: true,
-        user: {
-          select: {
-            id: true,
-            name: true,
-            nickname: true
+    const pr = await prisma.$transaction(async (tx) => {
+      await claimBatchContentMutation(tx, finalBatchId, {
+        creatorId: session.id,
+        expectedContentVersion: claimedContentVersion,
+      })
+      const created = await tx.pullRequest.create({
+        data: {
+          word: word.trim(),
+          oldWord: action === 'Change' ? oldWord.trim() : undefined,
+          code: code.trim(),
+          action: action as PullRequestType,
+          phraseId: finalPhraseId || undefined,
+          targetPhraseId: targetBinding.targetPhraseId,
+          targetFingerprint: targetBinding.targetFingerprint,
+          weight: finalWeight || undefined,
+          remark: remark || null,
+          type: type || undefined,
+          userId: session.id,
+          batchId: finalBatchId,
+          hasConflict: conflict.hasConflict,
+          conflictReason: conflict.hasConflict ? conflict.impact : undefined
+        },
+        include: {
+          phrase: true,
+          batch: true,
+          user: {
+            select: {
+              id: true,
+              name: true,
+              nickname: true
+            }
           }
         }
-      }
-    })
-
-    // If has conflict, create conflict record
-    if (conflict.hasConflict && conflict.currentPhrase) {
-      await prisma.codeConflict.create({
-        data: {
-          code: conflict.code,
-          currentWord: conflict.currentPhrase.word,
-          proposedWord: word,
-          pullRequestId: pr.id
-        }
       })
-    }
+
+      if (conflict.hasConflict && conflict.currentPhrase) {
+        await tx.codeConflict.create({
+          data: {
+            code: conflict.code,
+            currentWord: conflict.currentPhrase.word,
+            proposedWord: word,
+            pullRequestId: created.id
+          }
+        })
+      }
+      return created
+    })
 
     return NextResponse.json({
       pullRequest: pr,
+      contentVersion: claimedContentVersion + 1,
       conflict: conflict.hasConflict ? conflict : undefined
     })
   } catch (error) {
+    if (error instanceof BatchContentLockedError) {
+      return NextResponse.json({ error: error.message }, { status: error.status })
+    }
     console.error('Create PR error:', error)
     return NextResponse.json({ error: '创建 PR 失败' }, { status: 500 })
   }

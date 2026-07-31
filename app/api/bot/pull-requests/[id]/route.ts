@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireVerifiedBotUser } from '@/lib/botUserAuth'
-import { recheckBatchConflicts } from '@/lib/services/batchConflictService'
+import { BatchContentLockedError, claimBatchContentMutation } from '@/lib/services/batchContentGuard'
+import {
+  assertExpectedBatchTargets,
+  BatchTargetChangedError,
+  parseExpectedBatchTargets,
+} from '@/lib/services/batchDeleteTargets'
 
 /**
  * Bot API: Delete a PR item from the user's draft batch
@@ -18,65 +23,72 @@ export async function DELETE(
 ) {
   try {
     const { id } = await params
+    const rawBody = await request.clone().text()
     const prId = parseInt(id, 10)
 
     if (isNaN(prId)) {
       return NextResponse.json({ success: false, message: '无效的 PR ID' }, { status: 400 })
     }
 
-    const body = await request.json()
-    const { platform, platformId } = body
+    const body: unknown = await request.json().catch(() => null)
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ success: false, message: '请求格式错误' }, { status: 400 })
+    }
+    const payload = body as Record<string, unknown>
+    const { platform, platformId, batchId, expectedContentVersion } = payload
+    const expectedTargets = parseExpectedBatchTargets(payload.expectedTargets)
+    if (
+      typeof platform !== 'string'
+      || typeof platformId !== 'string'
+      || typeof batchId !== 'string'
+      || !Number.isInteger(expectedContentVersion)
+      || (expectedContentVersion as number) < 0
+      || !expectedTargets
+      || expectedTargets.length !== 1
+      || expectedTargets[0].id !== prId
+    ) {
+      return NextResponse.json({ success: false, message: '删除目标快照格式错误' }, { status: 400 })
+    }
 
-    const auth = await requireVerifiedBotUser(platform, platformId)
+    const auth = await requireVerifiedBotUser(platform, platformId, { request, rawBody })
     if (!auth.authorized) {
       return NextResponse.json({ success: false, message: auth.message }, { status: auth.status })
     }
     const user = auth.user
 
-    // Fetch PR and its batch in one query to verify ownership
-    const pr = await prisma.pullRequest.findUnique({
-      where: { id: prId },
-      select: {
-        id: true,
-        word: true,
-        code: true,
-        action: true,
-        userId: true,
-        batch: {
-          select: { id: true, status: true, creatorId: true }
-        }
-      }
+    await prisma.$transaction(async (tx) => {
+      await claimBatchContentMutation(tx, batchId, {
+        creatorId: user.id,
+        expectedContentVersion: expectedContentVersion as number,
+      })
+      const rows = await tx.pullRequest.findMany({
+        where: { id: prId, batchId, userId: user.id },
+        select: { id: true, word: true, code: true, action: true, type: true },
+      })
+      assertExpectedBatchTargets(expectedTargets, rows.map(row => ({
+        id: row.id,
+        word: row.word ?? '',
+        code: row.code ?? '',
+        action: row.action,
+        type: row.type ?? 'Phrase',
+      })))
+      const deleted = await tx.pullRequest.deleteMany({ where: { id: prId, batchId, userId: user.id } })
+      if (deleted.count !== 1) throw new BatchTargetChangedError()
     })
 
-    if (!pr) {
-      return NextResponse.json({ success: false, message: 'PR 条目不存在' }, { status: 404 })
-    }
-
-    // Verify ownership
-    if (pr.userId !== user.id) {
-      return NextResponse.json({ success: false, message: '无权限操作此条目' }, { status: 403 })
-    }
-
-    // Only allow deletion from Draft batches
-    if (!pr.batch || pr.batch.status !== 'Draft') {
-      return NextResponse.json(
-        { success: false, message: '只能删除草稿批次中的条目' },
-        { status: 400 }
-      )
-    }
-
-    await prisma.pullRequest.delete({ where: { id: prId } })
-
-    console.log(`[Bot API] Deleted PR #${prId} (${pr.action} "${pr.word}") from batch ${pr.batch.id}`)
-
-    // Re-check full batch conflict state so remaining items reflect the updated context
-    await recheckBatchConflicts(pr.batch.id)
+    const target = expectedTargets[0]
+    console.log(`[Bot API] Deleted PR #${prId} (${target.action} "${target.word}") from batch ${batchId}`)
 
     return NextResponse.json({
       success: true,
-      message: `已删除条目：${pr.action} "${pr.word}"（编码：${pr.code}）`
+      batchId,
+      contentVersion: (expectedContentVersion as number) + 1,
+      message: `已删除条目：${target.action} "${target.word}"（编码：${target.code}）`
     })
   } catch (error) {
+    if (error instanceof BatchContentLockedError || error instanceof BatchTargetChangedError) {
+      return NextResponse.json({ success: false, message: error.message }, { status: error.status })
+    }
     console.error('[Bot API] Delete PR error:', error)
     const errorMessage = error instanceof Error ? error.message : '未知错误'
     return NextResponse.json(

@@ -6,6 +6,8 @@ import { PullRequestType, PhraseType as PrismaPhraseType } from '@prisma/client'
 import { isValidPhraseType, type PhraseType } from '@/lib/constants/phraseTypes'
 import { calculateWeightForType } from '@/lib/services/batchConflictService'
 import { checkIsAdmin } from '@/lib/adminAuth'
+import { resolvePhraseTargetBinding } from '@/lib/services/phraseTargetBinding'
+import { BatchContentLockedError, claimBatchContentMutation } from '@/lib/services/batchContentGuard'
 
 const allowedActions = ['Create', 'Change', 'Delete'] as const
 
@@ -91,6 +93,17 @@ export async function PUT(
 
         const body = await request.json()
         const rawItems = (body as { items?: unknown }).items
+        const expectedContentVersion = (body as { expectedContentVersion?: unknown }).expectedContentVersion
+
+        if (
+            !Number.isInteger(expectedContentVersion)
+            || (expectedContentVersion as number) < 0
+        ) {
+            return NextResponse.json(
+                { error: '批次版本缺失或无效，请刷新后重试' },
+                { status: 409 }
+            )
+        }
 
         if (!Array.isArray(rawItems)) {
             return NextResponse.json({ error: '数据格式错误' }, { status: 400 })
@@ -191,6 +204,11 @@ export async function PUT(
 
         // Execute in transaction
         await prisma.$transaction(async (tx) => {
+            await claimBatchContentMutation(tx, id, {
+                expectedContentVersion: expectedContentVersion as number,
+                allowedStatuses,
+            })
+
             // A. Delete removed PRs
             if (idsToDelete.length > 0) {
                 await tx.pullRequest.deleteMany({
@@ -234,6 +252,11 @@ export async function PUT(
                     })
                     if (p) finalPhraseId = p.id
                 }
+
+                const binding = await resolvePhraseTargetBinding(tx.phrase, {
+                    ...item,
+                    phraseId: finalPhraseId,
+                })
 
                 // Calculate Weight
                 let finalWeight = item.weight
@@ -289,6 +312,8 @@ export async function PUT(
                             weight: finalWeight ?? undefined,
                             remark: item.remark !== undefined ? (item.remark || null) : undefined,
                             phraseId: finalPhraseId,
+                            targetPhraseId: binding.targetPhraseId,
+                            targetFingerprint: binding.targetFingerprint,
                             hasConflict: conflict.hasConflict,
                             conflictReason: conflict.hasConflict ? conflict.impact : null
                         }
@@ -311,6 +336,8 @@ export async function PUT(
                             weight: finalWeight ?? undefined,
                             remark: item.remark || null,
                             phraseId: finalPhraseId,
+                            targetPhraseId: binding.targetPhraseId,
+                            targetFingerprint: binding.targetFingerprint,
                             hasConflict: conflict.hasConflict,
                             conflictReason: conflict.hasConflict ? conflict.impact : undefined
                         }
@@ -319,9 +346,15 @@ export async function PUT(
             }
         })
 
-        return NextResponse.json({ success: true })
+        return NextResponse.json({
+            success: true,
+            contentVersion: (expectedContentVersion as number) + 1,
+        })
     } catch (error) {
         if (error instanceof BatchSyncInputError) {
+            return NextResponse.json({ error: error.message }, { status: error.status })
+        }
+        if (error instanceof BatchContentLockedError) {
             return NextResponse.json({ error: error.message }, { status: error.status })
         }
 

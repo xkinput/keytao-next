@@ -270,16 +270,21 @@ export default function DeveloperPage() {
               <Divider />
 
               <ApiDoc
-                method="POST / DELETE"
+                method="GET / POST / DELETE"
                 path="/api/v1/pull-requests/batch-draft"
-                description="维护当前 API Key 所属用户的个人 API 草稿批次"
+                description="读取并以严格版本控制维护当前 API Key 所属用户的个人 API 草稿批次"
                 params={[
+                  { name: 'batchId', desc: 'GET query / POST / DELETE JSON body: 指定草稿；GET 不传则读取最新草稿' },
+                  { name: 'expectedContentVersion', desc: 'POST / DELETE 必填：使用上次 GET 或写入响应返回的 contentVersion' },
                   { name: 'items', desc: 'POST JSON body: 草稿 PR 条目数组' },
-                  { name: 'batchId', desc: 'POST JSON body: 可选，追加到指定草稿批次' },
                   { name: 'ids', desc: 'DELETE JSON body: 要删除的草稿 PR ID 数组' },
                 ]}
-                example={`curl -X POST -H "Content-Type: application/json" -H "X-API-Key: kt_xxx" \\
-  -d '{"items":[{"action":"Create","word":"示例词","code":"ulci","type":"Phrase","weight":100}]}' \\
+                example={`curl -H "X-API-Key: kt_xxx" \\
+  "/api/v1/pull-requests/batch-draft"
+
+# 首次无草稿时使用 GET 返回的 contentVersion=0；后续同时回传 batchId 和最新版本
+curl -X POST -H "Content-Type: application/json" -H "X-API-Key: kt_xxx" \\
+  -d '{"expectedContentVersion":0,"items":[{"action":"Create","word":"示例词","code":"ulci","type":"Phrase","weight":100}]}' \\
   "/api/v1/pull-requests/batch-draft"`}
               />
 

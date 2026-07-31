@@ -220,17 +220,28 @@ export async function DELETE(
       return NextResponse.json({ error: '无权限' }, { status: 403 })
     }
 
-    // Cannot delete Submitted or Approved batches
-    if (batch.status === 'Submitted' || batch.status === 'Approved') {
+    if (batch.status !== 'Draft' && batch.status !== 'Rejected') {
       return NextResponse.json(
         { error: '不能删除审核中或已通过的批次' },
         { status: 400 }
       )
     }
 
-    await prisma.batch.delete({
-      where: { id }
+    const deleted = await prisma.batch.deleteMany({
+      where: {
+        id,
+        ...(isAdmin ? {} : { creatorId: session.id }),
+        status: { in: ['Draft', 'Rejected'] },
+        contentVersion: batch.contentVersion,
+      },
     })
+
+    if (deleted.count !== 1) {
+      return NextResponse.json(
+        { error: '批次内容或状态已被其他操作修改，请刷新后重试' },
+        { status: 409 }
+      )
+    }
 
     return NextResponse.json({ success: true })
   } catch (error) {

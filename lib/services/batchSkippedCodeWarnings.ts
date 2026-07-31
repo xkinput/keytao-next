@@ -11,6 +11,11 @@ interface CandidateSlotAnalysis {
   priorCodes: string[]
 }
 
+export interface SkippedCandidateSlotDependency {
+  type: PhraseType
+  code: string
+}
+
 const CODE_ONLY_PATTERN = /^[a-z]+$/i
 const HAN_PATTERN = /[\u3400-\u9fff]/
 const SKIPPED_SLOT_TYPES = new Set<PhraseType>(['Single', 'Phrase', 'Supplement'])
@@ -77,6 +82,28 @@ async function analyzeItem(item: BatchPRItem): Promise<CandidateSlotAnalysis | n
     })
     return null
   }
+}
+
+/**
+ * Return every dictionary slot whose occupancy can change skipped-slot warnings.
+ * Callers can bind these rows into a confirmation digest before accepting a
+ * previously issued warning snapshot.
+ */
+export async function collectSkippedCandidateSlotDependencies(
+  items: BatchPRItem[]
+): Promise<SkippedCandidateSlotDependency[]> {
+  const analyses = (await Promise.all(items.map(analyzeItem)))
+    .filter((item): item is CandidateSlotAnalysis => item !== null)
+  const dependencies = new Map<string, SkippedCandidateSlotDependency>()
+  for (const analysis of analyses) {
+    const type = normalizeItemType(analysis.item)
+    for (const code of analysis.priorCodes) {
+      dependencies.set(slotKey(type, code), { type, code })
+    }
+  }
+  return [...dependencies.values()].sort((left, right) =>
+    slotKey(left.type, left.code).localeCompare(slotKey(right.type, right.code))
+  )
 }
 
 export async function buildSkippedCandidateSlotWarnings(

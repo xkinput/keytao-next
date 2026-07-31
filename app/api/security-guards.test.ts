@@ -65,6 +65,7 @@ vi.mock('@/lib/prisma', () => ({
   prisma: {
     batch: {
       findUnique: vi.fn(),
+      findUniqueOrThrow: vi.fn(),
       findMany: vi.fn(),
       create: vi.fn(),
       findFirst: vi.fn(),
@@ -78,6 +79,7 @@ vi.mock('@/lib/prisma', () => ({
       findMany: vi.fn(),
       count: vi.fn(),
       update: vi.fn(),
+      updateMany: vi.fn(),
       delete: vi.fn(),
       deleteMany: vi.fn(),
     },
@@ -120,7 +122,8 @@ vi.mock('@/lib/prisma', () => ({
       findUnique: vi.fn(),
       update: vi.fn(),
     },
-    $transaction: vi.fn(async (operations: unknown[]) => Promise.all(operations)),
+    $executeRawUnsafe: vi.fn(),
+    $transaction: vi.fn(),
   },
 }))
 
@@ -142,6 +145,8 @@ function draftItem(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  process.env.BOT_API_TOKEN = 'test-bot-endpoint-token'
+  process.env.BOT_IDENTITY_SECRET = 'test-shared-bot-identity-secret'
   mockGetSession.mockResolvedValue({ id: 1, name: 'rea' })
   mockCheckIsAdmin.mockResolvedValue(false)
   mockCheckAdminPermission.mockResolvedValue({ authorized: true, response: undefined })
@@ -156,11 +161,20 @@ beforeEach(() => {
   mockCreateGithubSyncService.mockReturnValue({})
   mockPrisma.batch.create.mockResolvedValue({ id: 'batch-new' })
   mockPrisma.batch.update.mockResolvedValue({ id: 'batch-1' })
-  mockPrisma.batch.updateMany.mockResolvedValue({ count: 0 })
+  mockPrisma.batch.updateMany.mockResolvedValue({ count: 1 })
+  mockPrisma.batch.findUniqueOrThrow.mockResolvedValue({ status: 'Submitted' })
   mockPrisma.batch.findMany.mockResolvedValue([])
   mockPrisma.pullRequest.create.mockResolvedValue({ id: 1 })
   mockPrisma.pullRequest.findMany.mockResolvedValue([])
   mockPrisma.pullRequest.count.mockResolvedValue(0)
+  mockPrisma.pullRequest.updateMany.mockResolvedValue({ count: 1 })
+  mockPrisma.$executeRawUnsafe.mockResolvedValue(undefined)
+  mockPrisma.$transaction.mockImplementation(async (operation: unknown) => {
+    if (typeof operation === 'function') {
+      return (operation as (tx: typeof mockPrisma) => Promise<unknown>)(mockPrisma)
+    }
+    return Promise.all(operation as Promise<unknown>[])
+  })
   mockPrisma.issue.create.mockResolvedValue({ id: 1 })
   mockPrisma.issue.findMany.mockResolvedValue([])
   mockPrisma.issue.count.mockResolvedValue(0)
@@ -222,13 +236,12 @@ describe('API abuse guards', () => {
     expect(fetch).not.toHaveBeenCalled()
   })
 
-  it('overwrites client supplied user_id before proxying bot chat', async () => {
+  it('injects the authenticated user_id before proxying bot chat', async () => {
     const { POST } = await import('./bot/chat/route')
 
     const res = await POST(jsonRequest('http://localhost/api/bot/chat', {
       message: 'hi',
       session_id: 's1',
-      user_id: 'evil',
     }))
 
     expect(res.status).toBe(200)
@@ -541,13 +554,13 @@ describe('API abuse guards', () => {
       'http://localhost:8080/api/keytao/batches/review',
       expect.objectContaining({ method: 'POST' })
     )
-    expect(mockPrisma.pullRequest.update).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: 1 },
+    expect(mockPrisma.pullRequest.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 1, batchId: 'batch-1' },
       data: expect.objectContaining({
         remark: expect.stringContaining('本喵复审：通过'),
       }),
     }))
-    const persistedRemark = mockPrisma.pullRequest.update.mock.calls[0]?.[0]?.data?.remark
+    const persistedRemark = mockPrisma.pullRequest.updateMany.mock.calls[0]?.[0]?.data?.remark
     expect(persistedRemark).toContain('读音：an bo')
     expect(persistedRemark).toContain('来源：汉典')
     expect(persistedRemark).not.toContain('证据：读音：an bo')

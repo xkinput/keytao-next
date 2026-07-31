@@ -7,12 +7,16 @@ import { execSync } from 'child_process'
 import { beforeAll, afterEach, afterAll } from 'vitest'
 import { prisma } from '@/lib/prisma'
 
+const hasTestDatabase = typeof process.env.DATABASE_URL === 'string'
+  && process.env.DATABASE_URL.trim().length > 0
+
 beforeAll(async () => {
+  if (!hasTestDatabase) return
   // Run migrations on test database.
   // If schema-engine binary is unavailable (e.g. NixOS), skip and assume the
   // test DB schema is already up to date (apply manually with prisma migrate deploy).
   try {
-    execSync('pnpm prisma migrate deploy', {
+    execSync('./node_modules/.bin/prisma migrate deploy', {
       env: { ...process.env, DATABASE_URL: process.env.DATABASE_URL },
       stdio: 'inherit',
       timeout: 30_000,
@@ -23,6 +27,7 @@ beforeAll(async () => {
 })
 
 afterEach(async () => {
+  if (!hasTestDatabase) return
   // Clean up test data while preserving schema
   // Use TRUNCATE CASCADE for complete cleanup
   try {
@@ -48,5 +53,6 @@ afterEach(async () => {
 })
 
 afterAll(async () => {
+  if (!hasTestDatabase) return
   await prisma.$disconnect()
 })

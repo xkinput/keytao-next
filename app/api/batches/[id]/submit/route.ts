@@ -6,6 +6,10 @@ import { buildBatchSubmitWarnings } from '@/lib/services/batchSubmitWarnings'
 import { buildSkippedCandidateSlotWarnings } from '@/lib/services/batchSkippedCodeWarnings'
 import { buildPriorityOrderWarnings } from '@/lib/services/batchPriorityOrderWarnings'
 import { PhraseType } from '@/lib/constants/phraseTypes'
+import {
+  buildBotWarningDigest,
+  lockPhraseTableForWarningSnapshot,
+} from '@/lib/services/botWarningSnapshot'
 
 // POST /api/batches/:id/submit - Submit batch for review
 export async function POST(
@@ -18,8 +22,30 @@ export async function POST(
     if (!session) {
       return NextResponse.json({ error: '未登录' }, { status: 401 })
     }
-    const body = await request.json().catch(() => ({})) as { confirmed?: boolean }
+    const body = await request.json().catch(() => ({})) as {
+      confirmed?: unknown
+      expectedContentVersion?: unknown
+      expectedWarningDigest?: unknown
+    }
     const confirmed = body.confirmed === true
+    if (body.confirmed !== undefined && typeof body.confirmed !== 'boolean') {
+      return NextResponse.json({ error: 'confirmed 类型错误' }, { status: 400 })
+    }
+    if (
+      body.expectedContentVersion !== undefined
+      && (!Number.isInteger(body.expectedContentVersion) || (body.expectedContentVersion as number) < 0)
+    ) {
+      return NextResponse.json({ error: 'expectedContentVersion 类型错误' }, { status: 400 })
+    }
+    if (confirmed && body.expectedContentVersion === undefined) {
+      return NextResponse.json({ error: '确认提交必须包含 expectedContentVersion' }, { status: 400 })
+    }
+    if (
+      confirmed
+      && (typeof body.expectedWarningDigest !== 'string' || !/^[a-f0-9]{64}$/.test(body.expectedWarningDigest))
+    ) {
+      return NextResponse.json({ error: '确认提交必须包含 expectedWarningDigest' }, { status: 400 })
+    }
 
     const batch = await prisma.batch.findUnique({
       where: { id },
@@ -45,6 +71,13 @@ export async function POST(
         { error: '只能提交草稿或已拒绝状态的批次' },
         { status: 400 }
       )
+    }
+
+    const expectedContentVersion = body.expectedContentVersion === undefined
+      ? batch.contentVersion
+      : body.expectedContentVersion as number
+    if (batch.contentVersion !== expectedContentVersion) {
+      return NextResponse.json({ error: '批次内容已被修改，请刷新后重试' }, { status: 409 })
     }
 
     if (batch.pullRequests.length === 0) {
@@ -85,35 +118,71 @@ export async function POST(
       )
     }
 
-    if (!confirmed) {
-      const warnings = [
-        ...buildBatchSubmitWarnings(items, results),
-        ...await buildSkippedCandidateSlotWarnings(items),
-        ...await buildPriorityOrderWarnings(items),
-      ]
+    const warnings = [
+      ...buildBatchSubmitWarnings(items, results),
+      ...await buildSkippedCandidateSlotWarnings(items),
+      ...await buildPriorityOrderWarnings(items),
+    ]
+    const warningState = { results, warnings }
+    const warningDigest = await buildBotWarningDigest(prisma, items, warningState)
 
+    if (!confirmed) {
       if (warnings.length > 0) {
         return NextResponse.json(
           {
             error: `批次中存在 ${warnings.length} 个重码/多编码/跳过编码空位/同码链优先级警告，确认后可继续提交`,
             warnings,
             requiresConfirmation: true,
+            batchId: batch.id,
+            contentVersion: batch.contentVersion,
+            warningDigest,
           },
           { status: 400 }
         )
       }
     }
 
+    if (confirmed && warningDigest !== body.expectedWarningDigest) {
+      return NextResponse.json({ error: '警告快照已变化，请重新确认' }, { status: 409 })
+    }
+
     // Update batch status
-    const updated = await prisma.batch.update({
-      where: { id },
+    const transition = () => prisma.batch.updateMany({
+      where: {
+        id,
+        creatorId: session.id,
+        status: { in: ['Draft', 'Rejected'] },
+        contentVersion: expectedContentVersion,
+      },
       data: {
         status: 'Submitted',
         reviewNote: null // Clear previous rejection note
       }
     })
+    const transitioned = confirmed
+      ? await prisma.$transaction(async (tx) => {
+        await lockPhraseTableForWarningSnapshot(tx)
+        const lockedDigest = await buildBotWarningDigest(tx, items, warningState)
+        if (lockedDigest !== body.expectedWarningDigest) return { count: 0 }
+        return tx.batch.updateMany({
+          where: {
+            id,
+            creatorId: session.id,
+            status: { in: ['Draft', 'Rejected'] },
+            contentVersion: expectedContentVersion,
+          },
+          data: { status: 'Submitted', reviewNote: null },
+        })
+      })
+      : await transition()
 
-    return NextResponse.json({ batch: updated })
+    if (transitioned.count !== 1) {
+      return NextResponse.json({ error: '批次内容或状态已被其他操作修改，请刷新后重试' }, { status: 409 })
+    }
+
+    return NextResponse.json({
+      batch: { id, status: 'Submitted', contentVersion: expectedContentVersion },
+    })
   } catch (error) {
     console.error('Submit batch error:', error)
     return NextResponse.json({ error: '提交批次失败' }, { status: 500 })

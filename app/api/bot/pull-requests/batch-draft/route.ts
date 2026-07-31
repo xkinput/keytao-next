@@ -5,15 +5,25 @@ import { checkBatchConflictsWithWeight } from '@/lib/services/batchConflictServi
 import { buildSkippedCandidateSlotWarnings } from '@/lib/services/batchSkippedCodeWarnings'
 import { PullRequestType } from '@prisma/client'
 import { detectPhraseType, isValidPhraseType, PhraseType } from '@/lib/constants/phraseTypes'
+import { assertNoOtherBotDraftWithContent, BatchContentLockedError, claimBatchContentMutation, lockBotDraftUser } from '@/lib/services/batchContentGuard'
+import {
+  assertExpectedBatchTargets,
+  BatchTargetChangedError,
+  parseExpectedBatchTargets,
+} from '@/lib/services/batchDeleteTargets'
+import {
+  buildBotWarningDigest,
+  lockPhraseTableForWarningSnapshot,
+} from '@/lib/services/botWarningSnapshot'
+import { createPhraseTargetFingerprint } from '@/lib/services/phraseTargetBinding'
+import { randomUUID } from 'crypto'
 import type {
   BotBatchDraftRequest,
   BotBatchDraftResponse,
   BotBatchDraftFailedItem,
   BotDraftSnapshotItem,
-  BotBatchDeleteDraftRequest,
   BotBatchDeleteDraftResponse,
   BotBatchDeleteDraftDeletedItem,
-  BotBatchDeleteDraftFailedItem,
 } from '@/lib/types/bot'
 
 const MAX_DRAFT_ITEMS = 500
@@ -31,15 +41,25 @@ const MAX_REMARK_LENGTH = 500
  * - Processes each item individually
  * - Hard conflicts (duplicate word+code, missing existing phrase) → skip, report in `failed`
  * - Duplicate-in-draft → skip silently, report in `skipped`
- * - Warnings (重码) → auto-confirm and write to draft
+ * - Every first request returns a server-bound preview ticket without writing
  * - Returns success count, failed list, and current draft snapshot
  */
 export async function POST(request: NextRequest) {
   try {
+    const rawBody = await request.clone().text()
     const body: BotBatchDraftRequest = await request.json()
-    const { platform, platformId, items, batchId: requestedBatchId, confirmed = false } = body
+    const {
+      platform,
+      platformId,
+      items,
+      batchId: requestedBatchId,
+      confirmed = false,
+      expectedContentVersion,
+      expectedWarningDigest,
+      previewOnly = false,
+    } = body
 
-    const auth = await requireVerifiedBotUser(platform, platformId)
+    const auth = await requireVerifiedBotUser(platform, platformId, { request, rawBody })
     if (!auth.authorized) {
       return NextResponse.json<BotBatchDraftResponse>(
         { success: false, message: auth.message, successCount: 0, failedCount: 0, skippedCount: 0, warnedCount: 0, failed: [], skipped: [], warned: [], draftItems: [], draftTotal: 0 },
@@ -47,6 +67,48 @@ export async function POST(request: NextRequest) {
       )
     }
     const user = auth.user
+
+    if (typeof confirmed !== 'boolean') {
+      return NextResponse.json<BotBatchDraftResponse>(
+        { success: false, message: 'confirmed 类型错误', successCount: 0, failedCount: 0, skippedCount: 0, warnedCount: 0, failed: [], skipped: [], warned: [], draftItems: [], draftTotal: 0 },
+        { status: 400 }
+      )
+    }
+    if (typeof previewOnly !== 'boolean' || (previewOnly && confirmed)) {
+      return NextResponse.json<BotBatchDraftResponse>(
+        { success: false, message: 'previewOnly 类型错误，且不能与 confirmed 同时为 true', successCount: 0, failedCount: 0, skippedCount: 0, warnedCount: 0, failed: [], skipped: [], warned: [], draftItems: [], draftTotal: 0 },
+        { status: 400 }
+      )
+    }
+
+    if (
+      expectedContentVersion !== undefined
+      && (!Number.isInteger(expectedContentVersion) || expectedContentVersion < 0)
+    ) {
+      return NextResponse.json<BotBatchDraftResponse>(
+        { success: false, message: 'expectedContentVersion 类型错误', successCount: 0, failedCount: 0, skippedCount: 0, warnedCount: 0, failed: [], skipped: [], warned: [], draftItems: [], draftTotal: 0 },
+        { status: 400 }
+      )
+    }
+    if (expectedContentVersion !== undefined && !requestedBatchId) {
+      return NextResponse.json<BotBatchDraftResponse>(
+        { success: false, message: 'expectedContentVersion 必须与 batchId 一起提供', successCount: 0, failedCount: 0, skippedCount: 0, warnedCount: 0, failed: [], skipped: [], warned: [], draftItems: [], draftTotal: 0 },
+        { status: 400 }
+      )
+    }
+    if (
+      confirmed === true
+      && (
+        expectedContentVersion === undefined
+        || typeof expectedWarningDigest !== 'string'
+        || !/^[a-f0-9]{64}$/.test(expectedWarningDigest)
+      )
+    ) {
+      return NextResponse.json<BotBatchDraftResponse>(
+        { success: false, message: '确认写入必须包含版本和 warning digest', successCount: 0, failedCount: 0, skippedCount: 0, warnedCount: 0, failed: [], skipped: [], warned: [], draftItems: [], draftTotal: 0 },
+        { status: 400 }
+      )
+    }
 
     if (!items || !Array.isArray(items) || items.length === 0) {
       return NextResponse.json<BotBatchDraftResponse>(
@@ -62,44 +124,71 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    for (let i = 0; i < items.length; i++) {
+      if (items[i]?.needsManualReview !== undefined && typeof items[i].needsManualReview !== 'boolean') {
+        return NextResponse.json<BotBatchDraftResponse>(
+          { success: false, message: `项目 #${i + 1}: needsManualReview 必须是布尔值`, successCount: 0, failedCount: 0, skippedCount: 0, warnedCount: 0, failed: [], skipped: [], warned: [], draftItems: [], draftTotal: 0 },
+          { status: 400 }
+        )
+      }
+    }
+
     // Resolve or create draft batch
     let batchId = requestedBatchId
+    let batchContentVersion = 0
+    let batchIsVirtual = false
     if (batchId) {
       const batch = await prisma.batch.findUnique({
         where: { id: batchId },
-        select: { id: true, creatorId: true, status: true },
+        select: { id: true, creatorId: true, status: true, contentVersion: true },
       })
       if (!batch) {
-        return NextResponse.json<BotBatchDraftResponse>(
-          { success: false, message: '批次不存在', successCount: 0, failedCount: 0, skippedCount: 0, warnedCount: 0, failed: [], skipped: [], warned: [], draftItems: [], draftTotal: 0 },
-          { status: 404 }
-        )
-      }
-      if (batch.creatorId !== user.id) {
+        if (confirmed && expectedContentVersion === 0) {
+          batchIsVirtual = true
+        } else {
+          return NextResponse.json<BotBatchDraftResponse>(
+            { success: false, message: '批次不存在', successCount: 0, failedCount: 0, skippedCount: 0, warnedCount: 0, failed: [], skipped: [], warned: [], draftItems: [], draftTotal: 0 },
+            { status: 404 }
+          )
+        }
+      } else if (batch.creatorId !== user.id) {
         return NextResponse.json<BotBatchDraftResponse>(
           { success: false, message: '无权限操作此批次', successCount: 0, failedCount: 0, skippedCount: 0, warnedCount: 0, failed: [], skipped: [], warned: [], draftItems: [], draftTotal: 0 },
           { status: 403 }
         )
       }
-      if (batch.status !== 'Draft') {
+      else if (batch.status !== 'Draft' && batch.status !== 'Rejected') {
         return NextResponse.json<BotBatchDraftResponse>(
           { success: false, message: '只能写入草稿状态的批次', successCount: 0, failedCount: 0, skippedCount: 0, warnedCount: 0, failed: [], skipped: [], warned: [], draftItems: [], draftTotal: 0 },
           { status: 400 }
         )
       }
+      else if (expectedContentVersion !== undefined && batch.contentVersion !== expectedContentVersion) {
+        return NextResponse.json<BotBatchDraftResponse>(
+          { success: false, message: '批次内容已被修改，请刷新后重试', successCount: 0, failedCount: 0, skippedCount: 0, warnedCount: 0, failed: [], skipped: [], warned: [], draftItems: [], draftTotal: 0 },
+          { status: 409 }
+        )
+      }
+      else {
+        batchContentVersion = batch.contentVersion
+      }
     } else {
       let batch = await prisma.batch.findFirst({
         where: { creatorId: user.id, status: 'Draft', description: { startsWith: '键道助手' } },
         orderBy: { createAt: 'desc' },
-        select: { id: true }
+        select: { id: true, contentVersion: true }
       })
-      if (!batch) {
+      if (!batch && confirmed !== true) {
+        batch = { id: randomUUID(), contentVersion: 0 }
+        batchIsVirtual = true
+      } else if (!batch) {
         batch = await prisma.batch.create({
           data: { description: '键道助手草稿批次', creatorId: user.id, status: 'Draft' },
-          select: { id: true }
+          select: { id: true, contentVersion: true }
         })
       }
       batchId = batch.id
+      batchContentVersion = batch.contentVersion
     }
 
     // Load existing draft items (for duplicate detection)
@@ -142,6 +231,7 @@ export async function POST(request: NextRequest) {
         type,
         weight: normalizeWeight(item.weight),
         remark: item.remark,
+        needsManualReview: item.needsManualReview ?? false,
       }
     })
 
@@ -157,55 +247,6 @@ export async function POST(request: NextRequest) {
     }))
     const conflictResults = await checkBatchConflictsWithWeight(conflictItems)
     const skippedSlotWarnings = await buildSkippedCandidateSlotWarnings(conflictItems)
-
-    if (skippedSlotWarnings.length > 0 && !confirmed) {
-      return NextResponse.json<BotBatchDraftResponse>(
-        {
-          success: false,
-          message: `存在 ${skippedSlotWarnings.length} 个跳过编码空位警告，请确认后再写入草稿`,
-          batchId,
-          successCount: 0,
-          failedCount: 0,
-          skippedCount: 0,
-          warnedCount: skippedSlotWarnings.length,
-          failed: [],
-          skipped: [],
-          warned: skippedSlotWarnings.map((warning) => {
-            const index = conflictItems.findIndex(item => item.id === warning.id)
-            return {
-              index: index >= 0 ? index : 0,
-              word: conflictItems[index]?.word || warning.word,
-              code: conflictItems[index]?.code || warning.code,
-              reason: warning.impact || '跳过了编码链中的更短空位，不建议直接写入更长编码',
-            }
-          }),
-          warnings: skippedSlotWarnings.map((warning) => {
-            const index = conflictItems.findIndex(item => item.id === warning.id)
-            const normalizedItem = normalizedItems[index >= 0 ? index : 0]
-            return {
-              index: index >= 0 ? index : 0,
-              item: {
-                action: normalizedItem?.action || 'Create',
-                word: normalizedItem?.word || warning.word,
-                oldWord: normalizedItem?.oldWord,
-                code: normalizedItem?.code || warning.code,
-                type: normalizedItem?.type,
-                weight: normalizedItem?.weight,
-                remark: normalizedItem?.remark,
-              },
-              warningType: 'skipped_candidate_slot',
-              message: warning.impact || '跳过了编码链中的更短空位，不建议直接写入更长编码',
-              skippedCode: warning.skippedCode,
-              skippedCodes: warning.skippedCodes,
-            }
-          }),
-          requiresConfirmation: true,
-          draftItems: [],
-          draftTotal: 0,
-        },
-        { status: 400 }
-      )
-    }
 
     const failed: BotBatchDraftFailedItem[] = []
     const skipped: BotBatchDraftFailedItem[] = []
@@ -246,7 +287,7 @@ export async function POST(request: NextRequest) {
         continue
       }
 
-      // Warning (重码) or clean → write (warnings auto-confirmed for bulk operations)
+      // Warnings require a server-issued confirmation digest before writing.
       const isResolved = result.conflict.suggestions?.some(s => s.action === 'Resolved')
       const conflictReason = isResolved ? undefined : result.conflict.impact || undefined
       if (conflictReason) {
@@ -257,16 +298,117 @@ export async function POST(request: NextRequest) {
       existingPRs.push({ action: item.action, word: item.word, oldWord: item.oldWord ?? null, code: item.code, type: item.type, weight: item.weight ?? null })
     }
 
+    const serverWarnings = [
+      ...skippedSlotWarnings.map((warning) => {
+        const index = conflictItems.findIndex(item => item.id === warning.id)
+        return {
+          index: index >= 0 ? index : 0,
+          item: normalizedItems[index >= 0 ? index : 0],
+          warningType: 'skipped_candidate_slot' as const,
+          message: warning.impact || '跳过了编码链中的更短空位，不建议直接写入更长编码',
+          skippedCode: warning.skippedCode,
+          skippedCodes: warning.skippedCodes,
+        }
+      }),
+      ...warned.map((item) => ({
+        index: item.index,
+        item: normalizedItems[item.index],
+        warningType: 'duplicate_code' as const,
+        message: item.reason,
+        existing: conflictResults[item.index]?.conflict.currentPhrase
+          ? {
+            word: conflictResults[item.index].conflict.currentPhrase!.word,
+            code: conflictResults[item.index].conflict.currentPhrase!.code,
+            weight: conflictResults[item.index].conflict.currentPhrase!.weight,
+          }
+          : undefined,
+      })),
+    ]
+    const warningState = { targetBatchId: batchId, conflictResults, serverWarnings }
+    const warningDigest = await buildBotWarningDigest(prisma, conflictItems, warningState)
+
+    if (confirmed === true && warningDigest !== expectedWarningDigest) {
+      return NextResponse.json<BotBatchDraftResponse>(
+        { success: false, message: '警告快照已变化，请重新确认', successCount: 0, failedCount: 0, skippedCount: 0, warnedCount: 0, failed: [], skipped: [], warned: [], draftItems: [], draftTotal: 0 },
+        { status: 409 }
+      )
+    }
+
+    // previewOnly is a compatibility hint, not the authorization boundary:
+    // every request without an exact confirmed ticket must remain read-only.
+    if (confirmed !== true) {
+      return NextResponse.json<BotBatchDraftResponse>(
+        {
+          success: false,
+          message: serverWarnings.length > 0
+            ? `存在 ${serverWarnings.length} 个警告，请确认后再写入草稿`
+            : `请确认将 ${toWrite.length} 个修改写入草稿`,
+          batchId,
+          contentVersion: batchContentVersion,
+          warningDigest,
+          successCount: 0,
+          failedCount: failed.length,
+          skippedCount: skipped.length,
+          warnedCount: serverWarnings.length,
+          failed,
+          skipped,
+          warned,
+          warnings: serverWarnings,
+          requiresConfirmation: true,
+          draftItems: [],
+          draftTotal: 0,
+        },
+        { status: 400 }
+      )
+    }
+
     // Write all accepted items in one transaction
     if (toWrite.length > 0) {
-      await prisma.$transaction(
-        toWrite.map(({ item, conflictReason }) =>
-          prisma.pullRequest.create({
+      await prisma.$transaction(async (tx) => {
+        await lockBotDraftUser(tx, user.id)
+        await assertNoOtherBotDraftWithContent(tx, user.id, batchId!)
+        await lockPhraseTableForWarningSnapshot(tx)
+        const lockedDigest = await buildBotWarningDigest(tx, conflictItems, warningState)
+        if (lockedDigest !== warningDigest) {
+          throw new BatchContentLockedError('警告快照已变化，请重新确认')
+        }
+        if (batchIsVirtual) {
+          await tx.batch.create({
+            data: { id: batchId!, description: '键道助手草稿批次', creatorId: user.id, status: 'Draft' },
+          })
+        }
+        await claimBatchContentMutation(tx, batchId!, {
+          creatorId: user.id,
+          expectedContentVersion: batchContentVersion,
+        })
+        await Promise.all(
+          toWrite.map(async ({ item, conflictReason }) => {
+            const target = item.action === 'Change' || item.action === 'Delete'
+              ? await tx.phrase.findFirst({
+                where: {
+                  word: item.action === 'Change' ? item.oldWord : item.word,
+                  code: item.code,
+                  type: item.type as PhraseType,
+                },
+                select: {
+                  id: true, word: true, code: true, type: true, status: true,
+                  weight: true, remark: true, userId: true,
+                },
+              })
+              : null
+            if ((item.action === 'Change' || item.action === 'Delete') && !target) {
+              throw new BatchContentLockedError('目标词条已变化，请重新生成修改计划')
+            }
+            return tx.pullRequest.create({
             data: {
               word: item.word,
               oldWord: item.oldWord ?? undefined,
               code: item.code,
               action: item.action as PullRequestType,
+              phraseId: target?.id,
+              targetPhraseId: target?.id,
+              targetFingerprint: target ? createPhraseTargetFingerprint(target) : null,
+              needsManualReview: item.needsManualReview,
               type: item.type as PhraseType,
               weight: item.weight,
               remark: item.remark ?? null,
@@ -275,18 +417,21 @@ export async function POST(request: NextRequest) {
               hasConflict: false,
               conflictReason: conflictReason ?? null,
             },
+            })
           })
         )
-      )
+      })
+      batchContentVersion += 1
     }
 
     // Fetch updated draft snapshot
     const updatedBatch = await prisma.batch.findUnique({
       where: { id: batchId! },
       select: {
+        contentVersion: true,
         pullRequests: {
           orderBy: { createAt: 'asc' },
-          select: { id: true, action: true, word: true, code: true, type: true, weight: true, status: true, conflictReason: true },
+          select: { id: true, action: true, word: true, code: true, type: true, weight: true, status: true, conflictReason: true, needsManualReview: true },
         },
       },
     })
@@ -299,6 +444,7 @@ export async function POST(request: NextRequest) {
       type: pr.type ?? 'Phrase',
       weight: pr.weight,
       status: pr.status,
+      needsManualReview: pr.needsManualReview,
       ...(pr.conflictReason && { hasWarning: true, warningNote: pr.conflictReason }),
     }))
 
@@ -316,6 +462,7 @@ export async function POST(request: NextRequest) {
       success: true,
       message: parts.join('，'),
       batchId: batchId!,
+      contentVersion: updatedBatch?.contentVersion ?? batchContentVersion,
       successCount,
       failedCount,
       skippedCount,
@@ -327,6 +474,12 @@ export async function POST(request: NextRequest) {
       draftTotal: draftItems.length,
     })
   } catch (error: unknown) {
+    if (error instanceof BatchContentLockedError) {
+      return NextResponse.json<BotBatchDraftResponse>(
+        { success: false, message: error.message, successCount: 0, failedCount: 0, skippedCount: 0, warnedCount: 0, failed: [], skipped: [], warned: [], draftItems: [], draftTotal: 0 },
+        { status: error.status }
+      )
+    }
     console.error('[Bot API] batch-draft error:', error)
     const msg = error instanceof Error ? error.message : '未知错误'
     return NextResponse.json<BotBatchDraftResponse>(
@@ -378,10 +531,26 @@ function normalizeWeight(weight: unknown): number | undefined {
  */
 export async function DELETE(request: NextRequest) {
   try {
-    const body: BotBatchDeleteDraftRequest = await request.json()
-    const { platform, platformId, ids } = body
+    const rawBody = await request.clone().text()
+    const body: unknown = await request.json().catch(() => null)
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json<BotBatchDeleteDraftResponse>(
+        { success: false, message: '请求格式错误', successCount: 0, failedCount: 0, deleted: [], failed: [], draftItems: [], draftTotal: 0 },
+        { status: 400 }
+      )
+    }
+    const payload = body as Record<string, unknown>
+    const { platform, platformId, ids, batchId, expectedContentVersion } = payload
+    const expectedTargets = parseExpectedBatchTargets(payload.expectedTargets)
 
-    const auth = await requireVerifiedBotUser(platform, platformId)
+    if (typeof platform !== 'string' || typeof platformId !== 'string') {
+      return NextResponse.json<BotBatchDeleteDraftResponse>(
+        { success: false, message: '平台身份格式错误', successCount: 0, failedCount: 0, deleted: [], failed: [], draftItems: [], draftTotal: 0 },
+        { status: 400 }
+      )
+    }
+
+    const auth = await requireVerifiedBotUser(platform, platformId, { request, rawBody })
     if (!auth.authorized) {
       return NextResponse.json<BotBatchDeleteDraftResponse>(
         { success: false, message: auth.message, successCount: 0, failedCount: 0, deleted: [], failed: [], draftItems: [], draftTotal: 0 },
@@ -390,75 +559,60 @@ export async function DELETE(request: NextRequest) {
     }
     const user = auth.user
 
-    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+    if (
+      typeof batchId !== 'string'
+      || !batchId
+      || !Number.isInteger(expectedContentVersion)
+      || (expectedContentVersion as number) < 0
+      || !expectedTargets
+      || !Array.isArray(ids)
+      || ids.length !== expectedTargets.length
+      || ids.some((id, index) => id !== expectedTargets[index].id)
+    ) {
       return NextResponse.json<BotBatchDeleteDraftResponse>(
-        { success: false, message: '缺少必需参数: ids', successCount: 0, failedCount: 0, deleted: [], failed: [], draftItems: [], draftTotal: 0 },
+        { success: false, message: '删除目标快照格式错误', successCount: 0, failedCount: 0, deleted: [], failed: [], draftItems: [], draftTotal: 0 },
         { status: 400 }
       )
     }
 
-    if (ids.length > MAX_DELETE_ITEMS || ids.some(id => !Number.isInteger(id) || id <= 0)) {
+    if (ids.length > MAX_DELETE_ITEMS) {
       return NextResponse.json<BotBatchDeleteDraftResponse>(
-        { success: false, message: `一次最多删除 ${MAX_DELETE_ITEMS} 条，且 ID 必须为正整数`, successCount: 0, failedCount: 0, deleted: [], failed: [], draftItems: [], draftTotal: 0 },
+        { success: false, message: `一次最多删除 ${MAX_DELETE_ITEMS} 条`, successCount: 0, failedCount: 0, deleted: [], failed: [], draftItems: [], draftTotal: 0 },
         { status: 400 }
       )
     }
 
-    // Fetch all requested PRs with batch info
-    const prs = await prisma.pullRequest.findMany({
-      where: { id: { in: ids } },
-      select: {
-        id: true,
-        action: true,
-        word: true,
-        code: true,
-        userId: true,
-        batchId: true,
-        batch: { select: { id: true, status: true } },
-      },
-    })
-
-    const prMap = new Map(prs.map(pr => [pr.id, pr]))
-    const deleted: BotBatchDeleteDraftDeletedItem[] = []
-    const failed: BotBatchDeleteDraftFailedItem[] = []
-    const toDeleteIds: number[] = []
-    let batchId: string | undefined
-
-    for (const id of ids) {
-      const pr = prMap.get(id)
-      if (!pr) {
-        failed.push({ id, reason: '条目不存在' })
-        continue
-      }
-      if (pr.userId !== user.id) {
-        failed.push({ id, reason: '无权限删除此条目' })
-        continue
-      }
-      if (pr.batch?.status !== 'Draft') {
-        failed.push({ id, reason: '只能删除草稿状态的条目' })
-        continue
-      }
-      toDeleteIds.push(id)
-      deleted.push({ id, word: pr.word ?? '', code: pr.code ?? '', action: pr.action })
-      batchId = batchId ?? (pr.batchId ?? undefined)
-    }
-
-    if (toDeleteIds.length > 0) {
-      await prisma.pullRequest.deleteMany({ where: { id: { in: toDeleteIds } } })
-    }
-
-    // Fetch updated draft snapshot
-    const updatedBatch = batchId
-      ? await prisma.batch.findUnique({
+    const updatedBatch = await prisma.$transaction(async (tx) => {
+      await claimBatchContentMutation(tx, batchId, {
+        creatorId: user.id,
+        expectedContentVersion: expectedContentVersion as number,
+      })
+      const rows = await tx.pullRequest.findMany({
+        where: { id: { in: ids as number[] }, batchId, userId: user.id },
+        select: { id: true, action: true, word: true, code: true, type: true },
+      })
+      assertExpectedBatchTargets(expectedTargets, rows.map(row => ({
+        id: row.id,
+        word: row.word ?? '',
+        code: row.code ?? '',
+        action: row.action,
+        type: row.type ?? 'Phrase',
+      })))
+      const removed = await tx.pullRequest.deleteMany({
+        where: { id: { in: ids as number[] }, batchId, userId: user.id },
+      })
+      if (removed.count !== expectedTargets.length) throw new BatchTargetChangedError()
+      return tx.batch.findUniqueOrThrow({
         where: { id: batchId },
         select: {
+          contentVersion: true,
           pullRequests: {
             orderBy: { createAt: 'asc' },
-            select: { id: true, action: true, word: true, code: true, type: true, weight: true, status: true },
+            select: { id: true, action: true, word: true, code: true, type: true, weight: true, status: true, needsManualReview: true },
           },
         },
       })
-      : null
+    })
 
     const draftItems: BotDraftSnapshotItem[] = (updatedBatch?.pullRequests ?? []).map(pr => ({
       id: pr.id,
@@ -468,23 +622,32 @@ export async function DELETE(request: NextRequest) {
       type: pr.type ?? 'Phrase',
       weight: pr.weight,
       status: pr.status,
+      needsManualReview: pr.needsManualReview,
     }))
 
-    const parts: string[] = [`成功删除 ${deleted.length} 条`]
-    if (failed.length > 0) parts.push(`失败 ${failed.length} 条`)
+    const deleted: BotBatchDeleteDraftDeletedItem[] = expectedTargets.map(item => ({
+      id: item.id, word: item.word, code: item.code, action: item.action,
+    }))
 
     return NextResponse.json<BotBatchDeleteDraftResponse>({
       success: true,
-      message: parts.join('，'),
-      ...(batchId && { batchId }),
+      message: `成功删除 ${deleted.length} 条`,
+      batchId,
+      contentVersion: updatedBatch.contentVersion,
       successCount: deleted.length,
-      failedCount: failed.length,
+      failedCount: 0,
       deleted,
-      failed,
+      failed: [],
       draftItems,
       draftTotal: draftItems.length,
     })
   } catch (error: unknown) {
+    if (error instanceof BatchContentLockedError || error instanceof BatchTargetChangedError) {
+      return NextResponse.json<BotBatchDeleteDraftResponse>(
+        { success: false, message: error.message, successCount: 0, failedCount: 0, deleted: [], failed: [], draftItems: [], draftTotal: 0 },
+        { status: error.status }
+      )
+    }
     console.error('[Bot API] batch-draft DELETE error:', error)
     const msg = error instanceof Error ? error.message : '未知错误'
     return NextResponse.json<BotBatchDeleteDraftResponse>(

@@ -298,6 +298,9 @@ model PullRequest {
   /// 关联词条
   phrase   Phrase? @relation(fields: [phraseId], references: [id])
   phraseId Int?
+  targetPhraseId Int?
+  targetFingerprint String?
+  needsManualReview Boolean @default(false)
 
   /// 词（新增或修改后的词）
   word    String?
@@ -349,6 +352,7 @@ model Batch {
   description String?
   status      BatchStatus @default(Draft)
   reviewNote  String?     @db.Text
+  contentVersion Int      @default(0)
 
   // Relations
   creator      User          @relation("UserBatches", fields: [creatorId], references: [id], onDelete: Cascade)

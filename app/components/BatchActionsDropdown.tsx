@@ -39,7 +39,7 @@ export default function BatchActionsDropdown({
   const [isWithdrawing, setIsWithdrawing] = useState(false)
 
   const isOwner = user?.id === creatorId
-  const canDelete = isOwner && status !== 'Submitted' && status !== 'Approved'
+  const canDelete = isOwner && (status === 'Draft' || status === 'Rejected')
   const canWithdraw = isOwner && status === 'Submitted'
 
   if (!canDelete && !canWithdraw) {

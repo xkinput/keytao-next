@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { checkAdminPermission } from '@/lib/adminAuth'
+import { BatchConcurrentUpdateError } from '@/lib/services/batchApprovalService'
 
 // POST /api/admin/batches/:id/reject - Reject a batch
 export async function POST(
@@ -48,6 +49,21 @@ export async function POST(
 
     // Update batch and all PRs in a transaction
     const result = await prisma.$transaction(async (tx) => {
+      const transitioned = await tx.batch.updateMany({
+        where: {
+          id,
+          status: 'Submitted',
+          contentVersion: batch.contentVersion,
+        },
+        data: {
+          status: 'Rejected',
+          reviewNote,
+        },
+      })
+      if (transitioned.count !== 1) {
+        throw new BatchConcurrentUpdateError()
+      }
+
       // Update all PRs to Rejected status
       await tx.pullRequest.updateMany({
         where: {
@@ -58,20 +74,16 @@ export async function POST(
         }
       })
 
-      // Update batch status
-      const updated = await tx.batch.update({
+      return tx.batch.findUniqueOrThrow({
         where: { id },
-        data: {
-          status: 'Rejected',
-          reviewNote
-        }
       })
-
-      return updated
     })
 
     return NextResponse.json({ batch: result })
   } catch (error) {
+    if (error instanceof BatchConcurrentUpdateError) {
+      return NextResponse.json({ error: error.message }, { status: error.status })
+    }
     console.error('Reject batch error:', error)
     const errorMessage = error instanceof Error ? error.message : '拒绝批次失败'
     return NextResponse.json({ error: '拒绝批次失败', details: errorMessage }, { status: 500 })

@@ -84,6 +84,7 @@ interface PullRequest {
 
 interface BatchDetail {
   id: string
+  contentVersion: number
   description: string
   status: 'Draft' | 'Submitted' | 'Approved' | 'Rejected' | 'Published'
   createAt: string
@@ -230,12 +231,14 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
       weight: pr.weight || undefined
     }))
 
-    const submitBatch = async (confirmed = false) => {
+    const submitBatch = async (expectedContentVersion?: number, expectedWarningDigest?: string) => {
       setSubmitting(true)
       try {
         await apiRequest(`/api/batches/${resolvedParams.id}/submit`, {
           method: 'POST',
-          body: confirmed ? { confirmed: true } : undefined,
+          body: expectedContentVersion === undefined
+            ? undefined
+            : { confirmed: true, expectedContentVersion, expectedWarningDigest },
           withAuth: true
         })
         openAlert('批次已提交审核', '提交成功')
@@ -247,6 +250,9 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
             error?: string
             requiresConfirmation?: boolean
             warnings?: BatchSubmitWarning[]
+            batchId?: string
+            contentVersion?: number
+            warningDigest?: string
             conflicts?: Array<{
               hasConflict: boolean
               code: string
@@ -258,13 +264,21 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
         }
 
         if (error.info?.requiresConfirmation && error.info.warnings?.length) {
+          const warningVersion = error.info.contentVersion
+          const warningDigest = error.info.warningDigest
+          if (!Number.isInteger(warningVersion) || warningVersion! < 0) {
+            throw new Error('服务端未返回可确认的批次版本，请刷新后重试')
+          }
+          if (typeof warningDigest !== 'string' || !/^[a-f0-9]{64}$/.test(warningDigest)) {
+            throw new Error('服务端未返回可确认的警告快照，请刷新后重试')
+          }
           const message =
             '! 重要提示 - 请仔细阅读以下警告\n\n' +
             formatBatchSubmitWarnings(error.info.warnings, items).join('\n\n' + '─'.repeat(50) + '\n\n') +
             '\n\n确认要继续提交吗？'
 
           openConfirm(message, async () => {
-            await submitBatch(true)
+            await submitBatch(warningVersion, warningDigest)
           }, '提交审核', '确认提交', '取消')
           return
         }
@@ -608,6 +622,7 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
         isOpen={isOpen}
         onClose={handleCloseModal}
         batchId={resolvedParams.id}
+        batchContentVersion={batchData.contentVersion}
         batchPRs={batchData.pullRequests.length > 0 ? batchData.pullRequests.map(pr => ({
           id: pr.id,
           word: pr.word || '',

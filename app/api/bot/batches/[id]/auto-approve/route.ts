@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireVerifiedBotUser } from '@/lib/botUserAuth'
-import { approveSubmittedBatch, classifyBatchDeleteRisk } from '@/lib/services/batchApprovalService'
+import {
+  approveSubmittedBatch,
+  BatchApprovalTargetChangedError,
+  BatchConcurrentUpdateError,
+  classifyBatchDeleteRisk,
+} from '@/lib/services/batchApprovalService'
 
 function getErrorStatus(message: string): number {
   if (message === '批次不存在') return 404
@@ -16,10 +21,28 @@ export async function POST(
 ) {
   try {
     const { id } = await params
-    const body = await request.json()
-    const { platform, platformId, reviewNote } = body
+    const rawBody = await request.clone().text()
+    const body: unknown = await request.json().catch(() => null)
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ success: false, message: '请求格式错误' }, { status: 400 })
+    }
+    const allowedKeys = new Set(['platform', 'platformId', 'reviewNote', 'expectedContentVersion'])
+    if (Object.keys(body).some(key => !allowedKeys.has(key))) {
+      return NextResponse.json({ success: false, message: '请求包含不支持的字段' }, { status: 400 })
+    }
+    const payload = body as Record<string, unknown>
+    const { platform, platformId, reviewNote, expectedContentVersion } = payload
+    if (
+      typeof platform !== 'string'
+      || typeof platformId !== 'string'
+      || (reviewNote !== undefined && typeof reviewNote !== 'string')
+      || !Number.isInteger(expectedContentVersion)
+      || (expectedContentVersion as number) < 0
+    ) {
+      return NextResponse.json({ success: false, message: '请求字段类型错误' }, { status: 400 })
+    }
 
-    const auth = await requireVerifiedBotUser(platform, platformId)
+    const auth = await requireVerifiedBotUser(platform, platformId, { request, rawBody })
     if (!auth.authorized) {
       return NextResponse.json(
         { success: false, message: auth.message },
@@ -33,7 +56,7 @@ export async function POST(
       include: {
         pullRequests: {
           orderBy: { createAt: 'asc' },
-          select: { action: true, word: true, code: true },
+          select: { action: true, word: true, code: true, needsManualReview: true },
         },
       },
     })
@@ -46,6 +69,15 @@ export async function POST(
     }
     if (batch.status !== 'Submitted') {
       return NextResponse.json({ success: false, message: '只能自动批准已提交审核的批次' }, { status: 400 })
+    }
+    if (batch.contentVersion !== expectedContentVersion) {
+      return NextResponse.json({ success: false, message: '批次内容已被修改，请刷新后重试' }, { status: 409 })
+    }
+    if (batch.pullRequests.some(item => item.needsManualReview)) {
+      return NextResponse.json(
+        { success: false, message: '批次包含必须人工审核的条目' },
+        { status: 422 }
+      )
     }
 
     const deleteRisk = classifyBatchDeleteRisk(batch.pullRequests)
@@ -62,6 +94,7 @@ export async function POST(
       reviewNote: reviewNote || '本喵自动审词通过',
       mode: 'bot-auto',
       allowDelete: false,
+      expectedContentVersion: expectedContentVersion as number,
     })
 
     return NextResponse.json({
@@ -73,6 +106,12 @@ export async function POST(
       },
     })
   } catch (error) {
+    if (error instanceof BatchConcurrentUpdateError) {
+      return NextResponse.json({ success: false, message: error.message }, { status: error.status })
+    }
+    if (error instanceof BatchApprovalTargetChangedError) {
+      return NextResponse.json({ success: false, message: error.message }, { status: error.status })
+    }
     console.error('[Bot API] Auto approve error:', error)
     const message = error instanceof Error ? error.message : '自动批准失败'
     return NextResponse.json(
