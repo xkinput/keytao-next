@@ -18,6 +18,7 @@ export interface InferResponse {
   altCodes: string[]
   flyKeyVariants: FlyKeyVariant[]
   pronunciationSource?: PhraseEncoding['pronunciationSource']
+  standardPronunciationStatus?: PhraseEncoding['standardPronunciationStatus']
   phrasePinyins?: string[]
   contextPhrasePinyins?: string[]
   semanticPronunciationNeeded?: boolean
@@ -102,6 +103,7 @@ export async function inferPhrase(
     altCodes,
     flyKeyVariants: encoding.flyKeyVariants,
     pronunciationSource: encoding.pronunciationSource,
+    standardPronunciationStatus: encoding.standardPronunciationStatus,
     phrasePinyins: encoding.phrasePinyins,
     contextPhrasePinyins: encoding.contextPhrasePinyins,
     semanticPronunciationNeeded: encoding.semanticPronunciationNeeded,
@@ -152,6 +154,7 @@ export async function inferPhrases(words: string[]): Promise<InferResponse[]> {
       type,
       flyKeyVariants,
       pronunciationSource,
+      standardPronunciationStatus,
       phrasePinyins,
       contextPhrasePinyins,
       semanticPronunciationNeeded,
@@ -172,6 +175,7 @@ export async function inferPhrases(words: string[]): Promise<InferResponse[]> {
       altCodes,
       flyKeyVariants,
       pronunciationSource,
+      standardPronunciationStatus,
       phrasePinyins,
       contextPhrasePinyins,
       semanticPronunciationNeeded,

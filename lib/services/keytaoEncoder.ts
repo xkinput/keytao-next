@@ -192,8 +192,6 @@ export function getPhrasePinyins(word: string): string[] {
 // ── Zdic fetching ─────────────────────────────────────────────────────────────
 
 // In-memory cache: char → all pinyin readings (deduped, pinyin-only, no bopomofo)
-const pinyinCache = new Map<string, string[]>()
-
 type FetchTextResult =
   | { status: 'found'; text: string }
   | { status: 'absent' }
@@ -205,6 +203,7 @@ interface ZdicPinyinLookup {
 }
 
 const zdicEntryPinyinCache = new Map<string, ZdicPinyinLookup>()
+const zdicCharacterPinyinCache = new Map<string, ZdicPinyinLookup>()
 
 // Matches ASCII-based pinyin with at least one toned vowel (no bopomofo ㄅㄆ etc.)
 const PINYIN_ONLY_RE = /^[a-züāáǎàēéěèīíǐìōóǒòūúǔùǖǘǚǜ]+$/
@@ -305,7 +304,7 @@ interface PhrasePinyinResolution {
   trusted: boolean
   trustedIndexes: number[]
   source: 'zdic-phrase' | 'zdic-aabb' | 'pinyin-pro-context' | 'zdic-unavailable'
-  standardLookup: 'found' | 'absent' | 'unavailable'
+  standardLookup: StandardPronunciationStatus
 }
 
 export interface SemanticPronunciation {
@@ -371,13 +370,14 @@ export async function resolvePhrasePinyins(word: string): Promise<PhrasePinyinRe
   }
 }
 
-export async function getPinyinFromZdic(char: string): Promise<string[]> {
-  if (pinyinCache.has(char)) return pinyinCache.get(char)!
+async function lookupCharacterPinyinsFromZdic(char: string): Promise<ZdicPinyinLookup> {
+  if (zdicCharacterPinyinCache.has(char)) return zdicCharacterPinyinCache.get(char)!
   try {
     const fetched = await fetchZdicHtml(char)
     if (fetched.status !== 'found') {
-      if (fetched.status === 'absent') pinyinCache.set(char, [])
-      return []
+      const result: ZdicPinyinLookup = { status: fetched.status, pinyins: [] }
+      if (fetched.status === 'absent') zdicCharacterPinyinCache.set(char, result)
+      return result
     }
     const html = fetched.text
     // Extract all <span class="z_d song">…</span> values, keep only pinyin (not bopomofo)
@@ -385,19 +385,30 @@ export async function getPinyinFromZdic(char: string): Promise<string[]> {
       .map(m => m[1])
       .filter(s => PINYIN_ONLY_RE.test(s))
     const deduped = [...new Set(all)]
-    if (deduped.length > 0) { pinyinCache.set(char, deduped); return deduped }
+    if (deduped.length > 0) {
+      const result: ZdicPinyinLookup = { status: 'found', pinyins: deduped }
+      zdicCharacterPinyinCache.set(char, result)
+      return result
+    }
     // Fallback: parse pinyin from page title (format: "{char} pȳ1、pȳ2 - 汉典")
     // TONED_PINYIN_RE fails on syllables like guì/jué where the tone mark isn't first after the initial
     const titleMatch = html.match(/<title>[^\s<]+\s+([^<]+?)\s*-\s*汉典<\/title>/)
     if (titleMatch) {
       const titlePinyins = titleMatch[1].split(/[、，,\s]+/).filter(s => PINYIN_ONLY_RE.test(s) && s.length >= 2)
-      if (titlePinyins.length > 0) { pinyinCache.set(char, titlePinyins); return titlePinyins }
+      if (titlePinyins.length > 0) {
+        const result: ZdicPinyinLookup = { status: 'found', pinyins: titlePinyins }
+        zdicCharacterPinyinCache.set(char, result)
+        return result
+      }
     }
-    pinyinCache.set(char, [])
-    return []
+    return { status: 'unavailable', pinyins: [] }
   } catch {
-    return []
+    return { status: 'unavailable', pinyins: [] }
   }
+}
+
+export async function getPinyinFromZdic(char: string): Promise<string[]> {
+  return (await lookupCharacterPinyinsFromZdic(char)).pinyins
 }
 
 // ── Single character encoding ─────────────────────────────────────────────────
@@ -406,6 +417,7 @@ export interface CharEncoding {
   char: string
   pinyin: string          // first (default) reading used for encoding
   pinyins: string[]       // all readings from zdic (may be multiple for polyphonic chars)
+  pronunciationLookupStatus?: StandardPronunciationStatus
   phoneticCode: string   // 2-key: initial+final
   c1: string | null      // raw c1 radicals from split
   c2: string | null      // raw c2 radicals from split
@@ -449,7 +461,8 @@ interface EncodeCharOptions {
 }
 
 export async function encodeChar(char: string, preferredPinyin?: string, options: EncodeCharOptions = {}): Promise<CharEncoding> {
-  const zdicPinyins = await getPinyinFromZdic(char)
+  const pronunciationLookup = await lookupCharacterPinyinsFromZdic(char)
+  const zdicPinyins = pronunciationLookup.pinyins
   // Word-level zdic readings are trusted when they still exist in the character's reading list.
   // Otherwise, pinyin-pro context is used only when its standalone reading agrees with zdic's
   // primary reading; this keeps rare chars like 鳜 from being pulled to pinyin-pro's jué default.
@@ -482,6 +495,7 @@ export async function encodeChar(char: string, preferredPinyin?: string, options
     char,
     pinyin: pinyinStr,
     pinyins,
+    pronunciationLookupStatus: pronunciationLookup.status,
     phoneticCode,
     c1: shape?.c1 ?? null,
     c2: shape?.c2 ?? null,
@@ -502,6 +516,8 @@ export type PronunciationSource =
   | 'zdic-unavailable'
   | 'llm-semantic'
 
+export type StandardPronunciationStatus = 'found' | 'absent' | 'unavailable'
+
 export interface PhraseEncoding {
   input: string
   type: PhraseType
@@ -514,6 +530,10 @@ export interface PhraseEncoding {
   flyKeyVariants: FlyKeyVariant[]
   // Source of the pronunciation actually selected for encoding.
   pronunciationSource?: PronunciationSource
+  // Result of the authoritative whole-word lookup. Kept separate from the
+  // selected source because an accepted semantic reading may be used after an
+  // unavailable lookup.
+  standardPronunciationStatus?: StandardPronunciationStatus
   phrasePinyins?: string[]
   contextPhrasePinyins?: string[]
   semanticPronunciationNeeded?: boolean
@@ -749,15 +769,6 @@ export async function encodePhrase(word: string, options: EncodePhraseOptions = 
   const trustedIndexSet = new Set(trustedIndexes)
   const wordChars = [...word]
   const semantic = options.semanticPronunciation
-  const semanticPinyins = (
-    !trusted
-    && standardLookup === 'absent'
-    && wordChars.length > 1
-    && semantic
-    && semantic.meaning.trim()
-    && semantic.pinyins.length === wordChars.length
-    && semantic.pinyins.every(item => Boolean(normalizePinyin(item)))
-  ) ? semantic.pinyins.map(item => item.trim()) : []
 
   const encodeChars = (preferred: string[], trustSemantic: boolean) => Promise.all(
     wordChars.map((char, index) => encodeChar(char, preferred[index], {
@@ -770,12 +781,26 @@ export async function encodePhrase(word: string, options: EncodePhraseOptions = 
   const baselineMatchesContext = baselineChars.every(
     (char, index) => normalizePinyin(char.pinyin) === normalizePinyin(phrasePinyins[index] || '')
   )
+  const baselineReadingsVerified = baselineChars.every(
+    char => char.pronunciationLookupStatus === 'found'
+  )
   const semanticPronunciationNeeded = Boolean(
     !trusted
-    && standardLookup === 'absent'
+    && standardLookup !== 'found'
     && wordChars.length > 1
     && !baselineMatchesContext
   )
+  const semanticPinyins = (
+    semanticPronunciationNeeded
+    && semantic
+    && [...semantic.meaning.trim()].length >= 4
+    && semantic.pinyins.length === wordChars.length
+    && semantic.pinyins.every((item, index) => {
+      const normalized = normalizePinyin(item)
+      return Boolean(normalized)
+        && normalized === normalizePinyin(phrasePinyins[index] || '')
+    })
+  ) ? semantic.pinyins.map(item => item.trim()) : []
 
   let chars = baselineChars
   let semanticPronunciationAccepted = false
@@ -791,15 +816,16 @@ export async function encodePhrase(word: string, options: EncodePhraseOptions = 
     ? 'llm-semantic'
     : trusted
       ? source as 'zdic-phrase' | 'zdic-aabb'
-      : standardLookup === 'unavailable'
-        ? 'zdic-unavailable'
-        : baselineMatchesContext
-          ? 'pinyin-pro-context'
+      : baselineMatchesContext && baselineReadingsVerified
+        ? 'pinyin-pro-context'
+        : standardLookup === 'unavailable' || !baselineReadingsVerified
+          ? 'zdic-unavailable'
           : 'zdic-character-default'
 
   return {
     ...buildPhraseEncodingFromChars(word, chars),
     pronunciationSource,
+    standardPronunciationStatus: standardLookup,
     phrasePinyins: chars.map(char => char.pinyin),
     contextPhrasePinyins: phrasePinyins,
     semanticPronunciationNeeded: semanticPronunciationNeeded && !semanticPronunciationAccepted,

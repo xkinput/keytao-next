@@ -29,6 +29,9 @@ vi.mock('https', async () => {
 
   const htmlByEntry: Record<string, string> = {
     '攀': '<span class="z_d song">pān</span>',
+    '复': '<span class="z_d song">fù</span>',
+    '购': '<span class="z_d song">gòu</span>',
+    '率': '<span class="z_d song">shuài</span><span class="z_d song">lǜ</span>',
     '看': '<span class="z_d song">kàn</span>',
     '行': '<span class="z_d song">xíng</span><span class="z_d song">háng</span>',
     '长': '<span class="z_d song">cháng</span><span class="z_d song">zhǎng</span>',
@@ -58,7 +61,11 @@ vi.mock('https', async () => {
       queueMicrotask(() => {
         const entry = decodeURIComponent(new URL(url).pathname.replace('/hans/', ''))
         const body = htmlByEntry[entry]
-        const statusCode = entry === '看着' ? 429 : body ? 200 : 404
+        const statusCode = (
+          entry === '看着'
+          || entry === '复购率'
+          || ['测试', '测', '试'].includes(entry)
+        ) ? 429 : body ? 200 : 404
         const response = new EventEmitter() as NodeEventEmitter & {
           statusCode: number
           headers: Record<string, string>
@@ -192,20 +199,70 @@ describe('semantic phrase pronunciation fallback', () => {
     expect(result.semanticPronunciationAccepted).toBe(false)
   })
 
-  it('fails closed when the authoritative whole-word lookup is unavailable', async () => {
+  it('requires a meaning-backed reading that agrees with phrase context when authority is unavailable', async () => {
+    const unresolved = await encodePhrase('看着')
+    expect(unresolved.pronunciationSource).toBe('zdic-unavailable')
+    expect(unresolved.standardPronunciationStatus).toBe('unavailable')
+    expect(unresolved.semanticPronunciationNeeded).toBe(true)
+    expect(unresolved.semanticPronunciationAccepted).toBe(false)
+
+    const conflicting = await encodePhrase('看着', {
+      semanticPronunciation: {
+        pinyins: ['kan', 'zhuo'],
+        meaning: '把视线放在某个对象上并持续观察',
+      },
+    })
+    expect(conflicting.pronunciationSource).toBe('zdic-unavailable')
+    expect(conflicting.semanticPronunciationAccepted).toBe(false)
+
     const result = await encodePhrase('看着', {
       semanticPronunciation: {
         pinyins: ['kan', 'zhe'],
-        meaning: '把视线放在某个对象上',
+        meaning: '把视线放在某个对象上并持续观察',
       },
     })
 
-    expect(result.pronunciationSource).toBe('zdic-unavailable')
+    expect(result.pronunciationSource).toBe('llm-semantic')
+    expect(result.standardPronunciationStatus).toBe('unavailable')
     expect(result.semanticPronunciationNeeded).toBe(false)
-    expect(result.semanticPronunciationAccepted).toBe(false)
+    expect(result.semanticPronunciationAccepted).toBe(true)
 
-    const inferred = await inferPhrase('看着')
-    expect(inferred.pronunciationSource).toBe('zdic-unavailable')
+    const inferred = await inferPhrase('看着', undefined, {
+      semanticPronunciationResolver: async () => ({
+        pinyins: ['kan', 'zhe'],
+        meaning: '把视线放在某个对象上并持续观察',
+      }),
+    })
+    expect(inferred.pronunciationSource).toBe('llm-semantic')
+    expect(inferred.standardPronunciationStatus).toBe('unavailable')
+    expect(inferred.suggestion).not.toBeNull()
+    expect(inferred.suggestionStatus).toBe('available')
+  })
+
+  it('keeps an unambiguous contextual reading usable during an authority outage', async () => {
+    const encoding = await encodePhrase('复购率')
+    expect(encoding.phrasePinyins?.map(stripTone)).toEqual(['fu', 'gou', 'lu'])
+    expect(encoding.contextPhrasePinyins?.map(stripTone)).toEqual(['fu', 'gou', 'lu'])
+    expect(encoding.codes[0]).toBe('fgl')
+    expect(encoding.pronunciationSource).toBe('pinyin-pro-context')
+    expect(encoding.standardPronunciationStatus).toBe('unavailable')
+    expect(encoding.semanticPronunciationNeeded).toBe(false)
+
+    const inferred = await inferPhrase('复购率')
+    expect(inferred.suggestion).toBe('fgl')
+    expect(inferred.suggestionStatus).toBe('available')
+  })
+
+  it('does not trust pinyin-pro alone when both phrase and character lookups are unavailable', async () => {
+    const encoding = await encodePhrase('测试')
+    expect(encoding.phrasePinyins?.map(stripTone)).toEqual(['ce', 'shi'])
+    expect(encoding.contextPhrasePinyins?.map(stripTone)).toEqual(['ce', 'shi'])
+    expect(encoding.chars.every(char => char.pronunciationLookupStatus === 'unavailable')).toBe(true)
+    expect(encoding.pronunciationSource).toBe('zdic-unavailable')
+    expect(encoding.standardPronunciationStatus).toBe('unavailable')
+    expect(encoding.semanticPronunciationNeeded).toBe(false)
+
+    const inferred = await inferPhrase('测试')
     expect(inferred.suggestion).toBeNull()
     expect(inferred.suggestionStatus).toBe('pronunciation-unavailable')
   })
