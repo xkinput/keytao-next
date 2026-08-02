@@ -1,6 +1,15 @@
 import { prisma } from '@/lib/prisma'
 import { analyzeRequestedCode, encodePhrase } from '@/lib/services/keytaoEncoder'
-import type { FlyKeyVariant, RequestedCodeAnalysis } from '@/lib/services/keytaoEncoder'
+import type {
+  FlyKeyVariant,
+  PhraseEncoding,
+  RequestedCodeAnalysis,
+  SemanticPronunciation,
+} from '@/lib/services/keytaoEncoder'
+
+export interface InferPhraseOptions {
+  semanticPronunciationResolver?: (word: string) => Promise<SemanticPronunciation | null>
+}
 
 export interface InferResponse {
   word: string
@@ -8,8 +17,14 @@ export interface InferResponse {
   codes: string[]
   altCodes: string[]
   flyKeyVariants: FlyKeyVariant[]
-  /** First available code. null if all variants are occupied. */
+  pronunciationSource?: PhraseEncoding['pronunciationSource']
+  phrasePinyins?: string[]
+  contextPhrasePinyins?: string[]
+  semanticPronunciationNeeded?: boolean
+  semanticPronunciationAccepted?: boolean
+  /** First available verified code. null when unavailable; inspect suggestionStatus. */
   suggestion: string | null
+  suggestionStatus: 'available' | 'occupied' | 'pronunciation-unresolved' | 'pronunciation-unavailable'
   /** Which index of codes[] was chosen (0 = base code). */
   suggestionIndex: number
   /** true when the base code is already occupied */
@@ -36,8 +51,23 @@ function chooseSuggestion(codes: string[], altCodes: string[], occupiedCodes: Se
   return { suggestion: null, suggestionIndex: 0 }
 }
 
-export async function inferPhrase(word: string, requestedCode?: string): Promise<InferResponse> {
-  const encoding = await encodePhrase(word)
+export async function inferPhrase(
+  word: string,
+  requestedCode?: string,
+  options: InferPhraseOptions = {},
+): Promise<InferResponse> {
+  let encoding = await encodePhrase(word)
+  if (encoding.semanticPronunciationNeeded && options.semanticPronunciationResolver) {
+    try {
+      const semanticPronunciation = await options.semanticPronunciationResolver(word)
+      if (semanticPronunciation) {
+        const semanticEncoding = await encodePhrase(word, { semanticPronunciation })
+        if (semanticEncoding.semanticPronunciationAccepted) encoding = semanticEncoding
+      }
+    } catch {
+      // Semantic enrichment is optional; deterministic encoding remains available.
+    }
+  }
   const { codes, altCodes, type } = encoding
   const allCodes = [...new Set([...codes, ...altCodes])]
 
@@ -57,7 +87,13 @@ export async function inferPhrase(word: string, requestedCode?: string): Promise
     .filter(m => m.word === word)
     .map(m => ({ code: m.code, weight: m.weight, type: m.type ?? '' }))
 
-  const { suggestion, suggestionIndex } = chooseSuggestion(codes, altCodes, occupiedCodes)
+  const pronunciationBlocksSuggestion = Boolean(
+    encoding.semanticPronunciationNeeded
+    || encoding.pronunciationSource === 'zdic-unavailable'
+  )
+  const { suggestion, suggestionIndex } = pronunciationBlocksSuggestion
+    ? { suggestion: null, suggestionIndex: 0 }
+    : chooseSuggestion(codes, altCodes, occupiedCodes)
 
   return {
     word,
@@ -65,7 +101,19 @@ export async function inferPhrase(word: string, requestedCode?: string): Promise
     codes,
     altCodes,
     flyKeyVariants: encoding.flyKeyVariants,
+    pronunciationSource: encoding.pronunciationSource,
+    phrasePinyins: encoding.phrasePinyins,
+    contextPhrasePinyins: encoding.contextPhrasePinyins,
+    semanticPronunciationNeeded: encoding.semanticPronunciationNeeded,
+    semanticPronunciationAccepted: encoding.semanticPronunciationAccepted,
     suggestion,
+    suggestionStatus: encoding.semanticPronunciationNeeded
+      ? 'pronunciation-unresolved'
+      : encoding.pronunciationSource === 'zdic-unavailable'
+        ? 'pronunciation-unavailable'
+        : suggestion === null
+          ? 'occupied'
+          : 'available',
     suggestionIndex,
     isBaseConflict: codes.length > 0 && occupiedCodes.has(codes[0]),
     wordExists,
@@ -98,8 +146,24 @@ export async function inferPhrases(words: string[]): Promise<InferResponse[]> {
 
   return encodings.map((encoding, i) => {
     const word = words[i]
-    const { codes, altCodes, type, flyKeyVariants } = encoding
-    const { suggestion, suggestionIndex } = chooseSuggestion(codes, altCodes, occupiedCodes)
+    const {
+      codes,
+      altCodes,
+      type,
+      flyKeyVariants,
+      pronunciationSource,
+      phrasePinyins,
+      contextPhrasePinyins,
+      semanticPronunciationNeeded,
+      semanticPronunciationAccepted,
+    } = encoding
+    const pronunciationBlocksSuggestion = Boolean(
+      semanticPronunciationNeeded
+      || pronunciationSource === 'zdic-unavailable'
+    )
+    const { suggestion, suggestionIndex } = pronunciationBlocksSuggestion
+      ? { suggestion: null, suggestionIndex: 0 }
+      : chooseSuggestion(codes, altCodes, occupiedCodes)
 
     return {
       word,
@@ -107,7 +171,19 @@ export async function inferPhrases(words: string[]): Promise<InferResponse[]> {
       codes,
       altCodes,
       flyKeyVariants,
+      pronunciationSource,
+      phrasePinyins,
+      contextPhrasePinyins,
+      semanticPronunciationNeeded,
+      semanticPronunciationAccepted,
       suggestion,
+      suggestionStatus: semanticPronunciationNeeded
+        ? 'pronunciation-unresolved'
+        : pronunciationSource === 'zdic-unavailable'
+          ? 'pronunciation-unavailable'
+          : suggestion === null
+            ? 'occupied'
+            : 'available',
       suggestionIndex,
       isBaseConflict: codes.length > 0 && occupiedCodes.has(codes[0]),
       wordExists: wordMap.get(word) ?? [],

@@ -37,6 +37,11 @@ import {
   formatPreSubmitReviewWarning,
   mapReviewItemsByFieldId,
 } from '@/lib/services/preSubmitReviewClient'
+import {
+  FieldInferenceRequestTracker,
+  findCurrentFieldIndex,
+} from '@/lib/services/fieldInferenceGuard'
+import { resolveDictImportInference } from '@/lib/services/dictImportInference'
 
 interface CreatePRModalProps {
   isOpen: boolean
@@ -168,6 +173,9 @@ export default function CreatePRModal({
     name: 'items'
   })
   const watchedItems = watch('items')
+  const fieldsRef = useRef(fields)
+  fieldsRef.current = fields
+  const inferRequestTrackerRef = useRef(new FieldInferenceRequestTracker())
 
   const buildBatchCheckItems = (items: FormItem[]): BatchPRItem[] => items.map((item, index) => ({
     id: fields[index]?.id ?? String(index),
@@ -314,6 +322,7 @@ export default function CreatePRModal({
   // Reset when modal opens/closes - only initialize once per modal session
   useEffect(() => {
     if (isOpen && !hasInitializedRef.current) {
+      inferRequestTrackerRef.current.clear()
       // First time opening in this session - initialize form
       if (batchPRs && batchPRs.length > 0) {
         // Batch edit mode: load all PRs from the batch
@@ -360,12 +369,18 @@ export default function CreatePRModal({
       setPreSubmitReviewAttempt(null)
       setReviewingAll(false)
       preSubmitReviewRequestRef.current += 1
+      inferRequestTrackerRef.current.clear()
+      autoFilledRef.current.clear()
+      setEncodingFields(new Set())
+      setInferResults(new Map())
+      setContextResults(new Map())
     }
   }, [isOpen, batchPRs, editPR, reset, defaultFormItem])
 
   // Auto-infer: watch word changes, debounce 600ms, fill code with first available slot
   // Also checks if word already exists in DB (single round-trip via /api/phrases/infer)
   useEffect(() => {
+    if (!isOpen) return
     const timers = new Map<string, ReturnType<typeof setTimeout>>()
 
     const subscription = watch((values, { name }) => {
@@ -380,19 +395,33 @@ export default function CreatePRModal({
       const word = (item.word ?? '').trim()
       const code = item.code ?? ''
       const action = item.action
-      const fieldId = fields[index]?.id
+      const fieldId = fieldsRef.current[index]?.id
 
       if (!fieldId) return
 
-      // Clear infer result when word is cleared
+      const wasAutoFilled = autoFilledRef.current.has(fieldId)
+      const requestCode = wasAutoFilled ? '' : code
+      if (wasAutoFilled) {
+        autoFilledRef.current.delete(fieldId)
+        if (code) setValue(`items.${index}.code`, '', { shouldValidate: true })
+      }
+
+      const tracker = inferRequestTrackerRef.current
+      const request = tracker.begin(fieldId, word)
+      setInferResult(fieldId, null)
+
       if (!word) {
-        setInferResult(fieldId, null)
+        setEncodingFields(prev => { const next = new Set(prev); next.delete(fieldId); return next })
         return
       }
 
-      if (action === 'Delete') return
+      if (action === 'Delete') {
+        setInferResult(fieldId, null)
+        setEncodingFields(prev => { const next = new Set(prev); next.delete(fieldId); return next })
+        return
+      }
       // Only auto-fill code if it's empty or was previously auto-filled
-      const shouldFillCode = !code || autoFilledRef.current.has(fieldId)
+      const shouldFillCode = !requestCode
 
       // Debounce per field
       const existing = timers.get(fieldId)
@@ -403,21 +432,31 @@ export default function CreatePRModal({
       const timer = setTimeout(async () => {
         timers.delete(fieldId)
         try {
-          const params = new URLSearchParams({ word, ...(code.trim() ? { code: code.trim() } : {}) })
-          const res = await fetch(`/api/phrases/infer?${params}`)
-          if (!res.ok) return
-          const data: InferResponse = await res.json()
+          const params = new URLSearchParams({ word, ...(requestCode.trim() ? { code: requestCode.trim() } : {}) })
+          const data = await apiRequest<InferResponse>(`/api/phrases/infer?${params}`)
+          const currentIndex = findCurrentFieldIndex(
+            fieldsRef.current,
+            getValues('items'),
+            request,
+            tracker,
+          )
+          if (currentIndex < 0) return
 
           setInferResult(fieldId, data)
 
           if (shouldFillCode && data.suggestion) {
-            setValue(`items.${index}.code`, data.suggestion, { shouldValidate: true })
+            const currentCode = (getValues(`items.${currentIndex}.code`) ?? '').trim()
+            if (currentCode && !autoFilledRef.current.has(fieldId)) return
+            setEncodingFields(prev => { const next = new Set(prev); next.delete(fieldId); return next })
+            setValue(`items.${currentIndex}.code`, data.suggestion, { shouldValidate: true })
             autoFilledRef.current.add(fieldId)
           }
         } catch {
           // silently ignore
         } finally {
-          setEncodingFields(prev => { const s = new Set(prev); s.delete(fieldId); return s })
+          if (tracker.isLatest(request)) {
+            setEncodingFields(prev => { const next = new Set(prev); next.delete(fieldId); return next })
+          }
         }
       }, 600)
 
@@ -428,10 +467,11 @@ export default function CreatePRModal({
       subscription.unsubscribe()
       timers.forEach(t => clearTimeout(t))
     }
-  }, [watch, fields, setValue])
+  }, [isOpen, watch, setValue, getValues])
 
   // Context fetch: watch code changes, show surrounding phrases in collapsed diff rows
   useEffect(() => {
+    if (!isOpen) return
     const timers = new Map<string, ReturnType<typeof setTimeout>>()
 
     const subscription = watch((values, { name }) => {
@@ -439,13 +479,16 @@ export default function CreatePRModal({
       const indexMatch = name.match(/items\.(\d+)\.code/)
       if (!indexMatch) return
       const index = parseInt(indexMatch[1])
-      const fieldId = fields[index]?.id
+      const fieldId = fieldsRef.current[index]?.id
       if (!fieldId) return
 
       const code = (values.items?.[index]?.code ?? '').trim()
       const word = (values.items?.[index]?.word ?? '').trim()
       const action = values.items?.[index]?.action
       const type = (values.items?.[index]?.type ?? '').trim()
+      const tracker = inferRequestTrackerRef.current
+      const request = tracker.begin(fieldId, word, code)
+      setEncodingFields(prev => { const next = new Set(prev); next.delete(fieldId); return next })
       if (!code) {
         setContextResults(prev => { const n = new Map(prev); n.delete(fieldId); return n })
         return
@@ -458,16 +501,27 @@ export default function CreatePRModal({
         try {
           if (word && action !== 'Delete') {
             const inferParams = new URLSearchParams({ word, code })
-            const inferRes = await fetch(`/api/phrases/infer?${inferParams}`)
-            if (inferRes.ok) {
-              const inferData: InferResponse = await inferRes.json()
+            try {
+              const inferData = await apiRequest<InferResponse>(`/api/phrases/infer?${inferParams}`)
+              if (findCurrentFieldIndex(
+                fieldsRef.current,
+                getValues('items'),
+                request,
+                tracker,
+              ) < 0) return
               setInferResult(fieldId, inferData)
-            }
+            } catch { /* keep context lookup available when inference is temporarily unavailable */ }
           }
           const params = new URLSearchParams({ code, count: '3', ...(type ? { type } : {}) })
           const res = await fetch(`/api/phrases/context?${params}`)
           if (res.ok) {
             const data: ContextResponse = await res.json()
+            if (findCurrentFieldIndex(
+              fieldsRef.current,
+              getValues('items'),
+              request,
+              tracker,
+            ) < 0) return
             setContextResults(prev => new Map(prev).set(fieldId, data))
           }
         } catch { /* ignore */ }
@@ -480,7 +534,7 @@ export default function CreatePRModal({
       subscription.unsubscribe()
       timers.forEach(t => clearTimeout(t))
     }
-  }, [watch, fields])
+  }, [isOpen, watch, getValues])
 
   // Fetch context for all pre-filled codes on mount / when fields change
   useEffect(() => {
@@ -517,6 +571,11 @@ export default function CreatePRModal({
   const handleRemoveItem = (index: number) => {
     if (fields.length > 1) {
       const fieldId = fields[index].id
+      inferRequestTrackerRef.current.forget(fieldId)
+      autoFilledRef.current.delete(fieldId)
+      setInferResult(fieldId, null)
+      setContextResults(prev => { const next = new Map(prev); next.delete(fieldId); return next })
+      setEncodingFields(prev => { const next = new Set(prev); next.delete(fieldId); return next })
       remove(index)
       setMetaStates(prev => {
         const next = new Map(prev)
@@ -611,24 +670,10 @@ export default function CreatePRModal({
         const infer = data.results[idx]
         if (!infer) return { ...item, status: 'error' as const }
 
-        let finalCode = item.inputCode || ''
-        let status: DictParseItem['status'] = 'new'
-        let statusDetail: string | undefined
-
-        if (!item.inputCode) {
-          if (infer.suggestion === null) {
-            // All progressive + alt slots taken — add as 重码 using longest code
-            finalCode = infer.codes.at(-1) ?? infer.codes[0] ?? ''
-            status = 'overflow'
-          } else if (infer.isBaseConflict) {
-            finalCode = infer.suggestion
-            status = 'shifted'
-            statusDetail = `${infer.codes[0]} → ${infer.suggestion}`
-          } else {
-            finalCode = infer.suggestion
-            status = 'new'
-          }
-        }
+        const decision = resolveDictImportInference(item.inputCode, infer)
+        const finalCode = decision.finalCode
+        const status: DictParseItem['status'] = decision.status
+        let statusDetail = decision.statusDetail
 
         if (infer.wordExists.length > 0) {
           const existCodes = infer.wordExists.map(e => e.code).join('、')
@@ -1307,6 +1352,8 @@ export default function CreatePRModal({
                                                     endContent={
                                                       <div className="flex items-center gap-1">
                                                         {inf && inf.wordExists.length > 0 && <Tooltip content={`词条已存在，编码：${inf.wordExists.map(e => e.code).join('、')}`}><Chip size="sm" variant="flat" color="warning" className="h-5 text-[10px] cursor-default">已存在</Chip></Tooltip>}
+                                                        {inf?.suggestionStatus === 'pronunciation-unresolved' && <Tooltip content="没有整词权威读音，语义读音尚未确认"><Chip size="sm" variant="flat" color="warning" className="h-5 text-[10px] cursor-default">读音待审</Chip></Tooltip>}
+                                                        {inf?.suggestionStatus === 'pronunciation-unavailable' && <Tooltip content="权威读音服务暂不可用，请稍后重试"><Chip size="sm" variant="flat" color="danger" className="h-5 text-[10px] cursor-default">读音源异常</Chip></Tooltip>}
                                                         {f.value && <WordCodesPopover word={f.value}><Button size="sm" variant="light" isIconOnly className="min-w-unit-6 w-6 h-6"><Eye className="w-4 h-4" /></Button></WordCodesPopover>}
                                                       </div>
                                                     }
@@ -1410,6 +1457,8 @@ export default function CreatePRModal({
                                                   endContent={
                                                     <div className="flex items-center gap-1">
                                                       {inf && inf.wordExists.length > 0 && <Tooltip content={`词条已存在，编码：${inf.wordExists.map(e => e.code).join('、')}`}><Chip size="sm" variant="flat" color="warning" className="h-5 text-[10px] cursor-default">已存在</Chip></Tooltip>}
+                                                      {inf?.suggestionStatus === 'pronunciation-unresolved' && <Tooltip content="没有整词权威读音，语义读音尚未确认"><Chip size="sm" variant="flat" color="warning" className="h-5 text-[10px] cursor-default">读音待审</Chip></Tooltip>}
+                                                      {inf?.suggestionStatus === 'pronunciation-unavailable' && <Tooltip content="权威读音服务暂不可用，请稍后重试"><Chip size="sm" variant="flat" color="danger" className="h-5 text-[10px] cursor-default">读音源异常</Chip></Tooltip>}
                                                       {f.value && <WordCodesPopover word={f.value}><Button size="sm" variant="light" isIconOnly className="min-w-unit-6 w-6 h-6"><Eye className="w-4 h-4" /></Button></WordCodesPopover>}
                                                     </div>
                                                   }
@@ -1960,7 +2009,7 @@ export default function CreatePRModal({
                             {item.status === 'new' && <Chip size="sm" variant="flat" color="success" className="h-4 text-[10px] shrink-0">✓ 新词条</Chip>}
                             {item.status === 'shifted' && <Chip size="sm" variant="flat" color="primary" className="h-4 text-[10px] shrink-0">码位跳转</Chip>}
                             {item.status === 'overflow' && <Chip size="sm" variant="flat" color="danger" className="h-4 text-[10px] shrink-0">重码</Chip>}
-                            {item.status === 'error' && <Chip size="sm" variant="flat" color="danger" className="h-4 text-[10px] shrink-0">推断失败</Chip>}
+                            {item.status === 'error' && <Chip size="sm" variant="flat" color="danger" className="h-4 text-[10px] shrink-0">{item.infer?.suggestionStatus === 'pronunciation-unresolved' ? '读音待审' : '推断失败'}</Chip>}
                             {(item.infer?.wordExists?.length ?? 0) > 0 && (
                               <Chip size="sm" variant="flat" color="warning" className="h-4 text-[10px] shrink-0">词已存在</Chip>
                             )}

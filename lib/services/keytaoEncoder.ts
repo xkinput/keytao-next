@@ -168,7 +168,7 @@ function normalizePinyin(p: string): string {
   return p
     .replace(/[āáǎà]/g, 'a').replace(/[ēéěè]/g, 'e').replace(/[īíǐì]/g, 'i')
     .replace(/[ōóǒò]/g, 'o').replace(/[ūúǔù]/g, 'u').replace(/[ǖǘǚǜ]/g, 'ü')
-    .toLowerCase().trim()
+    .toLowerCase().replaceAll('v', 'ü').trim()
 }
 
 // Ordered longest-first so zh/ch/sh are matched before z/c/s
@@ -193,7 +193,18 @@ export function getPhrasePinyins(word: string): string[] {
 
 // In-memory cache: char → all pinyin readings (deduped, pinyin-only, no bopomofo)
 const pinyinCache = new Map<string, string[]>()
-const zdicEntryPinyinCache = new Map<string, string[]>()
+
+type FetchTextResult =
+  | { status: 'found'; text: string }
+  | { status: 'absent' }
+  | { status: 'unavailable' }
+
+interface ZdicPinyinLookup {
+  status: 'found' | 'absent' | 'unavailable'
+  pinyins: string[]
+}
+
+const zdicEntryPinyinCache = new Map<string, ZdicPinyinLookup>()
 
 // Matches ASCII-based pinyin with at least one toned vowel (no bopomofo ㄅㄆ etc.)
 const PINYIN_ONLY_RE = /^[a-züāáǎàēéěèīíǐìōóǒòūúǔùǖǘǚǜ]+$/
@@ -207,10 +218,10 @@ function splitPinyinText(text: string): string[] {
     .filter(s => PINYIN_ONLY_RE.test(s))
 }
 
-function fetchText(url: string, redirects = 2): Promise<string | null> {
+function fetchText(url: string, redirects = 2): Promise<FetchTextResult> {
   return new Promise((resolve) => {
     let settled = false
-    const done = (value: string | null) => {
+    const done = (value: FetchTextResult) => {
       if (settled) return
       settled = true
       resolve(value)
@@ -229,55 +240,81 @@ function fetchText(url: string, redirects = 2): Promise<string | null> {
 
       if (status < 200 || status >= 300) {
         res.resume()
-        done(null)
+        done(status === 404 || status === 410 ? { status: 'absent' } : { status: 'unavailable' })
         return
       }
 
       let body = ''
       res.setEncoding('utf8')
       res.on('data', chunk => { body += chunk })
-      res.on('end', () => done(body))
+      res.on('end', () => done({ status: 'found', text: body }))
     })
     req.setTimeout(8000, () => {
       req.destroy()
-      done(null)
+      done({ status: 'unavailable' })
     })
-    req.on('error', () => done(null))
+    req.on('error', () => done({ status: 'unavailable' }))
   })
 }
 
-async function fetchZdicHtml(entry: string): Promise<string | null> {
+async function fetchZdicHtml(entry: string): Promise<FetchTextResult> {
   return fetchText(`https://zdic.net/hans/${encodeURIComponent(entry)}`)
 }
 
-export async function getPinyinsFromZdicEntry(entry: string): Promise<string[]> {
+async function lookupPinyinsFromZdicEntry(entry: string): Promise<ZdicPinyinLookup> {
   if (zdicEntryPinyinCache.has(entry)) return zdicEntryPinyinCache.get(entry)!
-  const html = await fetchZdicHtml(entry)
-  if (!html) { zdicEntryPinyinCache.set(entry, []); return [] }
+  const fetched = await fetchZdicHtml(entry)
+  if (fetched.status !== 'found') {
+    const result: ZdicPinyinLookup = { status: fetched.status, pinyins: [] }
+    if (fetched.status === 'absent') zdicEntryPinyinCache.set(entry, result)
+    return result
+  }
 
-  const metaMatch = html.match(/<span class="meta-pinyin">([\s\S]*?)<\/span>/)
+  const metaMatch = fetched.text.match(/<span class="meta-pinyin">([\s\S]*?)<\/span>/)
   const pinyins = metaMatch ? splitPinyinText(metaMatch[1]) : []
   const chars = [...entry]
-  const result = pinyins.length === chars.length ? pinyins : []
-  zdicEntryPinyinCache.set(entry, result)
+  const result: ZdicPinyinLookup = pinyins.length === chars.length
+    ? { status: 'found', pinyins }
+    : { status: 'unavailable', pinyins: [] }
+  if (result.status === 'found') zdicEntryPinyinCache.set(entry, result)
   return result
 }
 
-async function getAabbPhrasePinyinsFromZdic(word: string): Promise<string[]> {
+export async function getPinyinsFromZdicEntry(entry: string): Promise<string[]> {
+  return (await lookupPinyinsFromZdicEntry(entry)).pinyins
+}
+
+async function getAabbPhrasePinyinsFromZdic(word: string): Promise<ZdicPinyinLookup> {
   const chars = [...word]
-  if (chars.length !== 4 || chars[0] !== chars[1] || chars[2] !== chars[3]) return []
+  if (chars.length !== 4 || chars[0] !== chars[1] || chars[2] !== chars[3]) {
+    return { status: 'absent', pinyins: [] }
+  }
 
   const baseWord = chars[0] + chars[2]
-  const basePinyins = await getPinyinsFromZdicEntry(baseWord)
-  return basePinyins.length === 2
-    ? [basePinyins[0], basePinyins[0], basePinyins[1], basePinyins[1]]
-    : []
+  const base = await lookupPinyinsFromZdicEntry(baseWord)
+  return base.status === 'found' && base.pinyins.length === 2
+    ? {
+        status: 'found',
+        pinyins: [base.pinyins[0], base.pinyins[0], base.pinyins[1], base.pinyins[1]],
+      }
+    : { status: base.status, pinyins: [] }
 }
 
 interface PhrasePinyinResolution {
   pinyins: string[]
   trusted: boolean
   trustedIndexes: number[]
+  source: 'zdic-phrase' | 'zdic-aabb' | 'pinyin-pro-context' | 'zdic-unavailable'
+  standardLookup: 'found' | 'absent' | 'unavailable'
+}
+
+export interface SemanticPronunciation {
+  pinyins: string[]
+  meaning: string
+}
+
+export interface EncodePhraseOptions {
+  semanticPronunciation?: SemanticPronunciation
 }
 
 function getTrustedContextPinyinIndexes(word: string, pinyins: string[]): number[] {
@@ -295,12 +332,33 @@ function getTrustedContextPinyinIndexes(word: string, pinyins: string[]): number
 
 export async function resolvePhrasePinyins(word: string): Promise<PhrasePinyinResolution> {
   const chars = [...word]
+  let standardLookup: PhrasePinyinResolution['standardLookup'] = 'absent'
   if (chars.length > 1) {
-    const exact = await getPinyinsFromZdicEntry(word)
-    if (exact.length === chars.length) return { pinyins: exact, trusted: true, trustedIndexes: [] }
+    const exact = await lookupPinyinsFromZdicEntry(word)
+    if (exact.status === 'found' && exact.pinyins.length === chars.length) {
+      return {
+        pinyins: exact.pinyins,
+        trusted: true,
+        trustedIndexes: [],
+        source: 'zdic-phrase',
+        standardLookup: 'found',
+      }
+    }
+    standardLookup = exact.status
 
     const aabb = await getAabbPhrasePinyinsFromZdic(word)
-    if (aabb.length === chars.length) return { pinyins: aabb, trusted: true, trustedIndexes: [] }
+    if (aabb.status === 'found' && aabb.pinyins.length === chars.length) {
+      return {
+        pinyins: aabb.pinyins,
+        trusted: true,
+        trustedIndexes: [],
+        source: 'zdic-aabb',
+        standardLookup: 'found',
+      }
+    }
+    if (standardLookup === 'unavailable' || aabb.status === 'unavailable') {
+      standardLookup = 'unavailable'
+    }
   }
 
   const pinyins = getPhrasePinyins(word)
@@ -308,14 +366,20 @@ export async function resolvePhrasePinyins(word: string): Promise<PhrasePinyinRe
     pinyins,
     trusted: false,
     trustedIndexes: getTrustedContextPinyinIndexes(word, pinyins),
+    source: standardLookup === 'unavailable' ? 'zdic-unavailable' : 'pinyin-pro-context',
+    standardLookup,
   }
 }
 
 export async function getPinyinFromZdic(char: string): Promise<string[]> {
   if (pinyinCache.has(char)) return pinyinCache.get(char)!
   try {
-    const html = await fetchZdicHtml(char)
-    if (!html) { pinyinCache.set(char, []); return [] }
+    const fetched = await fetchZdicHtml(char)
+    if (fetched.status !== 'found') {
+      if (fetched.status === 'absent') pinyinCache.set(char, [])
+      return []
+    }
+    const html = fetched.text
     // Extract all <span class="z_d song">…</span> values, keep only pinyin (not bopomofo)
     const all = [...html.matchAll(/class="z_d song">([^<\s]+)/g)]
       .map(m => m[1])
@@ -381,6 +445,7 @@ export interface RequestedCodeAnalysis {
 
 interface EncodeCharOptions {
   trustPreferred?: boolean
+  requireKnownPreferred?: boolean
 }
 
 export async function encodeChar(char: string, preferredPinyin?: string, options: EncodeCharOptions = {}): Promise<CharEncoding> {
@@ -404,8 +469,10 @@ export async function encodeChar(char: string, preferredPinyin?: string, options
         pinyins = zdicPinyins
       }
     }
-  } else {
+  } else if (!options.requireKnownPreferred) {
     pinyins = preferredPinyin ? [preferredPinyin] : []
+  } else {
+    pinyins = []
   }
   const pinyinStr = pinyins[0] ?? ''
   const { initial, final } = parsePinyin(pinyinStr)
@@ -427,6 +494,14 @@ export async function encodeChar(char: string, preferredPinyin?: string, options
 
 export type PhraseType = '单字' | '二字词' | '三字词' | '四字词及以上'
 
+export type PronunciationSource =
+  | 'zdic-phrase'
+  | 'zdic-aabb'
+  | 'zdic-character-default'
+  | 'pinyin-pro-context'
+  | 'zdic-unavailable'
+  | 'llm-semantic'
+
 export interface PhraseEncoding {
   input: string
   type: PhraseType
@@ -437,6 +512,12 @@ export interface PhraseEncoding {
   altCodes: string[]
   // Grouped fly-key series. Each series contains its own progressive shape codes.
   flyKeyVariants: FlyKeyVariant[]
+  // Source of the pronunciation actually selected for encoding.
+  pronunciationSource?: PronunciationSource
+  phrasePinyins?: string[]
+  contextPhrasePinyins?: string[]
+  semanticPronunciationNeeded?: boolean
+  semanticPronunciationAccepted?: boolean
 }
 
 function firstShapeKey(enc: CharEncoding): string {
@@ -566,6 +647,26 @@ export function analyzeRequestedCode(encoding: PhraseEncoding, requestedCode: st
     return { code, supported: false, matchType: 'unsupported', message: '未提供目标编码', alternatives }
   }
 
+  if (encoding.semanticPronunciationNeeded) {
+    return {
+      code,
+      supported: false,
+      matchType: 'unsupported',
+      message: '读音存在歧义，当前编码不能作为已验证候选',
+      alternatives: [],
+    }
+  }
+
+  if (encoding.pronunciationSource === 'zdic-unavailable') {
+    return {
+      code,
+      supported: false,
+      matchType: 'unsupported',
+      message: '权威读音服务暂不可用，无法验证当前编码',
+      alternatives: [],
+    }
+  }
+
   if (encoding.codes.includes(code)) {
     return { code, supported: true, matchType: 'standard', matchedCode: code, seriesBase: encoding.codes[0], seriesCodes: encoding.codes, message: `${code} 是标准候选编码`, alternatives }
   }
@@ -637,11 +738,71 @@ export function buildPhraseEncodingFromChars(word: string, chars: CharEncoding[]
   return { input: word, type, chars, codes, altCodes, flyKeyVariants }
 }
 
-export async function encodePhrase(word: string): Promise<PhraseEncoding> {
-  const { pinyins: phrasePinyins, trusted, trustedIndexes } = await resolvePhrasePinyins(word)
+export async function encodePhrase(word: string, options: EncodePhraseOptions = {}): Promise<PhraseEncoding> {
+  const {
+    pinyins: phrasePinyins,
+    trusted,
+    trustedIndexes,
+    source,
+    standardLookup,
+  } = await resolvePhrasePinyins(word)
   const trustedIndexSet = new Set(trustedIndexes)
-  const chars = await Promise.all([...word].map((char, index) => encodeChar(char, phrasePinyins[index], {
-    trustPreferred: trusted || trustedIndexSet.has(index),
-  })))
-  return buildPhraseEncodingFromChars(word, chars)
+  const wordChars = [...word]
+  const semantic = options.semanticPronunciation
+  const semanticPinyins = (
+    !trusted
+    && standardLookup === 'absent'
+    && wordChars.length > 1
+    && semantic
+    && semantic.meaning.trim()
+    && semantic.pinyins.length === wordChars.length
+    && semantic.pinyins.every(item => Boolean(normalizePinyin(item)))
+  ) ? semantic.pinyins.map(item => item.trim()) : []
+
+  const encodeChars = (preferred: string[], trustSemantic: boolean) => Promise.all(
+    wordChars.map((char, index) => encodeChar(char, preferred[index], {
+      trustPreferred: trusted || trustedIndexSet.has(index) || trustSemantic,
+      requireKnownPreferred: trustSemantic,
+    }))
+  )
+
+  const baselineChars = await encodeChars(phrasePinyins, false)
+  const baselineMatchesContext = baselineChars.every(
+    (char, index) => normalizePinyin(char.pinyin) === normalizePinyin(phrasePinyins[index] || '')
+  )
+  const semanticPronunciationNeeded = Boolean(
+    !trusted
+    && standardLookup === 'absent'
+    && wordChars.length > 1
+    && !baselineMatchesContext
+  )
+
+  let chars = baselineChars
+  let semanticPronunciationAccepted = false
+  if (semanticPinyins.length) {
+    const semanticChars = await encodeChars(semanticPinyins, true)
+    semanticPronunciationAccepted = semanticChars.every(
+      (char, index) => normalizePinyin(char.pinyin) === normalizePinyin(semanticPinyins[index])
+    )
+    if (semanticPronunciationAccepted) chars = semanticChars
+  }
+
+  const pronunciationSource: PronunciationSource = semanticPronunciationAccepted
+    ? 'llm-semantic'
+    : trusted
+      ? source as 'zdic-phrase' | 'zdic-aabb'
+      : standardLookup === 'unavailable'
+        ? 'zdic-unavailable'
+        : baselineMatchesContext
+          ? 'pinyin-pro-context'
+          : 'zdic-character-default'
+
+  return {
+    ...buildPhraseEncodingFromChars(word, chars),
+    pronunciationSource,
+    phrasePinyins: chars.map(char => char.pinyin),
+    contextPhrasePinyins: phrasePinyins,
+    semanticPronunciationNeeded: semanticPronunciationNeeded && !semanticPronunciationAccepted,
+    semanticPronunciationAccepted,
+  }
 }
