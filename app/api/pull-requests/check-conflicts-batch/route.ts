@@ -5,6 +5,7 @@ import { buildBatchSubmitWarnings } from '@/lib/services/batchSubmitWarnings'
 import { buildSkippedCandidateSlotWarnings } from '@/lib/services/batchSkippedCodeWarnings'
 import { buildPriorityOrderWarnings } from '@/lib/services/batchPriorityOrderWarnings'
 import { PhraseType } from '@/lib/constants/phraseTypes'
+import { validatePhraseInput } from '@/lib/validation/phraseInput'
 
 interface PRItemInput {
   id: string
@@ -19,8 +20,6 @@ interface PRItemInput {
 export async function POST(request: NextRequest) {
   try {
     const maxItems = 500
-    const maxWordLength = 100
-    const maxCodeLength = 20
 
     const session = await getSession()
     if (!session) {
@@ -42,15 +41,18 @@ export async function POST(request: NextRequest) {
     }
 
     for (const item of items) {
-      if (
-        typeof item.word !== 'string' ||
-        typeof item.code !== 'string' ||
-        item.word.trim().length === 0 ||
-        item.code.trim().length === 0 ||
-        item.word.trim().length > maxWordLength ||
-        item.code.trim().length > maxCodeLength
-      ) {
+      if (typeof item.word !== 'string' || typeof item.code !== 'string') {
         return NextResponse.json({ error: '词条或编码格式错误' }, { status: 400 })
+      }
+      const inputError = validatePhraseInput({
+        word: item.word.trim(),
+        code: item.code.trim(),
+        type: item.type,
+        oldWord: item.oldWord,
+        action: item.action,
+      })
+      if (inputError) {
+        return NextResponse.json({ error: inputError }, { status: 400 })
       }
     }
 

@@ -12,6 +12,7 @@
     "lint": "eslint",
     "postinstall": "prisma generate",
     "test": "vitest run",
+    "test:unit": "vitest run --config vitest.unit.config.ts",
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
     "test:coverage": "vitest run --coverage",
@@ -26,6 +27,7 @@
     "init:permission": "tsx scripts/initPermission.ts",
     "init:role": "tsx scripts/initRole.ts",
     "init:user": "tsx scripts/initUser.ts",
+    "init:bot-user": "tsx scripts/initBotUser.ts",
     "init:all": "pnpm run init:permission && pnpm run init:role && pnpm run init:user"
   },
   "dependencies": {

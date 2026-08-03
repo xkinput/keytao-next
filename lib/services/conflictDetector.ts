@@ -38,8 +38,17 @@ export interface CodeSuggestion {
 export class ConflictDetector {
   /**
    * Check if a phrase change will cause conflicts
+   *
+   * Phrase uniqueness is (word, code, type), so every lookup below is scoped by
+   * `change.type`. Callers must pass the type whenever they know it — omitting
+   * it widens the query to every dictionary and produces phantom conflicts for
+   * combinations the schema now allows (same word+code under a different type).
+   * `undefined` is kept as the "search every type" escape hatch for callers
+   * that genuinely have no type information.
    */
   async checkConflict(change: PhraseChange): Promise<ConflictInfo> {
+    const effectiveType = change.type || undefined
+
     // For Change action, verify old phrase exists
     if (change.action === 'Change') {
       if (!change.oldWord) {
@@ -59,7 +68,7 @@ export class ConflictDetector {
         where: {
           word: change.oldWord,
           code: change.code,
-          type: change.type || undefined
+          type: effectiveType
         }
       })
 
@@ -82,7 +91,7 @@ export class ConflictDetector {
           where: {
             word: change.word,
             code: change.code,
-            type: change.type || undefined
+            type: effectiveType
           }
         })
 
@@ -130,7 +139,7 @@ export class ConflictDetector {
         where: {
           word: change.word,
           code: change.code,
-          type: change.type || undefined
+          type: effectiveType
         }
       })
 
@@ -169,7 +178,7 @@ export class ConflictDetector {
       where: {
         word: change.word,
         code: change.code,
-        type: change.type || undefined,
+        type: effectiveType,
         NOT: change.phraseId ? { id: change.phraseId } : undefined
       }
     })
@@ -202,7 +211,7 @@ export class ConflictDetector {
       prisma.phrase.findFirst({
         where: {
           code: change.code,
-          type: change.type || undefined,
+          type: effectiveType,
           NOT: change.phraseId ? { id: change.phraseId } : undefined
         },
         include: {
@@ -215,7 +224,7 @@ export class ConflictDetector {
         where: {
           word: change.word,
           code: { not: change.code },
-          type: change.type || undefined,
+          type: effectiveType,
           NOT: change.phraseId ? { id: change.phraseId } : undefined
         },
         select: {

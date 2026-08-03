@@ -42,7 +42,7 @@ function fakePhrase(overrides = {}) {
 beforeEach(() => {
   vi.clearAllMocks()
   fakeApiKey(VALID_KEY)
-  mockPrisma.apiKey.findUnique.mockResolvedValue({ id: 1, userId: 1, enabled: true })
+  mockPrisma.apiKey.findUnique.mockResolvedValue({ id: 1, userId: 1, enabled: true, user: { status: 'ENABLE' } })
   mockPrisma.apiKey.update.mockResolvedValue({})
 })
 
@@ -125,7 +125,7 @@ describe('GET /api/v1/phrases/all', () => {
   })
 
   it('returns 403 when key is disabled', async () => {
-    mockPrisma.apiKey.findUnique.mockResolvedValue({ id: 1, userId: 1, enabled: false })
+    mockPrisma.apiKey.findUnique.mockResolvedValue({ id: 1, userId: 1, enabled: false, user: { status: 'ENABLE' } })
     const { GET } = await import('./all/route')
     const res = await GET()
     expect(res.status).toBe(403)
@@ -162,7 +162,7 @@ describe('API key authentication', () => {
   })
 
   it('returns 403 when key is disabled', async () => {
-    mockPrisma.apiKey.findUnique.mockResolvedValue({ id: 1, userId: 1, enabled: false })
+    mockPrisma.apiKey.findUnique.mockResolvedValue({ id: 1, userId: 1, enabled: false, user: { status: 'ENABLE' } })
     const { GET } = await import('./route')
     const res = await GET(new NextRequest('http://localhost/api/v1/phrases'))
     expect(res.status).toBe(403)

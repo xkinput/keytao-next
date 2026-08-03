@@ -9,7 +9,7 @@ import type {
 } from '@/lib/types/bot'
 
 const MAX_BATCH_SIZE = 500
-const MAX_CODE_LENGTH = 20
+import { MAX_CODE_LENGTH_ANY_TYPE as MAX_CODE_LENGTH } from '@/lib/constants/codeValidation'
 
 /**
  * Bot API: Batch lookup phrases by exact codes

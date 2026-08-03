@@ -3,13 +3,7 @@ import { prisma } from '../lib/prisma'
 import { newEnforcer } from 'casbin'
 import { PrismaAdapter } from 'casbin-prisma-adapter'
 import { resolve } from 'path'
-
-// User roles enum
-enum UserRole {
-  ROOT = 'R:ROOT',
-  MANAGER = 'R:MANAGER',
-  NORMAL = 'R:NORMAL',
-}
+import { USER_ROLE as UserRole } from '../lib/constants/roles'
 
 async function main() {
   console.log('Starting role initialization...')
@@ -27,6 +21,10 @@ async function main() {
     {
       name: '普通用户',
       value: UserRole.NORMAL
+    },
+    {
+      name: '机器人',
+      value: UserRole.BOT
     },
   ]
 

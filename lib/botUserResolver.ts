@@ -3,13 +3,38 @@ import { prisma } from '@/lib/prisma'
 const VALID_PLATFORMS = ['qq', 'telegram', 'web'] as const
 export type BotPlatform = typeof VALID_PLATFORMS[number]
 
+/**
+ * Platforms that are backed by a verified external identity (a QQ / Telegram
+ * account bound through `/bind`). The `web` pseudo-platform only carries a
+ * numeric user id supplied by the caller, so it must never be accepted on
+ * privilege-escalating endpoints.
+ */
+export const VERIFIED_BOT_PLATFORMS: readonly BotPlatform[] = ['qq', 'telegram']
+
 export function isValidPlatform(p: string | null): p is BotPlatform {
   return p !== null && (VALID_PLATFORMS as readonly string[]).includes(p)
 }
 
-export type BotUserBasic = { id: number; name: string | null; nickname: string | null }
+export type BotUserBasic = {
+  id: number
+  name: string | null
+  nickname: string | null
+  roles: { value: string }[]
+}
 
-const USER_SELECT = { id: true, name: true, nickname: true } as const
+const USER_SELECT = {
+  id: true,
+  name: true,
+  nickname: true,
+  roles: { select: { value: true } },
+} as const
+
+/**
+ * True when the resolved user carries the given role value (e.g. `R:BOT`).
+ */
+export function hasRole(user: Pick<BotUserBasic, 'roles'>, roleValue: string): boolean {
+  return user.roles.some(role => role.value === roleValue)
+}
 
 export async function resolveUserByPlatform(
   platform: BotPlatform,

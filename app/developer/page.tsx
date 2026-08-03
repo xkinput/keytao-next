@@ -14,11 +14,16 @@ import toast from 'react-hot-toast'
 interface ApiKey {
   id: number
   name: string
-  key: string
+  /** First 8 characters only — the full key is shown once, at creation time. */
+  keyPrefix: string
   enabled: boolean
   createdAt: string
   lastUsedAt: string | null
   requestCount: number
+}
+
+interface CreatedApiKey extends ApiKey {
+  plaintextKey: string
 }
 
 export default function DeveloperPage() {
@@ -30,6 +35,8 @@ export default function DeveloperPage() {
   const [isCreating, setIsCreating] = useState(false)
   const [deletingId, setDeletingId] = useState<number | null>(null)
   const [copiedId, setCopiedId] = useState<number | null>(null)
+  const [createdKey, setCreatedKey] = useState<CreatedApiKey | null>(null)
+  const [copiedCreatedKey, setCopiedCreatedKey] = useState(false)
 
   if (!user) {
     return (
@@ -50,14 +57,18 @@ export default function DeveloperPage() {
     if (!newKeyName.trim()) return
     setIsCreating(true)
     try {
-      await apiRequest('/api/developer/keys', {
+      const created = await apiRequest<{ key: CreatedApiKey }>('/api/developer/keys', {
         method: 'POST',
         withAuth: true,
         body: { name: newKeyName.trim() },
       })
-      await mutate()
+      // Surface the plaintext BEFORE anything that can fail: it is never
+      // retrievable again, so a failing list refresh must not lose it.
+      setCreatedKey(created.key)
+      setCopiedCreatedKey(false)
       setNewKeyName('')
       onClose()
+      await mutate()
       toast.success('API Key 创建成功')
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '创建失败')
@@ -80,9 +91,16 @@ export default function DeveloperPage() {
   }
 
   const handleCopy = async (key: ApiKey) => {
-    await navigator.clipboard.writeText(key.key)
+    await navigator.clipboard.writeText(key.keyPrefix)
     setCopiedId(key.id)
     setTimeout(() => setCopiedId(null), 2000)
+  }
+
+  const handleCopyCreatedKey = async () => {
+    if (!createdKey) return
+    await navigator.clipboard.writeText(createdKey.plaintextKey)
+    setCopiedCreatedKey(true)
+    setTimeout(() => setCopiedCreatedKey(false), 2000)
   }
 
   const keys = data?.keys ?? []
@@ -133,13 +151,13 @@ export default function DeveloperPage() {
                           </div>
                           <div className="flex items-center gap-2">
                             <code className="text-xs bg-default-100 px-2 py-1 rounded font-mono truncate max-w-xs">
-                              {k.key}
+                              {k.keyPrefix}……
                             </code>
                             <Button
                               isIconOnly
                               size="sm"
                               variant="light"
-                              aria-label={`复制 ${k.name}`}
+                              aria-label={`复制 ${k.name} 前缀`}
                               onPress={() => handleCopy(k)}
                             >
                               {copiedId === k.id
@@ -340,6 +358,37 @@ curl -X POST -H "Content-Type: application/json" -H "X-API-Key: kt_xxx" \\
             >
               创建
             </Button>
+          </ModalFooter>
+        </ModalContent>
+      </Modal>
+
+      {/* One-time key reveal — the plaintext is never stored server side */}
+      <Modal isOpen={createdKey !== null} onClose={() => setCreatedKey(null)}>
+        <ModalContent>
+          <ModalHeader>请立即保存你的 API Key</ModalHeader>
+          <ModalBody>
+            <p className="text-sm text-warning-600">
+              完整 Key 仅显示这一次，关闭后无法再次查看。请立即复制并妥善保存。
+            </p>
+            <div className="flex items-center gap-2">
+              <code className="text-xs bg-default-100 px-2 py-2 rounded font-mono break-all flex-1">
+                {createdKey?.plaintextKey}
+              </code>
+              <Button
+                isIconOnly
+                size="sm"
+                variant="light"
+                aria-label="复制完整 API Key"
+                onPress={handleCopyCreatedKey}
+              >
+                {copiedCreatedKey
+                  ? <Check className="w-4 h-4 text-success" />
+                  : <Copy className="w-4 h-4" />}
+              </Button>
+            </div>
+          </ModalBody>
+          <ModalFooter>
+            <Button color="primary" onPress={() => setCreatedKey(null)}>我已保存</Button>
           </ModalFooter>
         </ModalContent>
       </Modal>

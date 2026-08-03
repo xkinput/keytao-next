@@ -127,6 +127,7 @@ model User {
   likedPullRequests    PullRequest[] @relation("PullRequestLikes")
   dislikedPullRequests PullRequest[] @relation("PullRequestDislikes")
   batches              Batch[]       @relation("UserBatches")
+  reviewedBatches      Batch[]       @relation("BatchReviewer")
   linkKeys             LinkKey[]     @relation("UserLinkKeys")
   apiKeys              ApiKey[]      @relation("UserApiKeys")
   userDictionaryEntries UserDictionaryEntry[] @relation("UserDictionaryEntries")
@@ -244,7 +245,9 @@ model Phrase {
   /// 关联PR
   pullRequests PullRequest[]
 
-  @@unique([word, code])
+  @@unique([word, code, type])
+  @@index([code])
+  @@index([type, code])
   @@map("phrases")
 }
 
@@ -352,17 +355,21 @@ model Batch {
   description String?
   status      BatchStatus @default(Draft)
   reviewNote  String?     @db.Text
+  reviewedAt  DateTime?
   contentVersion Int      @default(0)
 
   // Relations
   creator      User          @relation("UserBatches", fields: [creatorId], references: [id], onDelete: Cascade)
   creatorId    Int
+  reviewer     User?         @relation("BatchReviewer", fields: [reviewerId], references: [id], onDelete: SetNull)
+  reviewerId   Int?
   pullRequests PullRequest[]
   sourceIssue  Issue?        @relation("IssueBatches", fields: [issueId], references: [id])
   issueId      Int?
   syncTask     SyncTask?     @relation("SyncTaskBatches", fields: [syncTaskId], references: [id])
   syncTaskId   String?
 
+  @@index([reviewerId])
   @@map("batches")
 }
 
@@ -433,7 +440,8 @@ model SyncTask {
 /// Developer API key
 model ApiKey {
   id           Int       @id @default(autoincrement())
-  key          String    @unique
+  keyHash      String    @unique
+  keyPrefix    String
   name         String
   enabled      Boolean   @default(true)
   createdAt    DateTime  @default(now())

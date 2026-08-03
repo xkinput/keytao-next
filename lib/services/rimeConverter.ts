@@ -5,6 +5,7 @@
 
 import { PhraseType, PullRequest, PullRequestType, Phrase } from '@prisma/client';
 import { format } from 'date-fns';
+import { validatePhraseInput } from '@/lib/validation/phraseInput';
 
 export interface RimeEntry {
   word: string;
@@ -17,6 +18,8 @@ export interface RimeDict {
   version: string;
   sort: string;
   entries: RimeEntry[];
+  /** Dictionary type, used to apply the right per-type code rules on output. */
+  type?: PhraseType;
 }
 
 interface ConvertPhrasesOptions {
@@ -161,10 +164,32 @@ export function groupPhrasesByType(phrases: Phrase[]): Map<PhraseType, Phrase[]>
 }
 
 /**
+ * Defense in depth: a Rime dictionary is a TSV file, so a tab / newline / any
+ * other control character in a word or code would shift every following column
+ * and corrupt the dictionary. Input validation should already have rejected
+ * these, but anything that slipped in earlier (or was imported before the
+ * validation existed) is dropped here rather than shipped to the users.
+ *
+ * Runs the full shared ruleset — not just the control-character check — so the
+ * generator and the write paths agree on what is a legal entry.
+ */
+function isEmittableEntry(entry: RimeEntry, dictName: string, type?: PhraseType): boolean {
+  const error = validatePhraseInput({ word: entry.word, code: entry.code, type });
+  if (error) {
+    console.error(
+      `[rimeConverter] Skipping invalid entry in "${dictName}" (${error}): word=${JSON.stringify(entry.word)} code=${JSON.stringify(entry.code)}`
+    );
+    return false;
+  }
+  return true;
+}
+
+/**
  * Generate Rime YAML content
  */
 export function generateRimeYaml(dict: RimeDict): string {
   const lines: string[] = [];
+  const safeEntries = dict.entries.filter(entry => isEmittableEntry(entry, dict.name, dict.type));
 
   // Header
   lines.push('# Rime dictionary');
@@ -176,14 +201,14 @@ export function generateRimeYaml(dict: RimeDict): string {
   lines.push('columns:');
   lines.push('  - text');
   lines.push('  - code');
-  if (dict.entries.some(e => e.weight !== undefined)) {
+  if (safeEntries.some(e => e.weight !== undefined)) {
     lines.push('  - weight');
   }
   lines.push('...');
   lines.push('');
 
   // Entries (sort by code, then by weight ascending - smaller weight first)
-  const sortedEntries = [...dict.entries].sort((a, b) => {
+  const sortedEntries = [...safeEntries].sort((a, b) => {
     if (a.code !== b.code) {
       return a.code.localeCompare(b.code);
     }
@@ -235,6 +260,7 @@ export function convertToRimeDicts(
       version: dateVersion,
       sort: 'by_weight',
       entries,
+      type,
     };
 
     const content = generateRimeYaml(dict);
@@ -249,6 +275,7 @@ export function convertToRimeDicts(
         version: 'Q1',
         sort: 'by_weight',
         entries,
+        type,
       };
       result.set('keytao-dz.dict.yaml', generateRimeYaml(dzDict));
 
@@ -258,6 +285,7 @@ export function convertToRimeDicts(
         version: 'Q1',
         sort: 'by_weight',
         entries,
+        type,
       };
       result.set('keytao-cx.dict.yaml', generateRimeYaml(cxDict));
     }
@@ -296,6 +324,7 @@ export function convertPhrasesToRimeDicts(
       version: dateVersion,
       sort: 'by_weight',
       entries,
+      type,
     };
 
     const content = generateRimeYaml(dict);
@@ -308,6 +337,7 @@ export function convertPhrasesToRimeDicts(
         version: 'Q1',
         sort: 'by_weight',
         entries,
+        type,
       };
       result.set('keytao-dz.dict.yaml', generateRimeYaml(dzDict));
 
@@ -316,6 +346,7 @@ export function convertPhrasesToRimeDicts(
         version: 'Q1',
         sort: 'by_weight',
         entries,
+        type,
       };
       result.set('keytao-cx.dict.yaml', generateRimeYaml(cxDict));
     }

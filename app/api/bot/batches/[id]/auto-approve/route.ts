@@ -1,10 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireVerifiedBotUser } from '@/lib/botUserAuth'
+import { hasRole } from '@/lib/botUserResolver'
+import { USER_ROLE } from '@/lib/constants/roles'
+import { PhraseWeightConflictError } from '@/lib/services/phraseWeightLock'
 import {
   approveSubmittedBatch,
   BatchApprovalTargetChangedError,
+  BatchApprovalMissingPhraseError,
   BatchConcurrentUpdateError,
+  BatchNeedsManualReviewError,
+  BatchTargetMismatchError,
+  BatchUnresolvableTargetError,
   classifyBatchDeleteRisk,
 } from '@/lib/services/batchApprovalService'
 
@@ -50,6 +57,12 @@ export async function POST(
       )
     }
     const user = auth.user
+    if (!hasRole(user, USER_ROLE.BOT)) {
+      return NextResponse.json(
+        { success: false, message: '当前账号无自动审核权限' },
+        { status: 403 }
+      )
+    }
 
     const batch = await prisma.batch.findUnique({
       where: { id },
@@ -73,11 +86,17 @@ export async function POST(
     if (batch.contentVersion !== expectedContentVersion) {
       return NextResponse.json({ success: false, message: '批次内容已被修改，请刷新后重试' }, { status: 409 })
     }
-    if (batch.pullRequests.some(item => item.needsManualReview)) {
-      return NextResponse.json(
-        { success: false, message: '批次包含必须人工审核的条目' },
-        { status: 422 }
-      )
+    const manualReviewItems = batch.pullRequests.filter(item => item.needsManualReview)
+    if (manualReviewItems.length > 0) {
+      const flagged = manualReviewItems.map(item => ({
+        word: item.word ?? '',
+        code: item.code ?? '',
+      }))
+      return NextResponse.json({
+        success: false,
+        message: new BatchNeedsManualReviewError(flagged).message,
+        needsManualReview: flagged,
+      }, { status: 422 })
     }
 
     const deleteRisk = classifyBatchDeleteRisk(batch.pullRequests)
@@ -95,6 +114,7 @@ export async function POST(
       mode: 'bot-auto',
       allowDelete: false,
       expectedContentVersion: expectedContentVersion as number,
+      reviewerId: user.id,
     })
 
     return NextResponse.json({
@@ -111,6 +131,36 @@ export async function POST(
     }
     if (error instanceof BatchApprovalTargetChangedError) {
       return NextResponse.json({ success: false, message: error.message }, { status: error.status })
+    }
+    if (error instanceof BatchNeedsManualReviewError) {
+      return NextResponse.json(
+        { success: false, message: error.message, needsManualReview: error.flagged },
+        { status: error.status }
+      )
+    }
+    if (error instanceof BatchUnresolvableTargetError) {
+      return NextResponse.json(
+        { success: false, message: error.message, unresolvable: error.items },
+        { status: error.status }
+      )
+    }
+    if (error instanceof PhraseWeightConflictError) {
+      return NextResponse.json(
+        { success: false, message: error.message, weightCollisions: error.collisions },
+        { status: error.status }
+      )
+    }
+    if (error instanceof BatchTargetMismatchError) {
+      return NextResponse.json(
+        { success: false, message: error.message, mismatches: error.mismatches },
+        { status: error.status }
+      )
+    }
+    if (error instanceof BatchApprovalMissingPhraseError) {
+      return NextResponse.json(
+        { success: false, message: error.message, missing: error.missing },
+        { status: error.status }
+      )
     }
     console.error('[Bot API] Auto approve error:', error)
     const message = error instanceof Error ? error.message : '自动批准失败'

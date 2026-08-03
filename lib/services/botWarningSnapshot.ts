@@ -37,7 +37,11 @@ export function createCanonicalDigest(value: unknown): string {
 export async function lockPhraseTableForWarningSnapshot(
   tx: Prisma.TransactionClient
 ): Promise<void> {
-  await tx.$executeRawUnsafe('LOCK TABLE "phrases" IN SHARE MODE')
+  // This must conflict with another approval taking the same snapshot lock.
+  // Plain SHARE locks are mutually compatible: two approvals can both hold
+  // one, then deadlock when each later tries to write phrases. SHARE ROW
+  // EXCLUSIVE serializes those snapshot-and-apply transactions instead.
+  await tx.$executeRawUnsafe('LOCK TABLE "phrases" IN SHARE ROW EXCLUSIVE MODE')
 }
 
 export async function buildBotWarningDigest(

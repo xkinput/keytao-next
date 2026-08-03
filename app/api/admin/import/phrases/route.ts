@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { checkRootAdminPermission } from '@/lib/adminAuth'
 import { isValidPhraseType, PHRASE_TYPE_CONFIGS, type PhraseType } from '@/lib/constants/phraseTypes'
-import { CODE_PATTERN, MAX_CODE_LENGTH } from '@/lib/constants/codeValidation'
+import { validatePhraseInput } from '@/lib/validation/phraseInput'
+import { lockPhraseWeightSlots } from '@/lib/services/phraseWeightLock'
 import { calculateWeightForType } from '@/lib/services/batchConflictService'
 
 interface ImportResult {
@@ -116,24 +117,15 @@ export async function POST(request: NextRequest) {
         continue
       }
 
-      // Check code length
-      if (code.length > MAX_CODE_LENGTH) {
+      // Shared validation: per-type code length, code format, and the control
+      // characters that would corrupt the generated Rime dictionary.
+      const inputError = validatePhraseInput({ word, code, type: phraseType })
+      if (inputError) {
         results.push({
           success: false,
           word,
           code,
-          error: `第 ${currentLine} 行：编码长度超过${MAX_CODE_LENGTH}个字符（${word} - ${code}）`
-        })
-        continue
-      }
-
-      // Check code format
-      if (!CODE_PATTERN.test(code)) {
-        results.push({
-          success: false,
-          word,
-          code,
-          error: `第 ${currentLine} 行：编码格式错误（${word} - ${code}）`
+          error: `第 ${currentLine} 行：${inputError}（${word} - ${code}）`
         })
         continue
       }
@@ -143,9 +135,12 @@ export async function POST(request: NextRequest) {
 
     // Step 2: Batch processing - optimized for performance
     if (validItems.length > 0) {
-      // Batch check: query existing phrases (word+code combinations)
+      // Batch check: query existing phrases. Uniqueness is (word, code, type),
+      // so the dedupe key must include the type being imported — otherwise a
+      // legitimate cross-type entry is rejected as a duplicate.
       const existingPhrases = await prisma.phrase.findMany({
         where: {
+          type: phraseType,
           OR: validItems.map(item => ({
             word: item.word,
             code: item.code
@@ -153,26 +148,27 @@ export async function POST(request: NextRequest) {
         },
         select: {
           word: true,
-          code: true
+          code: true,
+          type: true
         }
       })
 
       const existingCombinations = new Set(
-        existingPhrases.map(p => `${p.word}:${p.code}`)
+        existingPhrases.map(p => `${p.word}:${p.code}:${p.type}`)
       )
 
       // Filter out existing combinations
       const itemsToInsert: Array<{ index: number; word: string; code: string }> = []
 
       for (const item of validItems) {
-        const combination = `${item.word}:${item.code}`
+        const combination = `${item.word}:${item.code}:${phraseType}`
 
         if (existingCombinations.has(combination)) {
           results.push({
             success: false,
             word: item.word,
             code: item.code,
-            error: `第 ${startIndex + item.index + 1} 行：词条和编码的组合已存在（${item.word} - ${item.code}）`
+            error: `第 ${startIndex + item.index + 1} 行：词条和编码的组合已存在（${item.word} - ${item.code}，类型 ${phraseType}）`
           })
         } else {
           itemsToInsert.push(item)
@@ -184,9 +180,18 @@ export async function POST(request: NextRequest) {
         // Get unique codes to query
         const uniqueCodes = Array.from(new Set(itemsToInsert.map(item => item.code)))
 
+        // Weight assignment must use the same serialisation protocol as batch
+        // approval, otherwise an import and an approval can both read the same
+        // "next free weight" for a code and both take it.
+        await prisma.$transaction(async (tx) => {
+          await lockPhraseWeightSlots(
+            tx,
+            uniqueCodes.map(code => ({ code, type: phraseType as PhraseType }))
+          )
+
         // Batch query: count existing phrases per code AND type
         // Different types should have independent weight calculation
-        const codeGroups = await prisma.phrase.groupBy({
+        const codeGroups = await tx.phrase.groupBy({
           by: ['code', 'type'],
           where: {
             code: { in: uniqueCodes }
@@ -226,7 +231,7 @@ export async function POST(request: NextRequest) {
 
         // Step 4: Batch insert using createMany (10-100x faster than loop create)
         try {
-          await prisma.phrase.createMany({
+          await tx.phrase.createMany({
             data: phrasesToCreate,
             skipDuplicates: true // Skip if unique constraint violated
           })
@@ -253,7 +258,7 @@ export async function POST(request: NextRequest) {
             const weight = calculateWeightForType(phraseType as PhraseType, existingCount, batchCount)
 
             try {
-              await prisma.phrase.create({
+              await tx.phrase.create({
                 data: {
                   word: item.word,
                   code: item.code,
@@ -294,6 +299,7 @@ export async function POST(request: NextRequest) {
             }
           }
         }
+        })
       }
     }
 

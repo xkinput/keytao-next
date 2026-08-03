@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { apiKeyPrefix, hashApiKey } from '@/lib/apiKeyAuth'
 import {
   apiKeyValue,
   authHeaders,
@@ -119,7 +120,8 @@ test.describe('API 与权限功能 e2e 覆盖', () => {
     const key = apiKeyValue()
     await prisma.apiKey.create({
       data: {
-        key,
+        keyHash: hashApiKey(key),
+        keyPrefix: apiKeyPrefix(key),
         name: 'E2E direct API key',
         userId: seed.owner.id,
       },

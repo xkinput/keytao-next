@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 
-const MAX_CODE_LENGTH = 20
+import { MAX_CODE_LENGTH_ANY_TYPE as MAX_CODE_LENGTH } from '@/lib/constants/codeValidation'
 
 // GET /api/phrases/by-code?code=xxx&page=1 - Get phrases by code prefix with pagination (public access)
 export async function GET(request: NextRequest) {

@@ -28,6 +28,10 @@ export async function POST(
     if (!batch) {
       return NextResponse.json({ error: '批次不存在' }, { status: 404 })
     }
+    // Capture the content version the reviewer is about to look at. The remote
+    // review can take minutes; binding the result to this version means an edit
+    // that lands meanwhile invalidates the verdict instead of having it applied
+    // to different content.
     const reviewedContentVersion = batch.contentVersion
 
     const aiReview = await requestMiaomiaoBatchReview({

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { verifyApiKey } from '@/lib/apiKeyAuth'
 
-const MAX_CODE_LENGTH = 20
+import { MAX_CODE_LENGTH_ANY_TYPE as MAX_CODE_LENGTH } from '@/lib/constants/codeValidation'
 
 export async function GET(request: NextRequest) {
   const auth = await verifyApiKey()

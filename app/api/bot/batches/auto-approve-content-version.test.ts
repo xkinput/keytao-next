@@ -7,11 +7,14 @@ const mockApprove = vi.fn()
 
 vi.mock('@/lib/botUserAuth', () => ({ requireVerifiedBotUser: mockRequireVerifiedBotUser }))
 vi.mock('@/lib/prisma', () => ({ prisma: { batch: { findUnique: mockFindUnique } } }))
-vi.mock('@/lib/services/batchApprovalService', () => ({
-  approveSubmittedBatch: mockApprove,
-  classifyBatchDeleteRisk: vi.fn(() => ({ hasBareDelete: false, bareDeletes: [] })),
-  BatchConcurrentUpdateError: class BatchConcurrentUpdateError extends Error { status = 409 },
-}))
+vi.mock('@/lib/services/batchApprovalService', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/services/batchApprovalService')>()
+  return {
+    ...actual,
+    approveSubmittedBatch: mockApprove,
+    classifyBatchDeleteRisk: vi.fn(() => ({ hasBareDelete: false, bareDeletes: [] })),
+  }
+})
 
 function request(body: unknown) {
   return new NextRequest('http://localhost/api/bot/batches/batch-1/auto-approve', {
@@ -21,7 +24,10 @@ function request(body: unknown) {
 
 beforeEach(() => {
   vi.clearAllMocks()
-  mockRequireVerifiedBotUser.mockResolvedValue({ authorized: true, user: { id: 42 } })
+  mockRequireVerifiedBotUser.mockResolvedValue({
+    authorized: true,
+    user: { id: 42, roles: [{ value: 'R:BOT' }] },
+  })
   mockFindUnique.mockResolvedValue({
     id: 'batch-1', creatorId: 42, status: 'Submitted', contentVersion: 5, pullRequests: [],
   })

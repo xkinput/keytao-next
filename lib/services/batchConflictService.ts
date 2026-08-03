@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/prisma'
+import type { Prisma } from '@prisma/client'
 import { getDefaultWeight, type PhraseType } from '@/lib/constants/phraseTypes'
 import { conflictDetector, ConflictInfo } from './conflictDetector'
 
@@ -55,7 +56,13 @@ export function calculateWeightForType(
 export async function calculateDynamicWeight(
   item: BatchPRItem,
   allItems: BatchPRItem[],
-  currentIndex: number
+  currentIndex: number,
+  /**
+   * Database client to read existing phrases through. Defaults to the global
+   * client; the approval path passes its transaction client so the weights are
+   * computed from the same snapshot that the writes will use.
+   */
+  client: Prisma.TransactionClient = prisma
 ): Promise<number> {
   if (item.weight !== undefined) {
     return item.weight
@@ -68,7 +75,7 @@ export async function calculateDynamicWeight(
   // For Create action, check if this word+code already exists in database
   // But first check if it will be modified by a Change operation in the batch
   if (item.action === 'Create') {
-    const existingPhrase = await prisma.phrase.findFirst({
+    const existingPhrase = await client.phrase.findFirst({
       where: {
         word: item.word,
         code: item.code,
@@ -103,7 +110,7 @@ export async function calculateDynamicWeight(
 
   // Get all existing phrases with their weights for this code AND type
   // Different types (单字, 词语, etc.) should have independent weight calculation
-  const existingPhrases = await prisma.phrase.findMany({
+  const existingPhrases = await client.phrase.findMany({
     where: {
       code: item.code,
       type: item.type

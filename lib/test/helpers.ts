@@ -2,6 +2,8 @@ import { prisma } from '@/lib/prisma'
 import { PhraseType, UserStatus, SignUpType } from '@prisma/client'
 import bcrypt from 'bcrypt'
 import { ConflictInfo } from '@/lib/services/conflictDetector'
+import { detectPhraseType } from '@/lib/constants/phraseTypes'
+import { createPhraseTargetFingerprint } from '@/lib/services/phraseTargetBinding'
 
 export interface TestPhraseData {
   word: string
@@ -93,6 +95,18 @@ export async function createTestBatch(
 
   const createdPrs = []
   for (const pr of prs) {
+    const expectedWord = pr.action === 'Change' ? pr.oldWord : pr.word
+    const expectedType = pr.type ?? detectPhraseType(expectedWord ?? '', pr.code)
+    const target = pr.action === 'Create' || !expectedWord || !pr.code
+      ? null
+      : await prisma.phrase.findFirst({
+          where: {
+            ...(pr.phraseId ? { id: pr.phraseId } : {}),
+            word: expectedWord,
+            code: pr.code,
+            type: expectedType,
+          },
+        })
     const created = await prisma.pullRequest.create({
       data: {
         action: pr.action,
@@ -102,6 +116,10 @@ export async function createTestBatch(
         type: pr.type,
         weight: pr.weight,
         phraseId: pr.phraseId,
+        // Production write paths record both; mirror that so tests exercise the
+        // real Delete/Change target resolution.
+        targetPhraseId: target?.id ?? pr.phraseId ?? null,
+        targetFingerprint: target ? createPhraseTargetFingerprint(target) : null,
         userId,
         batchId: batch.id,
       },
