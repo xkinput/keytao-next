@@ -8,6 +8,7 @@ import { calculateWeightForType } from '@/lib/services/batchConflictService'
 import { checkIsAdmin } from '@/lib/adminAuth'
 import { resolvePhraseTargetBinding } from '@/lib/services/phraseTargetBinding'
 import { BatchContentLockedError, claimBatchContentMutation } from '@/lib/services/batchContentGuard'
+import { containsMiaomiaoReviewBlockDelimiter } from '@/lib/validation/phraseInput'
 
 const allowedActions = ['Create', 'Change', 'Delete'] as const
 
@@ -146,7 +147,9 @@ export async function PUT(
                 (oldWord !== undefined && oldWord.length > maxWordLength) ||
                 (type !== undefined && !isValidPhraseType(type)) ||
                 (item.remark !== undefined && item.remark !== null && typeof item.remark !== 'string') ||
-                (typeof remark === 'string' && remark.length > maxRemarkLength)
+                (typeof remark === 'string' && (
+                    remark.length > maxRemarkLength || containsMiaomiaoReviewBlockDelimiter(remark)
+                ))
             ) {
                 return NextResponse.json({ error: '词条、编码或备注格式错误' }, { status: 400 })
             }

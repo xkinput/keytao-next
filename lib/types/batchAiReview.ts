@@ -10,6 +10,10 @@ export interface BatchAiReviewRecord {
   summary: string
   pronunciation?: string
   sources: string[]
+  /** Explicit dictionary, encyclopedia, or other named reference sources. */
+  authoritySources?: string[]
+  /** Entity-context and language-common-sense evidence, kept separate from named references. */
+  commonSenseSources?: string[]
   evidence: string[]
 }
 

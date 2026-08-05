@@ -11,6 +11,17 @@ describe('userDictionary', () => {
     expect(input.replacePublic).toBe(true)
   })
 
+  it.each([
+    '--- miao-review:start ---',
+    '--- miao-review:end ---',
+  ])('rejects caller-supplied Miaomiao review delimiter %s', delimiter => {
+    expect(() => normalizeUserDictionaryInput({
+      word: '键道',
+      code: 'jmdc',
+      remark: `用户备注\n${delimiter}`,
+    })).toThrow('备注不能包含喵喵复审块标记')
+  })
+
   it('builds a Rime dictionary yaml', () => {
     const yaml = buildUserDictionaryYaml([
       { word: '键道', code: 'jmdc', weight: 100 },

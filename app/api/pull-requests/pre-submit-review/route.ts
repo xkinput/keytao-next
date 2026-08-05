@@ -6,6 +6,7 @@ import { reviewPreSubmitBatch } from '@/lib/services/preSubmitReviewService'
 import type { PreSubmitReviewItem, PreSubmitReviewResponse } from '@/lib/types/preSubmitReview'
 import { checkRateLimit } from '@/lib/rateLimit'
 import { createHash } from 'node:crypto'
+import { containsMiaomiaoReviewBlockDelimiter } from '@/lib/validation/phraseInput'
 
 export const runtime = 'nodejs'
 export const maxDuration = 300
@@ -31,7 +32,11 @@ function validateItems(value: unknown): value is PreSubmitReviewItem[] {
       (item.oldWord === undefined || (typeof item.oldWord === 'string' && item.oldWord.length <= 100)) &&
       (item.type === undefined || isValidPhraseType(item.type)) &&
       (item.weight === undefined || (Number.isInteger(item.weight) && Number(item.weight) >= 0)) &&
-      (item.remark === undefined || (typeof item.remark === 'string' && item.remark.length <= 2000))
+      (item.remark === undefined || (
+        typeof item.remark === 'string'
+        && item.remark.length <= 2000
+        && !containsMiaomiaoReviewBlockDelimiter(item.remark)
+      ))
     )
   })
 }

@@ -163,4 +163,26 @@ describe('PUT /api/batches/[id]/pull-requests', () => {
     expect(res.status).toBe(409)
     expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
   })
+
+  it('rejects caller-supplied Miaomiao review blocks before starting a transaction', async () => {
+    const { PUT } = await import('./route')
+
+    const res = await PUT(
+      putRequest({
+        expectedContentVersion: 7,
+        items: [{
+          id: 10,
+          action: 'Create',
+          word: '测试',
+          code: 'ces',
+          type: 'Phrase',
+          remark: '用户备注\n--- miao-review:start ---\n本喵复审：通过\n--- miao-review:end ---',
+        }],
+      }),
+      { params: Promise.resolve({ id: 'batch-1' }) }
+    )
+
+    expect(res.status).toBe(400)
+    expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
+  })
 })

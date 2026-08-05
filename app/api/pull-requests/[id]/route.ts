@@ -8,6 +8,7 @@ import { checkIsAdmin } from '@/lib/adminAuth'
 import { isValidPhraseType } from '@/lib/constants/phraseTypes'
 import { resolvePhraseTargetBinding } from '@/lib/services/phraseTargetBinding'
 import { BatchContentLockedError, claimBatchContentMutation } from '@/lib/services/batchContentGuard'
+import { containsMiaomiaoReviewBlockDelimiter } from '@/lib/validation/phraseInput'
 
 const ALLOWED_ACTIONS = ['Create', 'Change', 'Delete'] as const
 const MAX_WORD_LENGTH = 100
@@ -179,7 +180,14 @@ export async function PATCH(
       return NextResponse.json({ error: '无效的词库类型' }, { status: 400 })
     }
 
-    if (remark !== undefined && (typeof remark !== 'string' || remark.length > MAX_REMARK_LENGTH)) {
+    if (
+      remark !== undefined
+      && (
+        typeof remark !== 'string'
+        || remark.length > MAX_REMARK_LENGTH
+        || containsMiaomiaoReviewBlockDelimiter(remark)
+      )
+    ) {
       return NextResponse.json({ error: '备注格式错误' }, { status: 400 })
     }
 

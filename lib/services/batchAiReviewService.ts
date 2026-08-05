@@ -72,6 +72,9 @@ const AUTHORITY_SOURCE_NAMES = [
   '辞典',
 ]
 
+const COMMON_SENSE_CONTEXT_PATTERN = /(?:本喵(?:实体|整词)?语境判断|百科实体全称语境)(?:[（(][^）)\r\n]*[）)])?/g
+const LANGUAGE_COMMON_SENSE_PATTERN = /^(?:本喵)?语言常识(?:[：:\s]|$)/
+
 const BOT_REVIEW_PATTERN = /(Bot审词|Bot 自动审词|喵喵审词|本喵|自动审词|喵喵|Miaomiao|Miao)/i
 const CHINESE_PATTERN = /[\u3400-\u9fff]/
 const URL_PATTERN = /^https?:\/\//i
@@ -104,6 +107,41 @@ function compactText(text: string, maxLength = 140): string {
   return `${normalized.slice(0, maxLength - 1)}…`
 }
 
+function uniqueStrings(values: string[]): string[] {
+  return Array.from(new Set(values.map(value => value.trim()).filter(Boolean)))
+}
+
+function extractCommonSenseSources(values: string[]): string[] {
+  const contextSources = values.flatMap(value =>
+    Array.from(value.matchAll(COMMON_SENSE_CONTEXT_PATTERN), match => match[0])
+  )
+  if (values.some(value => LANGUAGE_COMMON_SENSE_PATTERN.test(value.trim()))) {
+    contextSources.push('语言常识')
+  }
+  return uniqueStrings(contextSources)
+}
+
+function classifyAuthoritySources(sources: string[]): string[] {
+  return AUTHORITY_SOURCE_NAMES.filter(authority =>
+    sources.some(source => source.includes(authority))
+  )
+}
+
+function extractLegacyReviewFieldValues(text: string, label: '来源' | '证据'): string[] {
+  const pattern = new RegExp(`(?:^|[；;\\r\\n])\\s*${label}[：:\\s]+([^；;\\r\\n]+)`, 'g')
+  return Array.from(text.matchAll(pattern), match => match[1].trim()).filter(Boolean)
+}
+
+function classifyStructuredSources(sources: string[], evidence: string[]): {
+  authoritySources: string[]
+  commonSenseSources: string[]
+} {
+  return {
+    authoritySources: classifyAuthoritySources(sources),
+    commonSenseSources: extractCommonSenseSources([...sources, ...evidence]),
+  }
+}
+
 function formatEntry(entry: BatchAiReviewChainEntry): string {
   const weight = entry.weight === null ? '?' : entry.weight
   return `「${entry.word}」(${weight})`
@@ -113,7 +151,11 @@ function extractReviewRecord(remark: string | null): BatchAiReviewRecord | undef
   if (!remark) return undefined
 
   const normalized = remark.trim()
-  const sourceNames = AUTHORITY_SOURCE_NAMES.filter(source => normalized.includes(source))
+  const sourceFields = extractLegacyReviewFieldValues(normalized, '来源')
+  const evidenceFields = extractLegacyReviewFieldValues(normalized, '证据')
+  const authoritySources = classifyAuthoritySources(sourceFields)
+  const commonSenseSources = extractCommonSenseSources([...sourceFields, ...evidenceFields])
+  const sourceNames = uniqueStrings([...authoritySources, ...commonSenseSources])
   const pronunciationMatch = normalized.match(/(?:读音|拼音)[：:\s]*([^；;，,。]+)/)
   const hasBotReview = BOT_REVIEW_PATTERN.test(normalized)
   const hasReviewEvidence = hasBotReview || sourceNames.length > 0 || Boolean(pronunciationMatch)
@@ -137,7 +179,33 @@ function extractReviewRecord(remark: string | null): BatchAiReviewRecord | undef
     summary: compactText(normalized),
     pronunciation: pronunciationMatch?.[1]?.trim(),
     sources: sourceNames,
+    authoritySources,
+    commonSenseSources,
     evidence,
+  }
+}
+
+function mergeReviewRecords(
+  structured: BatchAiReviewRecord | undefined,
+  legacy: BatchAiReviewRecord | undefined,
+): BatchAiReviewRecord | undefined {
+  if (!structured) return legacy
+  if (!legacy) return structured
+
+  return {
+    ...legacy,
+    ...structured,
+    pronunciation: structured.pronunciation || legacy.pronunciation,
+    sources: uniqueStrings([...structured.sources, ...legacy.sources]),
+    authoritySources: uniqueStrings([
+      ...(structured.authoritySources ?? []),
+      ...(legacy.authoritySources ?? []),
+    ]),
+    commonSenseSources: uniqueStrings([
+      ...(structured.commonSenseSources ?? []),
+      ...(legacy.commonSenseSources ?? []),
+    ]),
+    evidence: uniqueStrings([...structured.evidence, ...legacy.evidence]),
   }
 }
 
@@ -166,6 +234,7 @@ function parseMiaomiaoReviewRemark(remark: string | null): ParsedMiaomiaoReview 
     sources: structured.sources,
     evidence: structured.evidence,
   })
+  const sourceKinds = classifyStructuredSources(structured.sources, structured.evidence)
 
   return {
     status,
@@ -179,6 +248,7 @@ function parseMiaomiaoReviewRemark(remark: string | null): ParsedMiaomiaoReview 
       summary: compactText(title),
       pronunciation: structured.pronunciation,
       sources: structured.sources,
+      ...sourceKinds,
       evidence: evidence.length > 0 ? evidence : ['本喵已调用 LLM 完成复审。'],
     },
   }
@@ -306,8 +376,12 @@ function buildReviewItem(
 ): BatchAiReviewItem {
   const word = getWord(pr)
   const code = getCode(pr)
+  const parsedRemark = parseStructuredRemark(pr.remark)
   const structuredReview = parseMiaomiaoReviewRemark(pr.remark)
-  let reviewRecord = structuredReview?.reviewRecord ?? extractReviewRecord(pr.remark)
+  const legacyReviewRecord = extractReviewRecord(parsedRemark.baseRemark)
+  const reviewRecord = structuredReview?.reviewRecord && parsedRemark.review?.hasSourcesField
+    ? structuredReview.reviewRecord
+    : mergeReviewRecords(structuredReview?.reviewRecord, legacyReviewRecord)
   const state = {
     status: 'pass' as BatchAiReviewStatus,
     severity: 'success' as BatchAiReviewSeverity,
@@ -366,7 +440,12 @@ function buildReviewItem(
     addUnique(suggestions, '建议点击“让喵再审”，由喵结合 LLM、词典来源和现代汉语常识判断；常见成语或熟语不必强制要求词典来源。')
   }
 
-  if (reviewRecord && reviewRecord.sources.length === 0 && pr.action !== 'Delete') {
+  if (
+    reviewRecord
+    && reviewRecord.sources.length === 0
+    && (reviewRecord.commonSenseSources?.length ?? 0) === 0
+    && pr.action !== 'Delete'
+  ) {
     raiseStatus(state, 'attention', 'warning')
     addUnique(reasons, '有喵喵审词记录，但没有识别到来源名称或常识判断说明。')
     addUnique(suggestions, '若是大众已知的常见词、成语或熟语，可由喵在复审理由中写明读音、含义和语言常识依据。')
@@ -381,7 +460,6 @@ function buildReviewItem(
   if (structuredReview) {
     state.status = structuredReview.status
     state.severity = structuredReview.severity
-    reviewRecord = structuredReview.reviewRecord
     reasons.splice(0, reasons.length, ...structuredReview.reasons)
     suggestions.splice(0, suggestions.length, ...structuredReview.suggestions)
 

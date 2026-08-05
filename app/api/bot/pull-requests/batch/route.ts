@@ -15,6 +15,7 @@ import {
 } from '@/lib/services/botWarningSnapshot'
 import { createPhraseTargetFingerprint } from '@/lib/services/phraseTargetBinding'
 import { randomUUID } from 'crypto'
+import { containsMiaomiaoReviewBlockDelimiter } from '@/lib/validation/phraseInput'
 
 const MAX_ITEMS = 500
 const MAX_WORD_LENGTH = 100
@@ -163,6 +164,12 @@ export async function POST(request: NextRequest) {
       if (item.remark && item.remark.length > MAX_REMARK_LENGTH) {
         return NextResponse.json<BotCreatePRResponse>(
           { success: false, message: `项目 #${i + 1}: 备注过长` },
+          { status: 400 }
+        )
+      }
+      if (typeof item.remark === 'string' && containsMiaomiaoReviewBlockDelimiter(item.remark)) {
+        return NextResponse.json<BotCreatePRResponse>(
+          { success: false, message: `项目 #${i + 1}: 备注不能包含喵喵复审块标记` },
           { status: 400 }
         )
       }

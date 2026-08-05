@@ -7,6 +7,10 @@ import { PullRequestType } from '@prisma/client'
 import { PhraseType } from '@/lib/constants/phraseTypes'
 import { resolvePhraseTargetBinding } from '@/lib/services/phraseTargetBinding'
 import { BatchContentLockedError, claimBatchContentMutation } from '@/lib/services/batchContentGuard'
+import {
+  containsMiaomiaoReviewBlockDelimiter,
+  MAX_REMARK_LENGTH,
+} from '@/lib/validation/phraseInput'
 
 type BatchPullRequestItem = {
   action: PullRequestType
@@ -48,6 +52,18 @@ export async function POST(request: NextRequest) {
         { error: '缺少修改列表' },
         { status: 400 }
       )
+    }
+
+    const invalidRemark = (prItems as BatchPullRequestItem[]).find(change => (
+      change.remark !== undefined
+      && (
+        typeof change.remark !== 'string'
+        || change.remark.length > MAX_REMARK_LENGTH
+        || containsMiaomiaoReviewBlockDelimiter(change.remark)
+      )
+    ))
+    if (invalidRemark) {
+      return NextResponse.json({ error: '备注格式错误' }, { status: 400 })
     }
 
     // Validate all changes using unified conflict detection

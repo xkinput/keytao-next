@@ -67,4 +67,39 @@ describe('miaomiaoReviewRemark', () => {
       '编码 mwbc 位于候选链中。',
     ])
   })
+
+  it('splits source delimiters only outside parentheses', () => {
+    const source = '本喵实体语境判断（常见词，暂无权威页）'
+    const asciiParenthesesSource = '百科实体全称语境(Crab stick, no page)'
+    const parsed = parseMiaomiaoReviewRemark([
+      '--- miao-review:start ---',
+      '本喵复审：通过',
+      `来源：${source}；${asciiParenthesesSource}、汉典，语言常识`,
+      '--- miao-review:end ---',
+    ].join('\n'))
+
+    expect(parsed.review?.sources).toEqual([
+      source,
+      asciiParenthesesSource,
+      '汉典',
+      '语言常识',
+    ])
+  })
+
+  it('distinguishes an explicit empty source field from a missing source field', () => {
+    const withEmptySource = parseMiaomiaoReviewRemark([
+      '--- miao-review:start ---',
+      '本喵复审：通过',
+      '来源：',
+      '--- miao-review:end ---',
+    ].join('\n'))
+    const withoutSource = parseMiaomiaoReviewRemark([
+      '--- miao-review:start ---',
+      '本喵复审：通过',
+      '--- miao-review:end ---',
+    ].join('\n'))
+
+    expect(withEmptySource.review).toMatchObject({ sources: [], hasSourcesField: true })
+    expect(withoutSource.review).toMatchObject({ sources: [], hasSourcesField: false })
+  })
 })

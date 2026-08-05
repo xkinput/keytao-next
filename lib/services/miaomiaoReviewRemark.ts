@@ -9,6 +9,7 @@ export interface MiaomiaoReviewRemarkBlock {
   suggestion?: string
   pronunciation?: string
   sources: string[]
+  hasSourcesField: boolean
   evidence: string[]
   generatedAt?: string
 }
@@ -51,6 +52,38 @@ function getLineValue(text: string, label: string): string | undefined {
   return match?.[1]?.trim()
 }
 
+function hasLine(text: string, label: string): boolean {
+  return new RegExp(`^${label}[：:]`, 'm').test(text)
+}
+
+function splitSourceLabels(value: string): string[] {
+  const labels: string[] = []
+  let current = ''
+  let parenthesisDepth = 0
+
+  for (const character of value) {
+    if (character === '(' || character === '（') {
+      parenthesisDepth += 1
+      current += character
+      continue
+    }
+    if (character === ')' || character === '）') {
+      parenthesisDepth = Math.max(0, parenthesisDepth - 1)
+      current += character
+      continue
+    }
+    if (parenthesisDepth === 0 && /[、,，;；]/.test(character)) {
+      labels.push(current)
+      current = ''
+      continue
+    }
+    current += character
+  }
+
+  labels.push(current)
+  return labels
+}
+
 export function getMiaomiaoSemanticEvidence(
   record: Pick<BatchAiReviewRecord, 'pronunciation' | 'sources' | 'evidence'>,
 ): string[] {
@@ -88,8 +121,7 @@ export function parseMiaomiaoReviewRemark(remark?: string | null): ParsedMiaomia
 
   const pronunciation = getLineValue(latestBlock, '读音')
   const sources = uniqueValues(
-    (getLineValue(latestBlock, '来源') || '')
-      .split(/[、,，]/)
+    splitSourceLabels(getLineValue(latestBlock, '来源') || '')
       .map(source => source.trim()),
   )
   const rawEvidence = Array.from(latestBlock.matchAll(/^证据[：:]\s*(.+)$/gm))
@@ -106,6 +138,7 @@ export function parseMiaomiaoReviewRemark(remark?: string | null): ParsedMiaomia
       suggestion: getLineValue(latestBlock, '建议'),
       pronunciation,
       sources,
+      hasSourcesField: hasLine(latestBlock, '来源'),
       evidence,
       generatedAt: getLineValue(latestBlock, '时间'),
     },

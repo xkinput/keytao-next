@@ -6,6 +6,7 @@ import { Prisma, PullRequestStatus, PullRequestType } from '@prisma/client'
 import { isValidPhraseType } from '@/lib/constants/phraseTypes'
 import { resolvePhraseTargetBinding } from '@/lib/services/phraseTargetBinding'
 import { BatchContentLockedError, claimBatchContentMutation } from '@/lib/services/batchContentGuard'
+import { containsMiaomiaoReviewBlockDelimiter } from '@/lib/validation/phraseInput'
 
 // POST /api/pull-requests - Create a single PR
 export async function POST(request: NextRequest) {
@@ -63,8 +64,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '无效的词库类型' }, { status: 400 })
     }
 
-    if (remark !== undefined && typeof remark === 'string' && remark.length > 500) {
-      return NextResponse.json({ error: '备注过长' }, { status: 400 })
+    if (
+      remark !== undefined
+      && (
+        typeof remark !== 'string'
+        || remark.length > 500
+        || containsMiaomiaoReviewBlockDelimiter(remark)
+      )
+    ) {
+      return NextResponse.json({ error: '备注格式错误' }, { status: 400 })
     }
 
     // Check for conflicts

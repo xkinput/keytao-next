@@ -1,4 +1,5 @@
 import { detectPhraseType, getDefaultWeight, isValidPhraseType, type PhraseType } from '@/lib/constants/phraseTypes'
+import { containsMiaomiaoReviewBlockDelimiter } from '@/lib/validation/phraseInput'
 
 export const USER_DICT_FILE_NAME = 'user.dict.yaml'
 export const KEYTAO_USER_DICT_FILE_NAME = 'keytao.user.dict.yaml'
@@ -75,6 +76,9 @@ export function normalizeUserDictionaryInput(input: Record<string, unknown>): Us
 
   if (remark && remark.length > MAX_REMARK_LENGTH) {
     throw new UserDictionaryInputError('备注过长')
+  }
+  if (remark && containsMiaomiaoReviewBlockDelimiter(remark)) {
+    throw new UserDictionaryInputError('备注不能包含喵喵复审块标记')
   }
 
   return {

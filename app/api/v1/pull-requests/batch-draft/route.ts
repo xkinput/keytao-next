@@ -21,6 +21,7 @@ import type {
   BotBatchDeleteDraftResponse,
   BotDraftSnapshotItem,
 } from '@/lib/types/bot'
+import { containsMiaomiaoReviewBlockDelimiter } from '@/lib/validation/phraseInput'
 
 interface UserBatchDraftRequest {
   items: BotBatchDraftItem[]
@@ -147,6 +148,9 @@ export async function POST(request: NextRequest) {
       }
       if (item.remark && item.remark.length > MAX_REMARK_LENGTH) {
         throw new Error(`备注最多 ${MAX_REMARK_LENGTH} 个字符`)
+      }
+      if (typeof item.remark === 'string' && containsMiaomiaoReviewBlockDelimiter(item.remark)) {
+        throw new Error('备注不能包含喵喵复审块标记')
       }
       const type = normalizeType(word, code, item.type)
 

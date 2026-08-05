@@ -20,6 +20,10 @@ export const MAX_REMARK_LENGTH = 500
  *   U+2028/U+2029  Unicode line / paragraph separators
  */
 const CONTROL_CHAR_PATTERN = /[\u0000-\u001F\u007F-\u009F\u2028\u2029]/
+const MIAOMIAO_REVIEW_BLOCK_DELIMITERS = [
+  '--- miao-review:start ---',
+  '--- miao-review:end ---',
+] as const
 
 /**
  * True when the text contains a character that must never reach a Rime
@@ -27,6 +31,11 @@ const CONTROL_CHAR_PATTERN = /[\u0000-\u001F\u007F-\u009F\u2028\u2029]/
  */
 export function containsControlCharacters(value: string): boolean {
   return CONTROL_CHAR_PATTERN.test(value)
+}
+
+/** True when caller text could be parsed as a server-authored review block. */
+export function containsMiaomiaoReviewBlockDelimiter(value: string): boolean {
+  return MIAOMIAO_REVIEW_BLOCK_DELIMITERS.some(delimiter => value.includes(delimiter))
 }
 
 export interface PhraseInputCandidate {
@@ -106,6 +115,9 @@ export function validatePhraseInput(input: PhraseInputCandidate): string | null 
     }
     if (remark.length > MAX_REMARK_LENGTH) {
       return `备注最多 ${MAX_REMARK_LENGTH} 个字符`
+    }
+    if (containsMiaomiaoReviewBlockDelimiter(remark)) {
+      return '备注不能包含喵喵复审块标记'
     }
     if (containsControlCharacters(remark.replace(/[\r\n]/g, ''))) {
       return '备注不能包含控制字符'

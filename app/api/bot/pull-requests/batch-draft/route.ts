@@ -18,6 +18,7 @@ import {
 } from '@/lib/services/botWarningSnapshot'
 import { createPhraseTargetFingerprint } from '@/lib/services/phraseTargetBinding'
 import { randomUUID } from 'crypto'
+import { containsMiaomiaoReviewBlockDelimiter } from '@/lib/validation/phraseInput'
 import type {
   BotBatchDraftRequest,
   BotBatchDraftResponse,
@@ -130,6 +131,16 @@ export async function POST(request: NextRequest) {
     }
 
     for (let i = 0; i < items.length; i++) {
+      const remark = items[i]?.remark
+      if (
+        typeof remark === 'string'
+        && containsMiaomiaoReviewBlockDelimiter(remark)
+      ) {
+        return NextResponse.json<BotBatchDraftResponse>(
+          { success: false, message: `项目 #${i + 1}: 备注不能包含喵喵复审块标记`, successCount: 0, failedCount: 0, skippedCount: 0, warnedCount: 0, failed: [], skipped: [], warned: [], draftItems: [], draftTotal: 0 },
+          { status: 400 }
+        )
+      }
       if (items[i]?.needsManualReview !== undefined && typeof items[i].needsManualReview !== 'boolean') {
         return NextResponse.json<BotBatchDraftResponse>(
           { success: false, message: `项目 #${i + 1}: needsManualReview 必须是布尔值`, successCount: 0, failedCount: 0, skippedCount: 0, warnedCount: 0, failed: [], skipped: [], warned: [], draftItems: [], draftTotal: 0 },

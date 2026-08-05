@@ -107,7 +107,7 @@ function statusText(item: BatchAiReviewItem): string {
   return '需复核'
 }
 
-function formatMiaomiaoReviewRemark(item: BatchAiReviewItem, generatedAt: string): string {
+export function formatMiaomiaoReviewRemark(item: BatchAiReviewItem, generatedAt: string): string {
   const record = item.reviewRecord
   const lines = [
     '--- miao-review:start ---',
@@ -126,9 +126,13 @@ function formatMiaomiaoReviewRemark(item: BatchAiReviewItem, generatedAt: string
   if (record?.pronunciation) {
     lines.push(`读音：${record.pronunciation}`)
   }
-  if (record?.sources.length) {
-    lines.push(`来源：${record.sources.join('、')}`)
-  }
+  const persistedSources = Array.from(new Set([
+    ...(record?.sources ?? []),
+    ...(record?.commonSenseSources ?? []),
+  ].map(source => source.trim()).filter(Boolean)))
+  // Always persist the field: an empty value is an explicit retraction of
+  // legacy sources, while a missing field remains backward-compatible.
+  lines.push(`来源：${persistedSources.join('、')}`)
   for (const evidence of record ? getMiaomiaoSemanticEvidence(record).slice(0, 3) : []) {
     lines.push(`证据：${evidence}`)
   }

@@ -21,6 +21,7 @@ const DRAFT_BATCH_SELECT = {
       code: true,
       type: true,
       remark: true,
+      needsManualReview: true,
       weight: true,
       status: true,
       createAt: true,
@@ -31,6 +32,29 @@ const DRAFT_BATCH_SELECT = {
 
 type DraftBatchSnapshot = Prisma.BatchGetPayload<{ select: typeof DRAFT_BATCH_SELECT }>
 type DraftBatchItem = DraftBatchSnapshot['pullRequests'][number]
+
+// Source of truth: keytao-bot/keytao_bot/utils/review_flags.py
+// MANUAL_REVIEW_PREFIXES (lines 31-44). Keep this compatibility copy in sync.
+const LEGACY_MANUAL_REVIEW_MARKERS = [
+  '自动审核：该词需管理员审核',
+  '自动审核:该词需管理员审核',
+  '自动审核：该词需要管理员审核',
+  '自动审核:该词需要管理员审核',
+  '自动审核：预计需管理员审核',
+  '自动审核:预计需管理员审核',
+  '自动审核：预计需要管理员审核',
+  '自动审核:预计需要管理员审核',
+  '自动审核：需管理员审核',
+  '自动审核:需管理员审核',
+  '自动审核：该词暂未完成预审',
+  '自动审核:该词暂未完成预审',
+] as const
+
+function effectiveNeedsManualReview(item: DraftBatchItem): boolean {
+  return item.needsManualReview || LEGACY_MANUAL_REVIEW_MARKERS.some(
+    marker => (item.remark ?? '').includes(marker),
+  )
+}
 
 /**
  * Bot API: List all PR items in the user's current draft batch
@@ -98,6 +122,7 @@ export async function GET(request: NextRequest) {
       const conflictResult = conflictResults.find(r => r.id === String(pr.id))
       return {
         ...pr,
+        needsManualReview: effectiveNeedsManualReview(pr),
         weight: conflictResult?.calculatedWeight ?? pr.weight,
         conflictInfo: conflictResult?.conflict ?? null,
       }
