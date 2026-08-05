@@ -53,6 +53,20 @@ function response(): PreSubmitReviewResponse {
 }
 
 describe('pre-submit review client helpers', () => {
+  it('reviews only the user remark when an existing server review block is round-tripped', () => {
+    const remark = [
+      '管理员更新备注',
+      '',
+      '--- miao-review:start ---',
+      '本喵复审：需人工确认',
+      '来源：汉典',
+      '--- miao-review:end ---',
+    ].join('\n')
+
+    expect(buildPreSubmitReviewItems([{ ...formItem, remark }], ['field-1'])[0]?.remark)
+      .toBe('管理员更新备注')
+  })
+
   it('invalidates an old review when review-relevant form data changes', () => {
     const original = buildPreSubmitReviewItems([formItem], ['field-1'])
     const changedCode = buildPreSubmitReviewItems([{ ...formItem, code: 'pgtkv' }], ['field-1'])

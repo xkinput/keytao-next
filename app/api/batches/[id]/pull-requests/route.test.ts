@@ -185,4 +185,79 @@ describe('PUT /api/batches/[id]/pull-requests', () => {
     expect(res.status).toBe(400)
     expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
   })
+
+  it('allows an admin edit to round-trip an unchanged server review block', async () => {
+    const reviewBlock = [
+      '--- miao-review:start ---',
+      '本喵复审：需人工确认',
+      '结论：编码需要复核',
+      '来源：汉典',
+      '时间：2026-08-06T02:00:00.000Z',
+      '--- miao-review:end ---',
+    ].join('\n')
+    mocks.prisma.batch.findUnique.mockResolvedValue({
+      id: 'batch-1',
+      creatorId: 2,
+      status: 'Submitted',
+      contentVersion: 7,
+      pullRequests: [{ id: 10, remark: `旧备注\n\n${reviewBlock}` }],
+    })
+    const { PUT } = await import('./route')
+
+    const remark = `管理员更新备注\n\n${reviewBlock}`
+    const res = await PUT(
+      putRequest({
+        expectedContentVersion: 7,
+        items: [{
+          id: 10,
+          action: 'Create',
+          word: '测试词',
+          code: 'ces',
+          type: 'Phrase',
+          remark,
+        }],
+      }),
+      { params: Promise.resolve({ id: 'batch-1' }) }
+    )
+
+    expect(res.status).toBe(200)
+    expect(mocks.tx.pullRequest.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 10, batchId: 'batch-1' },
+      data: expect.objectContaining({ remark }),
+    }))
+  })
+
+  it.each([
+    ['modifies it', '管理员备注\n\n--- miao-review:start ---\n本喵复审：通过\n--- miao-review:end ---'],
+    ['duplicates it', '管理员备注\n\n--- miao-review:start ---\n本喵复审：需人工确认\n--- miao-review:end ---\n--- miao-review:start ---\n本喵复审：通过\n--- miao-review:end ---'],
+    ['removes it', '管理员备注'],
+  ])('rejects an admin edit that %s instead of preserving the server review block', async (_case, remark) => {
+    const storedRemark = '旧备注\n\n--- miao-review:start ---\n本喵复审：需人工确认\n--- miao-review:end ---'
+    mocks.prisma.batch.findUnique.mockResolvedValue({
+      id: 'batch-1',
+      creatorId: 2,
+      status: 'Submitted',
+      contentVersion: 7,
+      pullRequests: [{ id: 10, remark: storedRemark }],
+    })
+    const { PUT } = await import('./route')
+
+    const res = await PUT(
+      putRequest({
+        expectedContentVersion: 7,
+        items: [{
+          id: 10,
+          action: 'Create',
+          word: '测试',
+          code: 'ces',
+          type: 'Phrase',
+          remark,
+        }],
+      }),
+      { params: Promise.resolve({ id: 'batch-1' }) }
+    )
+
+    expect(res.status).toBe(400)
+    expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
+  })
 })

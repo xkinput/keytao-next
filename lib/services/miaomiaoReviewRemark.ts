@@ -1,6 +1,11 @@
 import type { BatchAiReviewRecord } from '@/lib/types/batchAiReview'
 
-const MIAOMIAO_REVIEW_BLOCK_PATTERN = /\n?--- miao-review:start ---([\s\S]*?)--- miao-review:end ---/g
+export const MIAOMIAO_REVIEW_BLOCK_START = '--- miao-review:start ---'
+export const MIAOMIAO_REVIEW_BLOCK_END = '--- miao-review:end ---'
+
+const MIAOMIAO_REVIEW_BLOCK_SOURCE = `${MIAOMIAO_REVIEW_BLOCK_START}([\\s\\S]*?)${MIAOMIAO_REVIEW_BLOCK_END}`
+const MIAOMIAO_REVIEW_BLOCK_PATTERN = new RegExp(`\\n?${MIAOMIAO_REVIEW_BLOCK_SOURCE}`, 'g')
+const MIAOMIAO_REVIEW_BLOCK_EXACT_PATTERN = new RegExp(MIAOMIAO_REVIEW_BLOCK_SOURCE, 'g')
 
 export interface MiaomiaoReviewRemarkBlock {
   status?: string
@@ -48,7 +53,7 @@ function uniqueValues(values: Array<string | undefined>): string[] {
 }
 
 function getLineValue(text: string, label: string): string | undefined {
-  const match = text.match(new RegExp(`^${label}[：:]\\s*(.+)$`, 'm'))
+  const match = text.match(new RegExp(`^${label}[：:][^\\S\\r\\n]*(.+)$`, 'm'))
   return match?.[1]?.trim()
 }
 
@@ -147,4 +152,10 @@ export function parseMiaomiaoReviewRemark(remark?: string | null): ParsedMiaomia
 
 export function stripMiaomiaoReviewRemark(remark?: string | null): string {
   return parseMiaomiaoReviewRemark(remark).baseRemark
+}
+
+/** Return each complete parser-recognised block with its bytes unchanged. */
+export function extractMiaomiaoReviewBlocks(remark?: string | null): string[] {
+  if (!remark) return []
+  return Array.from(remark.matchAll(MIAOMIAO_REVIEW_BLOCK_EXACT_PATTERN), match => match[0])
 }

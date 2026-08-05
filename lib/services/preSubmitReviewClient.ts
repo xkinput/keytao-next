@@ -1,6 +1,7 @@
 import type { PhraseType } from '@/lib/constants/phraseTypes'
 import type { BatchAiReviewItem } from '@/lib/types/batchAiReview'
 import type { PreSubmitReviewItem, PreSubmitReviewResponse } from '@/lib/types/preSubmitReview'
+import { stripMiaomiaoReviewRemark } from '@/lib/services/miaomiaoReviewRemark'
 
 export interface PreSubmitReviewFormItem {
   action: 'Create' | 'Change' | 'Delete'
@@ -16,16 +17,19 @@ export function buildPreSubmitReviewItems(
   items: PreSubmitReviewFormItem[],
   fieldIds: string[],
 ): PreSubmitReviewItem[] {
-  return items.map((item, index) => ({
-    id: fieldIds[index] ?? String(index),
-    action: item.action,
-    word: item.word,
-    oldWord: item.action === 'Change' ? item.oldWord || undefined : undefined,
-    code: item.code,
-    weight: item.weight ? Number.parseInt(item.weight, 10) : undefined,
-    type: item.type as PhraseType,
-    remark: item.remark || undefined,
-  }))
+  return items.map((item, index) => {
+    const userRemark = stripMiaomiaoReviewRemark(item.remark)
+    return {
+      id: fieldIds[index] ?? String(index),
+      action: item.action,
+      word: item.word,
+      oldWord: item.action === 'Change' ? item.oldWord || undefined : undefined,
+      code: item.code,
+      weight: item.weight ? Number.parseInt(item.weight, 10) : undefined,
+      type: item.type as PhraseType,
+      remark: userRemark || undefined,
+    }
+  })
 }
 
 export function buildPreSubmitFingerprint(items: PreSubmitReviewItem[]): string {

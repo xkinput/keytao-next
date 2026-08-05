@@ -8,6 +8,12 @@
 
 import { getCodeValidationError } from '@/lib/constants/codeValidation'
 import { isValidPhraseType, type PhraseType } from '@/lib/constants/phraseTypes'
+import {
+  extractMiaomiaoReviewBlocks,
+  MIAOMIAO_REVIEW_BLOCK_END,
+  MIAOMIAO_REVIEW_BLOCK_START,
+  stripMiaomiaoReviewRemark,
+} from '@/lib/services/miaomiaoReviewRemark'
 
 export const MAX_WORD_LENGTH = 100
 export const MAX_REMARK_LENGTH = 500
@@ -21,8 +27,8 @@ export const MAX_REMARK_LENGTH = 500
  */
 const CONTROL_CHAR_PATTERN = /[\u0000-\u001F\u007F-\u009F\u2028\u2029]/
 const MIAOMIAO_REVIEW_BLOCK_DELIMITERS = [
-  '--- miao-review:start ---',
-  '--- miao-review:end ---',
+  MIAOMIAO_REVIEW_BLOCK_START,
+  MIAOMIAO_REVIEW_BLOCK_END,
 ] as const
 
 /**
@@ -36,6 +42,34 @@ export function containsControlCharacters(value: string): boolean {
 /** True when caller text could be parsed as a server-authored review block. */
 export function containsMiaomiaoReviewBlockDelimiter(value: string): boolean {
   return MIAOMIAO_REVIEW_BLOCK_DELIMITERS.some(delimiter => value.includes(delimiter))
+}
+
+/**
+ * True when an update adds, changes, duplicates, or removes a persisted review
+ * block. Ordinary text outside byte-identical complete blocks may still change.
+ */
+export function changesPersistedMiaomiaoReviewBlocks(
+  nextRemark: string | null | undefined,
+  persistedRemark: string | null | undefined,
+): boolean {
+  if (nextRemark === undefined) return false
+
+  const nextText = nextRemark ?? ''
+  const persistedText = persistedRemark ?? ''
+  if (
+    !containsMiaomiaoReviewBlockDelimiter(nextText)
+    && !containsMiaomiaoReviewBlockDelimiter(persistedText)
+  ) {
+    return false
+  }
+
+  const nextBlocks = extractMiaomiaoReviewBlocks(nextText)
+  const persistedBlocks = extractMiaomiaoReviewBlocks(persistedText)
+  if (containsMiaomiaoReviewBlockDelimiter(stripMiaomiaoReviewRemark(nextText))) {
+    return true
+  }
+  if (nextBlocks.length !== persistedBlocks.length) return true
+  return nextBlocks.some((block, index) => block !== persistedBlocks[index])
 }
 
 export interface PhraseInputCandidate {

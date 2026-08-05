@@ -8,7 +8,7 @@ import { calculateWeightForType } from '@/lib/services/batchConflictService'
 import { checkIsAdmin } from '@/lib/adminAuth'
 import { resolvePhraseTargetBinding } from '@/lib/services/phraseTargetBinding'
 import { BatchContentLockedError, claimBatchContentMutation } from '@/lib/services/batchContentGuard'
-import { containsMiaomiaoReviewBlockDelimiter } from '@/lib/validation/phraseInput'
+import { changesPersistedMiaomiaoReviewBlocks } from '@/lib/validation/phraseInput'
 
 const allowedActions = ['Create', 'Change', 'Delete'] as const
 
@@ -114,6 +114,7 @@ export async function PUT(
             return NextResponse.json({ error: `一次最多保存 ${maxItems} 个条目` }, { status: 400 })
         }
 
+        const persistedPullRequestsById = new Map(batch.pullRequests.map(pr => [pr.id, pr]))
         const items: BatchSyncItem[] = []
         for (const rawItem of rawItems) {
             if (!rawItem || typeof rawItem !== 'object') {
@@ -134,6 +135,9 @@ export async function PUT(
                     : typeof item.remark === 'string'
                         ? item.remark
                         : undefined
+            const persistedRemark = typeof itemId === 'number'
+                ? persistedPullRequestsById.get(itemId)?.remark
+                : undefined
 
             if (
                 itemId === null ||
@@ -147,9 +151,11 @@ export async function PUT(
                 (oldWord !== undefined && oldWord.length > maxWordLength) ||
                 (type !== undefined && !isValidPhraseType(type)) ||
                 (item.remark !== undefined && item.remark !== null && typeof item.remark !== 'string') ||
-                (typeof remark === 'string' && (
-                    remark.length > maxRemarkLength || containsMiaomiaoReviewBlockDelimiter(remark)
-                ))
+                (typeof remark === 'string' && remark.length > maxRemarkLength) ||
+                (
+                    item.remark !== undefined
+                    && changesPersistedMiaomiaoReviewBlocks(remark ?? null, persistedRemark)
+                )
             ) {
                 return NextResponse.json({ error: '词条、编码或备注格式错误' }, { status: 400 })
             }
@@ -166,7 +172,7 @@ export async function PUT(
             })
         }
 
-        const batchPullRequestIds = new Set(batch.pullRequests.map(pr => pr.id))
+        const batchPullRequestIds = new Set(persistedPullRequestsById.keys())
         const invalidItem = items.find(item => item.id !== undefined && !batchPullRequestIds.has(item.id))
         if (invalidItem) {
             return NextResponse.json({ error: '修改项不存在或不属于此批次' }, { status: 400 })

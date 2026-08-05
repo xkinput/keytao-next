@@ -102,4 +102,27 @@ describe('miaomiaoReviewRemark', () => {
     expect(withEmptySource.review).toMatchObject({ sources: [], hasSourcesField: true })
     expect(withoutSource.review).toMatchObject({ sources: [], hasSourcesField: false })
   })
+
+  it.each([
+    ['status', '本喵复审：需复核', { status: '需复核' }],
+    ['conclusion', '结论：编码需要复核', { conclusion: '编码需要复核' }],
+    ['reason', '理由：候选链不一致', { reason: '候选链不一致' }],
+    ['suggestion', '建议：管理员确认编码', { suggestion: '管理员确认编码' }],
+    ['pronunciation', '读音：cè shì', { pronunciation: 'cè shì' }],
+    ['evidence', '证据：编码 ces 位于候选链中。', { evidence: ['编码 ces 位于候选链中。'] }],
+    ['time', '时间：2026-08-06T02:00:00.000Z', { generatedAt: '2026-08-06T02:00:00.000Z' }],
+  ])('keeps an empty source from swallowing the following %s field', (_label, nextLine, expected) => {
+    const parsed = parseMiaomiaoReviewRemark([
+      '--- miao-review:start ---',
+      '来源： \t',
+      nextLine,
+      '--- miao-review:end ---',
+    ].join('\n'))
+
+    expect(parsed.review).toMatchObject({
+      sources: [],
+      hasSourcesField: true,
+      ...expected,
+    })
+  })
 })
