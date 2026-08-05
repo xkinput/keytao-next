@@ -7,7 +7,8 @@ import { buildSkippedCandidateSlotWarnings } from '@/lib/services/batchSkippedCo
 import { PullRequestType } from '@prisma/client'
 import { PhraseType } from '@/lib/constants/phraseTypes'
 import type { BotCreatePRRequest, BotCreatePRResponse, BotConflictInfo, BotWarningInfo, BotDeleteNoteInfo } from '@/lib/types/bot'
-import { assertNoOtherBotDraftWithContent, BatchContentLockedError, claimBatchContentMutation, lockBotDraftUser } from '@/lib/services/batchContentGuard'
+import { assertNoBotDraftBatch, assertNoOtherBotDraftWithContent, BatchContentLockedError, claimBatchContentMutation, lockBotDraftUser } from '@/lib/services/batchContentGuard'
+import { findCurrentBotDraftBatch, NEW_BOT_DRAFT_BATCH_IDENTITY } from '@/lib/services/botDraftBatch'
 import {
   buildBotWarningDigest,
   lockPhraseTableForWarningSnapshot,
@@ -182,13 +183,24 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Run conflict detection
+    // Resolve the batch this request targets. Without an explicit batchId the
+    // caller means "my current draft", which must be the same batch the read
+    // endpoints report — hence the shared selector rather than a local query.
+    // When the user has no draft at all the request targets a batch that does
+    // not exist yet: it gets a provisional id below and is only materialised by
+    // a confirmed write.
+    const implicitDraft = batchId ? null : await findCurrentBotDraftBatch(prisma, user.id)
     const existingBatchSnapshot = batchId
       ? await prisma.batch.findUnique({
         where: { id: batchId },
         select: { id: true, creatorId: true, status: true, contentVersion: true },
       })
-      : null
+      : implicitDraft && {
+        id: implicitDraft.id,
+        creatorId: user.id,
+        status: 'Draft' as const,
+        contentVersion: implicitDraft.contentVersion,
+      }
 
     if (batchId && !existingBatchSnapshot && !previewOnly && confirmed !== true) {
       return NextResponse.json<BotCreatePRResponse>({ success: false, message: '批次不存在' }, { status: 404 })
@@ -285,7 +297,14 @@ export async function POST(request: NextRequest) {
     }
 
     const targetBatchId = existingBatchSnapshot?.id ?? batchId ?? randomUUID()
-    const warningState = { targetBatchId, results, warnings, skippedSlotWarnings }
+    // A batch that does not exist yet has no stable id to hash: use the shared
+    // identity so preview and confirm agree (see NEW_BOT_DRAFT_BATCH_IDENTITY).
+    const warningState = {
+      targetBatchId: existingBatchSnapshot ? targetBatchId : NEW_BOT_DRAFT_BATCH_IDENTITY,
+      results,
+      warnings,
+      skippedSlotWarnings,
+    }
     const warningDigest = await buildBotWarningDigest(prisma, validationItems, warningState)
 
     if (confirmed === true && warningDigest !== expectedWarningDigest) {
@@ -326,11 +345,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json<BotCreatePRResponse>(responseData)
     }
 
-    // Check for duplicates in existing draft batch
-    if (batchId) {
+    // Check for duplicates in the batch we are about to write into (explicit or
+    // implicitly resolved); a batch that does not exist yet has nothing to dedupe.
+    if (existingBatchSnapshot) {
       const existingPRs = await prisma.pullRequest.findMany({
         where: {
-          batchId: batchId
+          batchId: existingBatchSnapshot.id
         },
         select: {
           action: true,
@@ -408,7 +428,9 @@ export async function POST(request: NextRequest) {
             expectedContentVersion: existingBatchSnapshot.contentVersion,
         })
       } else {
-        // Create new batch
+        // Create the user's first draft, but only while the "no draft yet"
+        // baseline the caller planned against still holds under the lock.
+        await assertNoBotDraftBatch(tx, user.id)
         batch = await tx.batch.create({
           data: {
             id: targetBatchId,

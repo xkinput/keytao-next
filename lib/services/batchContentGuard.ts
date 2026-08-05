@@ -1,4 +1,5 @@
 import type { Prisma } from '@prisma/client'
+import { BOT_BATCH_DESCRIPTION_PREFIX, botDraftBatchWhere } from '@/lib/services/botDraftBatch'
 
 export const EDITABLE_BATCH_STATUSES = ['Draft', 'Rejected'] as const
 
@@ -28,13 +29,34 @@ export async function assertNoOtherBotDraftWithContent(
       id: { not: batchId },
       creatorId: userId,
       status: 'Draft',
-      description: { startsWith: '键道助手' },
+      description: { startsWith: BOT_BATCH_DESCRIPTION_PREFIX },
       pullRequests: { some: {} },
     },
     select: { id: true },
   })
   if (other) {
     throw new BatchContentLockedError('当前已有另一个含内容的助手草稿，请刷新后重试')
+  }
+}
+
+/**
+ * CAS check for a write that creates the user's first bot draft.
+ *
+ * The caller's plan was built against "this user has no draft batch"
+ * (`expectedContentVersion: 0` with no `batchId`). Re-check that under the
+ * per-user advisory lock before creating one, so two concurrent first writes
+ * cannot each create their own draft.
+ */
+export async function assertNoBotDraftBatch(
+  tx: Prisma.TransactionClient,
+  userId: number
+): Promise<void> {
+  const existing = await tx.batch.findFirst({
+    where: botDraftBatchWhere(userId),
+    select: { id: true },
+  })
+  if (existing) {
+    throw new BatchContentLockedError('草稿批次已变化，请刷新后重试')
   }
 }
 

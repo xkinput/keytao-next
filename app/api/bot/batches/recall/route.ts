@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireVerifiedBotUser } from '@/lib/botUserAuth'
 import { lockBotDraftUser } from '@/lib/services/batchContentGuard'
+import { BOT_BATCH_DESCRIPTION_PREFIX } from '@/lib/services/botDraftBatch'
 
 export async function GET(request: NextRequest) {
   try {
@@ -16,7 +17,7 @@ export async function GET(request: NextRequest) {
       where: {
         creatorId: auth.user.id,
         status: 'Submitted',
-        description: { startsWith: '键道助手' },
+        description: { startsWith: BOT_BATCH_DESCRIPTION_PREFIX },
       },
       orderBy: { updateAt: 'desc' },
       select: {
@@ -108,11 +109,14 @@ export async function POST(request: NextRequest) {
       })
       if (!batch) return { kind: 'stale' as const }
 
+      // Only a draft that actually holds content blocks a recall: after the
+      // recall the restored batch owns the "current draft" pointer because the
+      // selector prefers the draft with content (see botDraftBatch.ts).
       const existingDraft = await tx.batch.findFirst({
         where: {
           creatorId: user.id,
           status: 'Draft',
-          description: { startsWith: '键道助手' },
+          description: { startsWith: BOT_BATCH_DESCRIPTION_PREFIX },
           pullRequests: { some: {} },
         },
         select: { id: true },

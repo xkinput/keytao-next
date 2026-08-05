@@ -1,14 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireVerifiedBotUser } from '@/lib/botUserAuth'
-import { lockBotDraftUser } from '@/lib/services/batchContentGuard'
+import { findCurrentBotDraftBatch } from '@/lib/services/botDraftBatch'
 
 /**
- * Bot API: Get or create latest draft batch
+ * Bot API: Read the caller's current draft batch
  * GET /api/bot/batches/latest-draft
  * Requires a valid Bot token and a bound platform user
- * 
- * Returns the user's latest Draft batch, or creates a new one if none exists
+ *
+ * This endpoint is strictly read-only. It used to be a get-or-create, which
+ * meant a pure preview could mint an empty draft batch and steal the "current
+ * draft" pointer from a batch that was about to be recalled (incident: the
+ * empty ec511ac6 shadowing 785e0368). Batch creation now belongs to the write
+ * endpoints only (`/api/bot/pull-requests/batch` and
+ * `/api/bot/pull-requests/batch-draft`), which create on the first confirmed
+ * write.
+ *
+ * When the user has no draft batch the response keeps the same shape with
+ * `batchId: null` and `exists: false` (a 404 would be indistinguishable from
+ * "platform account not bound" for existing clients).
  */
 export async function GET(request: NextRequest) {
   try {
@@ -33,50 +43,34 @@ export async function GET(request: NextRequest) {
     }
     const user = auth.user
 
-    // Find latest Draft batch for this user (bot-created only)
-    // Bot-created batches have description starting with "键道助手"
-    const { batch, isNew } = await prisma.$transaction(async (tx) => {
-      await lockBotDraftUser(tx, user.id)
-      const existing = await tx.batch.findFirst({
-        where: {
-          creatorId: user.id,
-          status: 'Draft',
-          description: { startsWith: '键道助手' },
-        },
-        orderBy: { createAt: 'desc' },
-        select: {
-          id: true,
-          description: true,
-          status: true,
-          createAt: true,
-          contentVersion: true,
-          _count: {
-            select: {
-              pullRequests: true
-            }
-          }
-        },
+    const batch = await findCurrentBotDraftBatch(prisma, user.id)
+
+    if (!batch) {
+      // `batchId: null` + `contentVersion: 0` is the CAS baseline for "this
+      // user has no draft yet": a write may send it (with no batchId) to
+      // create the first draft, and the server re-checks the absence under the
+      // write lock. See NEW_BOT_DRAFT_BATCH_IDENTITY.
+      return NextResponse.json({
+        success: true,
+        batchId: null,
+        exists: false,
+        pullRequestCount: 0,
+        contentVersion: 0,
+        isNew: false,
+        message: '当前没有草稿批次'
       })
-      if (existing) return { batch: existing, isNew: false }
-      const created = await tx.batch.create({
-        data: { description: '键道助手草稿批次', creatorId: user.id, status: 'Draft' },
-        select: {
-          id: true, description: true, status: true, createAt: true, contentVersion: true,
-          _count: { select: { pullRequests: true } },
-        },
-      })
-      return { batch: created, isNew: true }
-    })
+    }
 
     return NextResponse.json({
       success: true,
       batchId: batch.id,
-      pullRequestCount: batch._count.pullRequests,
+      exists: true,
+      pullRequestCount: batch.pullRequestCount,
       contentVersion: batch.contentVersion,
-      isNew,
-      message: batch._count.pullRequests > 0
-        ? `找到草稿批次，已包含 ${batch._count.pullRequests} 个修改`
-        : '创建了新的草稿批次'
+      isNew: false,
+      message: batch.pullRequestCount > 0
+        ? `找到草稿批次，已包含 ${batch.pullRequestCount} 个修改`
+        : '找到空的草稿批次'
     })
   } catch (error) {
     console.error('[Bot API] Get latest draft batch error:', error)

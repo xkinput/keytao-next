@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
+  assertNoBotDraftBatch,
   assertNoOtherBotDraftWithContent,
   BatchContentLockedError,
   claimBatchContentMutation,
@@ -49,5 +50,24 @@ describe('claimBatchContentMutation', () => {
     expect(executeRawUnsafe).toHaveBeenCalledWith(
       'SELECT pg_advisory_xact_lock($1, $2)', 0x4b54, 42
     )
+  })
+})
+
+describe('assertNoBotDraftBatch', () => {
+  it('passes when the user still has no bot draft', async () => {
+    const findFirst = vi.fn(async () => null)
+
+    await expect(assertNoBotDraftBatch({ batch: { findFirst } } as never, 42)).resolves.toBeUndefined()
+    expect(findFirst).toHaveBeenCalledWith({
+      where: { creatorId: 42, status: 'Draft', description: { startsWith: '键道助手' } },
+      select: { id: true },
+    })
+  })
+
+  it('fails the "no draft yet" CAS when a draft appeared, even an empty one', async () => {
+    const findFirst = vi.fn(async () => ({ id: 'raced-empty-draft' }))
+
+    await expect(assertNoBotDraftBatch({ batch: { findFirst } } as never, 42))
+      .rejects.toBeInstanceOf(BatchContentLockedError)
   })
 })

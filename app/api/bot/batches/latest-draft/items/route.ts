@@ -1,12 +1,45 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireVerifiedBotUser } from '@/lib/botUserAuth'
+import type { Prisma } from '@prisma/client'
 import type { PhraseType } from '@/lib/constants/phraseTypes'
+import { BOT_BATCH_DESCRIPTION_PREFIX, findCurrentBotDraftBatchId } from '@/lib/services/botDraftBatch'
+
+/** Shape of the draft snapshot query, so item callbacks below stay typed. */
+const DRAFT_BATCH_SELECT = {
+  id: true,
+  description: true,
+  createAt: true,
+  contentVersion: true,
+  pullRequests: {
+    orderBy: { createAt: 'asc' },
+    select: {
+      id: true,
+      action: true,
+      word: true,
+      oldWord: true,
+      code: true,
+      type: true,
+      remark: true,
+      weight: true,
+      status: true,
+      createAt: true,
+      conflictReason: true
+    }
+  }
+} satisfies Prisma.BatchSelect
+
+type DraftBatchSnapshot = Prisma.BatchGetPayload<{ select: typeof DRAFT_BATCH_SELECT }>
+type DraftBatchItem = DraftBatchSnapshot['pullRequests'][number]
 
 /**
- * Bot API: List all PR items in the user's latest draft batch
+ * Bot API: List all PR items in the user's current draft batch
  * GET /api/bot/batches/latest-draft/items
  * Requires a valid Bot token and a bound platform user
+ *
+ * Without an explicit `batchId` the batch is resolved through
+ * `findCurrentBotDraftBatch`, the same selector `GET /latest-draft` uses, so
+ * both endpoints can never disagree about which batch is "current".
  */
 export async function GET(request: NextRequest) {
   try {
@@ -21,43 +54,28 @@ export async function GET(request: NextRequest) {
     }
     const user = auth.user
 
-    const batch = await prisma.batch.findFirst({
-      where: {
-        ...(requestedBatchId ? { id: requestedBatchId } : {}),
-        creatorId: user.id,
-        status: requestedBatchId ? { in: ['Draft', 'Rejected'] } : 'Draft',
-        description: { startsWith: '键道助手' }
-      },
-      orderBy: { createAt: 'desc' },
-      select: {
-        id: true,
-        description: true,
-        createAt: true,
-        contentVersion: true,
-        pullRequests: {
-          orderBy: { createAt: 'asc' },
-          select: {
-            id: true,
-            action: true,
-            word: true,
-            oldWord: true,
-            code: true,
-            type: true,
-            remark: true,
-            weight: true,
-            status: true,
-            createAt: true,
-            conflictReason: true
-          }
-        }
-      }
-    })
+    const targetBatchId = requestedBatchId ?? await findCurrentBotDraftBatchId(prisma, user.id)
+
+    const batch: DraftBatchSnapshot | null = targetBatchId
+      ? await prisma.batch.findFirst({
+        where: {
+          id: targetBatchId,
+          creatorId: user.id,
+          status: requestedBatchId ? { in: ['Draft', 'Rejected'] } : 'Draft',
+          description: { startsWith: BOT_BATCH_DESCRIPTION_PREFIX }
+        },
+        select: DRAFT_BATCH_SELECT
+      })
+      : null
 
     if (!batch) {
+      // Same "no draft yet" CAS baseline as `GET /latest-draft`: callers that
+      // build a plan digest can use (batchId: null, contentVersion: 0) and hand
+      // it to a write without a batchId to create the first draft.
       return NextResponse.json({
         success: true,
         batchId: null,
-        contentVersion: null,
+        contentVersion: 0,
         items: [],
         message: '当前没有草稿批次'
       })
@@ -65,7 +83,7 @@ export async function GET(request: NextRequest) {
 
     // Calculate dynamic weights and conflicts (same as web batch detail page)
     const { checkBatchConflictsWithWeight } = await import('@/lib/services/batchConflictService')
-    const prItems = batch.pullRequests.map(pr => ({
+    const prItems = batch.pullRequests.map((pr: DraftBatchItem) => ({
       id: String(pr.id),
       action: pr.action as 'Create' | 'Change' | 'Delete',
       word: pr.word || '',
@@ -76,7 +94,7 @@ export async function GET(request: NextRequest) {
     }))
     const conflictResults = prItems.length > 0 ? await checkBatchConflictsWithWeight(prItems) : []
 
-    const enrichedItems = batch.pullRequests.map(pr => {
+    const enrichedItems = batch.pullRequests.map((pr: DraftBatchItem) => {
       const conflictResult = conflictResults.find(r => r.id === String(pr.id))
       return {
         ...pr,

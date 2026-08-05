@@ -250,18 +250,11 @@ describe('API abuse guards', () => {
     expect(proxiedBody).toEqual({ message: 'hi', session_id: 's1', user_id: '1' })
   })
 
-  it('allows bot token privileged draft access for bound platform users', async () => {
+  it('allows bot token privileged draft access for bound platform users without creating a batch', async () => {
     mockGetSession.mockResolvedValue(null)
     mockVerifyApiKey.mockResolvedValue({ success: false, response: NextResponse.json({ error: 'missing' }, { status: 401 }) })
     mockPrisma.user.findFirst.mockResolvedValue({ id: 2, name: 'garth', nickname: 'Garth' })
     mockPrisma.batch.findFirst.mockResolvedValue(null)
-    mockPrisma.batch.create.mockResolvedValue({
-      id: 'batch-new',
-      description: '键道助手草稿批次',
-      status: 'Draft',
-      createAt: new Date(),
-      _count: { pullRequests: 0 },
-    })
 
     const { GET } = await import('./bot/batches/latest-draft/route')
     const res = await GET(new NextRequest('http://localhost/api/bot/batches/latest-draft?platform=qq&platformId=1449533601'))
@@ -270,9 +263,14 @@ describe('API abuse guards', () => {
     expect(mockVerifyBotToken).toHaveBeenCalled()
     expect(mockVerifyApiKey).not.toHaveBeenCalled()
     expect(mockGetSession).not.toHaveBeenCalled()
-    expect(mockPrisma.batch.create).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({ creatorId: 2 }),
+    // The lookup is still scoped to the bound platform user...
+    expect(mockPrisma.batch.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ creatorId: 2, status: 'Draft' }),
     }))
+    // ...but this read path must never mint a draft batch (a read that creates
+    // a batch is what let an empty batch shadow a recalled one).
+    expect(mockPrisma.batch.create).not.toHaveBeenCalled()
+    expect(await res.json()).toMatchObject({ success: true, batchId: null, exists: false })
   })
 
   it('ignores platform identity when bot token is missing', async () => {

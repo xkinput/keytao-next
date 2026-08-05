@@ -5,7 +5,8 @@ import { checkBatchConflictsWithWeight } from '@/lib/services/batchConflictServi
 import { buildSkippedCandidateSlotWarnings } from '@/lib/services/batchSkippedCodeWarnings'
 import { PullRequestType } from '@prisma/client'
 import { detectPhraseType, isValidPhraseType, PhraseType } from '@/lib/constants/phraseTypes'
-import { assertNoOtherBotDraftWithContent, BatchContentLockedError, claimBatchContentMutation, lockBotDraftUser } from '@/lib/services/batchContentGuard'
+import { assertNoBotDraftBatch, assertNoOtherBotDraftWithContent, BatchContentLockedError, claimBatchContentMutation, lockBotDraftUser } from '@/lib/services/batchContentGuard'
+import { BOT_DRAFT_BATCH_DESCRIPTION, findCurrentBotDraftBatch, NEW_BOT_DRAFT_BATCH_IDENTITY } from '@/lib/services/botDraftBatch'
 import {
   assertExpectedBatchTargets,
   BatchTargetChangedError,
@@ -90,7 +91,11 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       )
     }
-    if (expectedContentVersion !== undefined && !requestedBatchId) {
+    // `expectedContentVersion: 0` without a batchId is the "this user has no
+    // draft batch yet" CAS baseline: the write may create the first draft, but
+    // only while that is still true (re-checked under the write lock). Any
+    // other version needs an explicit batch to compare against.
+    if (expectedContentVersion !== undefined && expectedContentVersion !== 0 && !requestedBatchId) {
       return NextResponse.json<BotBatchDraftResponse>(
         { success: false, message: 'expectedContentVersion 必须与 batchId 一起提供', successCount: 0, failedCount: 0, skippedCount: 0, warnedCount: 0, failed: [], skipped: [], warned: [], draftItems: [], draftTotal: 0 },
         { status: 400 }
@@ -173,22 +178,26 @@ export async function POST(request: NextRequest) {
         batchContentVersion = batch.contentVersion
       }
     } else {
-      let batch = await prisma.batch.findFirst({
-        where: { creatorId: user.id, status: 'Draft', description: { startsWith: '键道助手' } },
-        orderBy: { createAt: 'desc' },
-        select: { id: true, contentVersion: true }
-      })
-      if (!batch && confirmed !== true) {
-        batch = { id: randomUUID(), contentVersion: 0 }
+      // Same "current draft" selector the read endpoints use, so a write can
+      // never land in a different batch than the one the user was just shown.
+      const current = await findCurrentBotDraftBatch(prisma, user.id)
+      if (!current) {
+        // No draft at all: hand out a provisional id. Preview stops here;
+        // a confirmed write materialises this exact id in the transaction.
+        batchId = randomUUID()
+        batchContentVersion = 0
         batchIsVirtual = true
-      } else if (!batch) {
-        batch = await prisma.batch.create({
-          data: { description: '键道助手草稿批次', creatorId: user.id, status: 'Draft' },
-          select: { id: true, contentVersion: true }
-        })
+      } else if (expectedContentVersion !== undefined && current.contentVersion !== expectedContentVersion) {
+        // The caller planned against "no draft" (or an older version) but a
+        // draft is there now — fail the CAS instead of writing blindly.
+        return NextResponse.json<BotBatchDraftResponse>(
+          { success: false, message: '批次内容已被修改，请刷新后重试', successCount: 0, failedCount: 0, skippedCount: 0, warnedCount: 0, failed: [], skipped: [], warned: [], draftItems: [], draftTotal: 0 },
+          { status: 409 }
+        )
+      } else {
+        batchId = current.id
+        batchContentVersion = current.contentVersion
       }
-      batchId = batch.id
-      batchContentVersion = batch.contentVersion
     }
 
     // Load existing draft items (for duplicate detection)
@@ -324,7 +333,13 @@ export async function POST(request: NextRequest) {
           : undefined,
       })),
     ]
-    const warningState = { targetBatchId: batchId, conflictResults, serverWarnings }
+    // A batch that does not exist yet has no stable id to hash: use the shared
+    // identity so preview and confirm agree (see NEW_BOT_DRAFT_BATCH_IDENTITY).
+    const warningState = {
+      targetBatchId: batchIsVirtual ? NEW_BOT_DRAFT_BATCH_IDENTITY : batchId,
+      conflictResults,
+      serverWarnings,
+    }
     const warningDigest = await buildBotWarningDigest(prisma, conflictItems, warningState)
 
     if (confirmed === true && warningDigest !== expectedWarningDigest) {
@@ -373,8 +388,11 @@ export async function POST(request: NextRequest) {
           throw new BatchContentLockedError('警告快照已变化，请重新确认')
         }
         if (batchIsVirtual) {
+          // First confirmed write materialises the provisional batch, but only
+          // while the "no draft yet" baseline still holds under the lock.
+          await assertNoBotDraftBatch(tx, user.id)
           await tx.batch.create({
-            data: { id: batchId!, description: '键道助手草稿批次', creatorId: user.id, status: 'Draft' },
+            data: { id: batchId!, description: BOT_DRAFT_BATCH_DESCRIPTION, creatorId: user.id, status: 'Draft' },
           })
         }
         await claimBatchContentMutation(tx, batchId!, {

@@ -35,6 +35,40 @@ describe('latest draft item snapshot', () => {
     expect(await res.json()).toMatchObject({ batchId: 'batch-2', contentVersion: 9 })
   })
 
+  it('resolves the batch through the shared current-draft selector when no id is pinned', async () => {
+    // First lookup = "a draft that holds content", which is what the shared
+    // selector asks for before falling back to the newest draft.
+    mockFindFirst
+      .mockResolvedValueOnce({ id: 'batch-with-items', contentVersion: 4, _count: { pullRequests: 2 }, description: '键道助手草稿批次', createAt: new Date() })
+      .mockResolvedValueOnce({ id: 'batch-with-items', description: '键道助手草稿批次', createAt: new Date(), contentVersion: 4, pullRequests: [] })
+
+    const { GET } = await import('./route')
+    const res = await GET(new NextRequest(
+      'http://localhost/api/bot/batches/latest-draft/items?platform=qq&platformId=u-1'
+    ))
+
+    expect(res.status).toBe(200)
+    expect(mockFindFirst).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      where: expect.objectContaining({ creatorId: 42, pullRequests: { some: {} } }),
+    }))
+    expect(mockFindFirst).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      where: expect.objectContaining({ id: 'batch-with-items', creatorId: 42, status: 'Draft' }),
+    }))
+    expect(await res.json()).toMatchObject({ batchId: 'batch-with-items', contentVersion: 4 })
+  })
+
+  it('reports an empty draft without inventing a batch', async () => {
+    mockFindFirst.mockResolvedValue(null)
+
+    const { GET } = await import('./route')
+    const res = await GET(new NextRequest(
+      'http://localhost/api/bot/batches/latest-draft/items?platform=qq&platformId=u-1'
+    ))
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({ success: true, batchId: null, items: [], message: '当前没有草稿批次' })
+  })
+
   it('disables the legacy direct-write endpoint', async () => {
     const { POST } = await import('./route')
     const res = await POST(new NextRequest(

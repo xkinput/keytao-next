@@ -30,6 +30,7 @@ vi.mock('@/lib/services/batchContentGuard', () => ({
   BatchContentLockedError: class BatchContentLockedError extends Error {
     readonly status = 409
   },
+  assertNoBotDraftBatch: vi.fn(),
   assertNoOtherBotDraftWithContent: vi.fn(),
   claimBatchContentMutation: vi.fn(),
   lockBotDraftUser: vi.fn(),
@@ -140,6 +141,52 @@ describe('bot draft mutations require a server ticket', () => {
     })
     expect(body.batchId).toMatch(/^[0-9a-f-]{36}$/)
     expect(mocks.batchCreate).not.toHaveBeenCalled()
+    expect(mocks.transaction).not.toHaveBeenCalled()
+  })
+})
+
+describe('the regular batch route resolves the same draft the reads report', () => {
+  it('uses the shared current-draft selector when no batchId is given', async () => {
+    mocks.batchFindFirst.mockResolvedValue({
+      id: 'batch-with-content', description: '键道助手草稿批次', createAt: new Date(),
+      contentVersion: 6, _count: { pullRequests: 2 },
+    })
+
+    const { POST } = await import('./batch/route')
+    const response = await POST(request('/api/bot/pull-requests/batch', {
+      platform: 'qq',
+      platformId: 'user-7',
+      items: [{ action: 'Create', word: '测试', code: 'ces', type: 'Phrase' }],
+    }))
+    const body = await response.json()
+
+    expect(mocks.batchFindFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ creatorId: 7, pullRequests: { some: {} } }),
+    }))
+    expect(body).toMatchObject({
+      requiresConfirmation: true,
+      batchId: 'batch-with-content',
+      contentVersion: 6,
+    })
+    // No explicit id was sent, so nothing may be looked up by id.
+    expect(mocks.batchFindUnique).not.toHaveBeenCalled()
+  })
+
+  it('hashes a not-yet-created batch against the shared identity', async () => {
+    mocks.batchFindFirst.mockResolvedValue(null)
+
+    const { POST } = await import('./batch/route')
+    const response = await POST(request('/api/bot/pull-requests/batch', {
+      platform: 'qq',
+      platformId: 'user-7',
+      items: [{ action: 'Create', word: '测试', code: 'ces', type: 'Phrase' }],
+    }))
+    const body = await response.json()
+    const warningState = mocks.warningDigest.mock.calls.at(-1)?.[2] as { targetBatchId: string }
+
+    expect(body).toMatchObject({ requiresConfirmation: true, contentVersion: 0 })
+    expect(body.batchId).toMatch(/^[0-9a-f-]{36}$/)
+    expect(warningState.targetBatchId).toBe('new-bot-draft-batch')
     expect(mocks.transaction).not.toHaveBeenCalled()
   })
 })
