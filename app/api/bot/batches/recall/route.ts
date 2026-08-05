@@ -130,7 +130,7 @@ export async function POST(request: NextRequest) {
           status: 'Submitted',
           contentVersion: expectedContentVersion as number,
         },
-        data: { status: 'Draft' },
+        data: { status: 'Draft', contentVersion: { increment: 1 } },
       })
       if (updated.count !== 1) return { kind: 'stale' as const }
       return { kind: 'ok' as const, batch }
@@ -153,7 +153,7 @@ export async function POST(request: NextRequest) {
       success: true,
       message: `已撤回提审，批次重新变为草稿状态（共 ${recall.batch._count.pullRequests} 条）`,
       batchId: recall.batch.id,
-      contentVersion: recall.batch.contentVersion,
+      contentVersion: recall.batch.contentVersion + 1,
       status: 'Draft',
     })
   } catch (error: unknown) {

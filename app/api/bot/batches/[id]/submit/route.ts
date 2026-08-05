@@ -253,6 +253,7 @@ export async function POST(
         data: {
           status: 'Submitted',
           reviewNote: null,
+          contentVersion: { increment: 1 },
         },
       })
     })
@@ -270,7 +271,7 @@ export async function POST(
       batch: {
         id,
         status: 'Submitted',
-        contentVersion: expectedContentVersion,
+        contentVersion: (expectedContentVersion as number) + 1,
       }
     })
   } catch (error: unknown) {

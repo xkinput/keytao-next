@@ -90,10 +90,32 @@ const findFirst = vi.fn(async ({ where, orderBy }: { where?: Where; orderBy?: Re
   return rows[0] ? project(rows[0]) : null
 })
 
+const findUnique = vi.fn(async ({ where }: { where: { id: string } }) => {
+  const row = store.batches.find(batch => batch.id === where.id)
+  return row ? project(row) : null
+})
+
+const pullRequestFindMany = vi.fn(async ({ where }: { where: { batchId: string } }) => {
+  return store.batches.find(batch => batch.id === where.batchId)?.items ?? []
+})
+
+const phraseFindMany = vi.fn(async () => [])
+
 const updateMany = vi.fn(async ({ where, data }: { where: Where; data: Record<string, unknown> }) => {
   const rows = store.batches.filter(batch => matches(batch, where))
   for (const row of rows) {
-    Object.assign(row, data)
+    for (const [key, value] of Object.entries(data)) {
+      if (
+        key === 'contentVersion'
+        && typeof value === 'object'
+        && value !== null
+        && typeof (value as { increment?: unknown }).increment === 'number'
+      ) {
+        row.contentVersion += (value as { increment: number }).increment
+      } else {
+        Object.assign(row, { [key]: value })
+      }
+    }
     row.updateAt = new Date()
   }
   return { count: rows.length }
@@ -105,9 +127,12 @@ const batchCreate = vi.fn(async () => {
 
 vi.mock('@/lib/prisma', () => ({
   prisma: {
-    batch: { findFirst, updateMany, create: batchCreate },
+    batch: { findFirst, findUnique, updateMany, create: batchCreate },
+    phrase: { findMany: phraseFindMany },
     $transaction: async (fn: (tx: unknown) => Promise<unknown>) => fn({
-      batch: { findFirst, updateMany, create: batchCreate },
+      batch: { findFirst, findUnique, updateMany, create: batchCreate },
+      pullRequest: { findMany: pullRequestFindMany },
+      phrase: { findMany: phraseFindMany },
       $executeRawUnsafe: async () => undefined,
     }),
   },
@@ -117,6 +142,16 @@ const mockRequireVerifiedBotUser = vi.fn()
 vi.mock('@/lib/botUserAuth', () => ({ requireVerifiedBotUser: mockRequireVerifiedBotUser }))
 vi.mock('@/lib/services/batchConflictService', () => ({
   checkBatchConflictsWithWeight: vi.fn(async () => []),
+}))
+vi.mock('@/lib/services/batchSubmitWarnings', () => ({
+  buildBatchSubmitWarnings: vi.fn(() => []),
+}))
+vi.mock('@/lib/services/batchSkippedCodeWarnings', () => ({
+  buildSkippedCandidateSlotWarnings: vi.fn(async () => []),
+  collectSkippedCandidateSlotDependencies: vi.fn(async () => []),
+}))
+vi.mock('@/lib/services/batchPriorityOrderWarnings', () => ({
+  buildPriorityOrderWarnings: vi.fn(async () => []),
 }))
 
 const USER_ID = 42
@@ -161,6 +196,31 @@ async function recall(batchId: string, expectedContentVersion: number) {
   return { status: res.status, body: await res.json() }
 }
 
+async function submit(batchId: string, expectedContentVersion: number) {
+  const { POST } = await import('../[id]/submit/route')
+  const preview = await POST(new NextRequest(`http://localhost/api/bot/batches/${batchId}/submit`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      platform: 'qq', platformId: 'u-1', expectedContentVersion, previewOnly: true,
+    }),
+  }), { params: Promise.resolve({ id: batchId }) })
+  const previewBody = await preview.json()
+  const confirmed = await POST(new NextRequest(`http://localhost/api/bot/batches/${batchId}/submit`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      platform: 'qq',
+      platformId: 'u-1',
+      expectedContentVersion,
+      expectedWarningDigest: previewBody.warningDigest,
+      expectedSnapshotDigest: previewBody.snapshotDigest,
+      confirmed: true,
+    }),
+  }), { params: Promise.resolve({ id: batchId }) })
+  return { status: confirmed.status, body: await confirmed.json() }
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
   store.batches = []
@@ -168,6 +228,28 @@ beforeEach(() => {
 })
 
 describe('current draft pointer survives submit + read + recall', () => {
+  it('ages the snapshot across a Draft -> Submitted -> Draft round trip', async () => {
+    store.batches.push({
+      id: 'round-trip',
+      creatorId: USER_ID,
+      status: 'Draft',
+      description: '键道助手草稿批次',
+      createAt: new Date('2026-08-04T16:00:00.000Z'),
+      updateAt: new Date('2026-08-04T16:30:00.000Z'),
+      contentVersion: 1,
+      items: [item()],
+    })
+
+    const submitted = await submit('round-trip', 1)
+    expect(submitted.status).toBe(200)
+    expect(submitted.body.batch).toMatchObject({ status: 'Submitted', contentVersion: 2 })
+
+    const recalled = await recall('round-trip', 2)
+    expect(recalled.status).toBe(200)
+    expect(recalled.body).toMatchObject({ status: 'Draft', contentVersion: 3 })
+    expect(store.batches[0]).toMatchObject({ status: 'Draft', contentVersion: 3 })
+  })
+
   it('keeps the recalled batch and its items reachable', async () => {
     // T0: batch A holds the user's word and is submitted for review.
     store.batches.push({
@@ -191,7 +273,9 @@ describe('current draft pointer survives submit + read + recall', () => {
     // T2: the user recalls the submission.
     const recalled = await recall('785e0368', 2)
     expect(recalled.status).toBe(200)
-    expect(recalled.body).toMatchObject({ success: true, batchId: '785e0368' })
+    expect(recalled.body).toMatchObject({
+      success: true, batchId: '785e0368', contentVersion: 3,
+    })
 
     // T3: the current draft must be A again, with the word still in it.
     const afterRecall = await readLatestDraft()

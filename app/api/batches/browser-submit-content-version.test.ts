@@ -53,6 +53,23 @@ beforeEach(() => {
 })
 
 describe('browser batch submit content snapshot', () => {
+  it('advances the version when a clean draft becomes submitted', async () => {
+    const { POST } = await import('./[id]/submit/route')
+    const res = await POST(request(), { params: Promise.resolve({ id: 'batch-1' }) })
+
+    expect(res.status).toBe(200)
+    expect(mockUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: {
+        status: 'Submitted',
+        reviewNote: null,
+        contentVersion: { increment: 1 },
+      },
+    }))
+    expect(await res.json()).toMatchObject({
+      batch: { id: 'batch-1', status: 'Submitted', contentVersion: 4 },
+    })
+  })
+
   it('returns the server snapshot version with warnings', async () => {
     mockBuildWarnings.mockReturnValue([{ type: 'duplicate_code', message: 'warning' }])
     const { POST } = await import('./[id]/submit/route')

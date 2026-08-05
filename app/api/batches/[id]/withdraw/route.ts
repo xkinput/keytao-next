@@ -41,7 +41,7 @@ export async function POST(
           status: 'Submitted',
           contentVersion: batch.contentVersion,
         },
-        data: { status: 'Draft' },
+        data: { status: 'Draft', contentVersion: { increment: 1 } },
       })
       if (transitioned.count !== 1) return null
       return tx.batch.findUniqueOrThrow({ where: { id } })

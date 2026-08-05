@@ -19,7 +19,7 @@ interface BatchActionsDropdownProps {
   batchId: string
   status: 'Draft' | 'Submitted' | 'Approved' | 'Rejected' | 'Published'
   creatorId: number
-  onSuccess?: () => void
+  onSuccess?: () => void | Promise<unknown>
   size?: 'sm' | 'md' | 'lg'
   iconSize?: number
 }
@@ -78,12 +78,12 @@ export default function BatchActionsDropdown({
           method: 'POST',
           withAuth: true
         })
-        toast.success('已撤销提交')
         if (onSuccess) {
-          onSuccess()
+          await onSuccess()
         } else {
           router.refresh()
         }
+        toast.success('已撤销提交')
       } catch (error) {
         console.error('Withdraw error:', error)
         const err = error as Error

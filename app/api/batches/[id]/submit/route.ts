@@ -156,7 +156,8 @@ export async function POST(
       },
       data: {
         status: 'Submitted',
-        reviewNote: null // Clear previous rejection note
+        reviewNote: null, // Clear previous rejection note
+        contentVersion: { increment: 1 },
       }
     })
     const transitioned = confirmed
@@ -171,7 +172,11 @@ export async function POST(
             status: { in: ['Draft', 'Rejected'] },
             contentVersion: expectedContentVersion,
           },
-          data: { status: 'Submitted', reviewNote: null },
+          data: {
+            status: 'Submitted',
+            reviewNote: null,
+            contentVersion: { increment: 1 },
+          },
         })
       })
       : await transition()
@@ -181,7 +186,7 @@ export async function POST(
     }
 
     return NextResponse.json({
-      batch: { id, status: 'Submitted', contentVersion: expectedContentVersion },
+      batch: { id, status: 'Submitted', contentVersion: expectedContentVersion + 1 },
     })
   } catch (error) {
     console.error('Submit batch error:', error)

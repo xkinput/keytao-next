@@ -125,7 +125,30 @@ describe('bot batch submit content snapshot', () => {
         status: { in: ['Draft', 'Rejected'] },
         contentVersion: 7,
       },
-      data: { status: 'Submitted', reviewNote: null },
+      data: { status: 'Submitted', reviewNote: null, contentVersion: { increment: 1 } },
+    })
+  })
+
+  it('returns the advanced version after the status transition', async () => {
+    const { POST } = await import('./[id]/submit/route')
+    const preview = await POST(request({
+      platform: 'qq', platformId: 'u-1', expectedContentVersion: 7, previewOnly: true,
+    }), { params: Promise.resolve({ id: 'batch-1' }) })
+    const previewData = await preview.json()
+
+    const res = await POST(request({
+      platform: 'qq',
+      platformId: 'u-1',
+      expectedContentVersion: 7,
+      expectedWarningDigest: previewData.warningDigest,
+      expectedSnapshotDigest: previewData.snapshotDigest,
+      confirmed: true,
+    }), { params: Promise.resolve({ id: 'batch-1' }) })
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({
+      success: true,
+      batch: { id: 'batch-1', status: 'Submitted', contentVersion: 8 },
     })
   })
 })

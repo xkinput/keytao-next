@@ -141,7 +141,7 @@ export class StaleBatchReviewError extends Error {
   readonly status = 409
 
   constructor() {
-    super('批次内容在复审期间已被修改，本次复审结果已作废，请重新发起复审')
+    super('批次状态或内容在复审期间已发生变化，本次复审结果已作废，请重新发起复审')
     this.name = 'StaleBatchReviewError'
   }
 }

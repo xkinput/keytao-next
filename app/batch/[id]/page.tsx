@@ -241,8 +241,8 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
             : { confirmed: true, expectedContentVersion, expectedWarningDigest },
           withAuth: true
         })
-        openAlert('批次已提交审核', '提交成功')
         await mutate()
+        openAlert('批次已提交审核', '提交成功')
       } catch (err) {
         console.error('Submit batch error:', err)
         const error = err as Error & {

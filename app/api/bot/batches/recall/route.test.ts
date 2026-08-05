@@ -60,7 +60,31 @@ describe('bot batch recall snapshot', () => {
     expect(res.status).toBe(409)
     expect(mockUpdateMany).toHaveBeenCalledWith({
       where: { id: 'submitted-1', creatorId: 42, status: 'Submitted', contentVersion: 6 },
-      data: { status: 'Draft' },
+      data: { status: 'Draft', contentVersion: { increment: 1 } },
+    })
+  })
+
+  it('returns the advanced version so a status round trip cannot revive old tickets', async () => {
+    mockFindFirst
+      .mockResolvedValueOnce({
+        id: 'submitted-1', status: 'Submitted', contentVersion: 6,
+        description: '键道助手', _count: { pullRequests: 2 },
+      })
+      .mockResolvedValueOnce(null)
+    const { POST } = await import('./route')
+    const res = await POST(new NextRequest('http://localhost/api/bot/batches/recall', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        platform: 'qq', platformId: 'u-1', batchId: 'submitted-1', expectedContentVersion: 6,
+      }),
+    }))
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({
+      success: true,
+      batchId: 'submitted-1',
+      status: 'Draft',
+      contentVersion: 7,
     })
   })
 })

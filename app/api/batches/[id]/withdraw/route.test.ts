@@ -45,7 +45,7 @@ describe('POST /api/batches/[id]/withdraw', () => {
     expect(response.status).toBe(200)
     expect(mocks.tx.batch.updateMany).toHaveBeenCalledWith({
       where: { id: 'batch-1', creatorId: 1, status: 'Submitted', contentVersion: 4 },
-      data: { status: 'Draft' },
+      data: { status: 'Draft', contentVersion: { increment: 1 } },
     })
   })
 

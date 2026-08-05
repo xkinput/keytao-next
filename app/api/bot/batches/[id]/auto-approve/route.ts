@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireVerifiedBotUser } from '@/lib/botUserAuth'
-import { hasRole } from '@/lib/botUserResolver'
-import { USER_ROLE } from '@/lib/constants/roles'
 import { PhraseWeightConflictError } from '@/lib/services/phraseWeightLock'
 import {
   approveSubmittedBatch,
@@ -57,12 +55,6 @@ export async function POST(
       )
     }
     const user = auth.user
-    if (!hasRole(user, USER_ROLE.BOT)) {
-      return NextResponse.json(
-        { success: false, message: '当前账号无自动审核权限' },
-        { status: 403 }
-      )
-    }
 
     const batch = await prisma.batch.findUnique({
       where: { id },

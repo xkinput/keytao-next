@@ -30,6 +30,13 @@ const BOT_USER = {
   roles: [{ value: 'R:NORMAL' }, { value: 'R:BOT' }],
 }
 
+const NORMAL_USER = {
+  id: 8,
+  name: '普通用户',
+  nickname: '普通用户',
+  roles: [{ value: 'R:NORMAL' }],
+}
+
 function autoApproveRequest(body: unknown = {
   platform: 'qq',
   platformId: '123',
@@ -46,13 +53,17 @@ function pr(overrides: Record<string, unknown> = {}) {
   return { action: 'Create', word: '测试', code: 'ces', needsManualReview: false, ...overrides }
 }
 
-function batchWith(pullRequests: ReturnType<typeof pr>[]) {
+function batchWith(
+  pullRequests: ReturnType<typeof pr>[],
+  overrides: Record<string, unknown> = {},
+) {
   return {
     id: 'batch-1',
     creatorId: BOT_USER.id,
     status: 'Submitted',
     contentVersion: 0,
     pullRequests,
+    ...overrides,
   }
 }
 
@@ -68,7 +79,7 @@ beforeEach(() => {
 })
 
 describe('POST /api/bot/batches/:id/auto-approve', () => {
-  it('approves a clean batch', async () => {
+  it('keeps auto-approval working for the machine account', async () => {
     mockPrisma.batch.findUnique.mockResolvedValue(batchWith([pr()]))
 
     const res = await callAutoApprove()
@@ -113,18 +124,61 @@ describe('POST /api/bot/batches/:id/auto-approve', () => {
     expect(mockApproveSubmittedBatch).not.toHaveBeenCalled()
   })
 
-  it('rejects an account without the R:BOT role before reading the batch', async () => {
+  it('allows a non-R:BOT user to auto-approve their own clean batch', async () => {
     mockRequireVerifiedBotUser.mockResolvedValue({
       authorized: true,
-      user: { ...BOT_USER, roles: [{ value: 'R:NORMAL' }] },
+      user: NORMAL_USER,
       platform: 'qq',
     })
+    mockPrisma.batch.findUnique.mockResolvedValue(batchWith([pr()], {
+      creatorId: NORMAL_USER.id,
+    }))
+
+    const res = await callAutoApprove()
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({
+      success: true,
+      message: '批次已由本喵自动审核通过',
+    })
+    expect(mockApproveSubmittedBatch).toHaveBeenCalledWith(
+      expect.objectContaining({ reviewerId: NORMAL_USER.id })
+    )
+  })
+
+  it('still refuses a batch owned by another user', async () => {
+    mockRequireVerifiedBotUser.mockResolvedValue({
+      authorized: true,
+      user: NORMAL_USER,
+      platform: 'qq',
+    })
+    mockPrisma.batch.findUnique.mockResolvedValue(batchWith([pr()]))
 
     const res = await callAutoApprove()
 
     expect(res.status).toBe(403)
-    expect(await res.json()).toMatchObject({ message: '当前账号无自动审核权限' })
-    expect(mockPrisma.batch.findUnique).not.toHaveBeenCalled()
+    expect(await res.json()).toMatchObject({ message: '无权限操作此批次' })
+    expect(mockPrisma.batch.findUnique).toHaveBeenCalledOnce()
+    expect(mockApproveSubmittedBatch).not.toHaveBeenCalled()
+  })
+
+  it('still refuses a batch that is not submitted', async () => {
+    mockPrisma.batch.findUnique.mockResolvedValue(batchWith([pr()], { status: 'Draft' }))
+
+    const res = await callAutoApprove()
+
+    expect(res.status).toBe(400)
+    expect(await res.json()).toMatchObject({ message: '只能自动批准已提交审核的批次' })
+    expect(mockApproveSubmittedBatch).not.toHaveBeenCalled()
+  })
+
+  it('still refuses a stale content version', async () => {
+    mockPrisma.batch.findUnique.mockResolvedValue(batchWith([pr()], { contentVersion: 1 }))
+
+    const res = await callAutoApprove()
+
+    expect(res.status).toBe(409)
+    expect(await res.json()).toMatchObject({ message: '批次内容已被修改，请刷新后重试' })
     expect(mockApproveSubmittedBatch).not.toHaveBeenCalled()
   })
 
@@ -136,6 +190,9 @@ describe('POST /api/bot/batches/:id/auto-approve', () => {
     const res = await callAutoApprove()
 
     expect(res.status).toBe(400)
+    expect(await res.json()).toMatchObject({
+      message: '自动审核禁止纯删除项，已保留给管理员审核',
+    })
     expect(mockApproveSubmittedBatch).not.toHaveBeenCalled()
   })
 })
