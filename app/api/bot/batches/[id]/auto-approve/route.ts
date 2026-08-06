@@ -13,6 +13,8 @@ import {
   classifyBatchDeleteRisk,
 } from '@/lib/services/batchApprovalService'
 
+export const maxDuration = 30
+
 function getErrorStatus(message: string): number {
   if (message === '批次不存在') return 404
   if (message === '只能审核待审核状态的批次') return 400

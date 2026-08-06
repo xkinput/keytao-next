@@ -2,6 +2,7 @@ import * as fs from 'fs'
 import * as https from 'https'
 import * as path from 'path'
 import { customPinyin, pinyin } from 'pinyin-pro'
+import { readZdicPinyinCache, writeZdicPinyinCache } from './zdicLookupCache'
 
 // ── Data loading ──────────────────────────────────────────────────────────────
 
@@ -217,7 +218,10 @@ function splitPinyinText(text: string): string[] {
     .filter(s => PINYIN_ONLY_RE.test(s))
 }
 
-function fetchText(url: string, redirects = 2): Promise<FetchTextResult> {
+const ZDIC_REQUEST_TIMEOUT_MS = 4000
+const ZDIC_RETRY_BACKOFF_MS = 300
+
+function fetchTextAttempt(url: string, redirects: number): Promise<FetchTextResult> {
   return new Promise((resolve) => {
     let settled = false
     const done = (value: FetchTextResult) => {
@@ -233,7 +237,7 @@ function fetchText(url: string, redirects = 2): Promise<FetchTextResult> {
       if (status >= 300 && status < 400 && res.headers.location && redirects > 0) {
         res.resume()
         const nextUrl = new URL(res.headers.location, url).toString()
-        fetchText(nextUrl, redirects - 1).then(done)
+        fetchTextAttempt(nextUrl, redirects - 1).then(done)
         return
       }
 
@@ -248,12 +252,20 @@ function fetchText(url: string, redirects = 2): Promise<FetchTextResult> {
       res.on('data', chunk => { body += chunk })
       res.on('end', () => done({ status: 'found', text: body }))
     })
-    req.setTimeout(8000, () => {
+    req.setTimeout(ZDIC_REQUEST_TIMEOUT_MS, () => {
       req.destroy()
       done({ status: 'unavailable' })
     })
     req.on('error', () => done({ status: 'unavailable' }))
   })
+}
+
+async function fetchText(url: string, redirects = 2): Promise<FetchTextResult> {
+  const first = await fetchTextAttempt(url, redirects)
+  if (first.status !== 'unavailable') return first
+
+  await new Promise(resolve => setTimeout(resolve, ZDIC_RETRY_BACKOFF_MS))
+  return fetchTextAttempt(url, redirects)
 }
 
 async function fetchZdicHtml(entry: string): Promise<FetchTextResult> {
@@ -262,10 +274,23 @@ async function fetchZdicHtml(entry: string): Promise<FetchTextResult> {
 
 async function lookupPinyinsFromZdicEntry(entry: string): Promise<ZdicPinyinLookup> {
   if (zdicEntryPinyinCache.has(entry)) return zdicEntryPinyinCache.get(entry)!
+  const cached = await readZdicPinyinCache('entry', entry)
+  if (cached && !cached.stale) {
+    const result: ZdicPinyinLookup = { status: cached.status, pinyins: cached.pinyins }
+    zdicEntryPinyinCache.set(entry, result)
+    return result
+  }
   const fetched = await fetchZdicHtml(entry)
   if (fetched.status !== 'found') {
     const result: ZdicPinyinLookup = { status: fetched.status, pinyins: [] }
-    if (fetched.status === 'absent') zdicEntryPinyinCache.set(entry, result)
+    if (result.status === 'unavailable' && cached?.stale && cached.status === 'absent') {
+      return { status: 'absent', pinyins: cached.pinyins }
+    }
+    if (fetched.status === 'absent') {
+      void writeZdicPinyinCache('entry', entry, { status: 'absent', pinyins: result.pinyins })
+        .catch(() => undefined)
+      zdicEntryPinyinCache.set(entry, result)
+    }
     return result
   }
 
@@ -275,7 +300,14 @@ async function lookupPinyinsFromZdicEntry(entry: string): Promise<ZdicPinyinLook
   const result: ZdicPinyinLookup = pinyins.length === chars.length
     ? { status: 'found', pinyins }
     : { status: 'unavailable', pinyins: [] }
-  if (result.status === 'found') zdicEntryPinyinCache.set(entry, result)
+  if (result.status === 'unavailable' && cached?.stale && cached.status === 'absent') {
+    return { status: 'absent', pinyins: cached.pinyins }
+  }
+  if (result.status === 'found') {
+    void writeZdicPinyinCache('entry', entry, { status: 'found', pinyins: result.pinyins })
+      .catch(() => undefined)
+    zdicEntryPinyinCache.set(entry, result)
+  }
   return result
 }
 
@@ -372,11 +404,26 @@ export async function resolvePhrasePinyins(word: string): Promise<PhrasePinyinRe
 
 async function lookupCharacterPinyinsFromZdic(char: string): Promise<ZdicPinyinLookup> {
   if (zdicCharacterPinyinCache.has(char)) return zdicCharacterPinyinCache.get(char)!
+  const cached = await readZdicPinyinCache('char', char)
+  if (cached && !cached.stale) {
+    const result: ZdicPinyinLookup = { status: cached.status, pinyins: cached.pinyins }
+    zdicCharacterPinyinCache.set(char, result)
+    return result
+  }
+
+  const staleAbsent = (): ZdicPinyinLookup | null => {
+    if (!cached?.stale || cached.status !== 'absent') return null
+    return { status: 'absent', pinyins: cached.pinyins }
+  }
+
   try {
     const fetched = await fetchZdicHtml(char)
     if (fetched.status !== 'found') {
       const result: ZdicPinyinLookup = { status: fetched.status, pinyins: [] }
-      if (fetched.status === 'absent') zdicCharacterPinyinCache.set(char, result)
+      if (fetched.status === 'unavailable') return staleAbsent() ?? result
+      void writeZdicPinyinCache('char', char, { status: 'absent', pinyins: result.pinyins })
+        .catch(() => undefined)
+      zdicCharacterPinyinCache.set(char, result)
       return result
     }
     const html = fetched.text
@@ -387,6 +434,8 @@ async function lookupCharacterPinyinsFromZdic(char: string): Promise<ZdicPinyinL
     const deduped = [...new Set(all)]
     if (deduped.length > 0) {
       const result: ZdicPinyinLookup = { status: 'found', pinyins: deduped }
+      void writeZdicPinyinCache('char', char, { status: 'found', pinyins: result.pinyins })
+        .catch(() => undefined)
       zdicCharacterPinyinCache.set(char, result)
       return result
     }
@@ -397,13 +446,15 @@ async function lookupCharacterPinyinsFromZdic(char: string): Promise<ZdicPinyinL
       const titlePinyins = titleMatch[1].split(/[、，,\s]+/).filter(s => PINYIN_ONLY_RE.test(s) && s.length >= 2)
       if (titlePinyins.length > 0) {
         const result: ZdicPinyinLookup = { status: 'found', pinyins: titlePinyins }
+        void writeZdicPinyinCache('char', char, { status: 'found', pinyins: result.pinyins })
+          .catch(() => undefined)
         zdicCharacterPinyinCache.set(char, result)
         return result
       }
     }
-    return { status: 'unavailable', pinyins: [] }
+    return staleAbsent() ?? { status: 'unavailable', pinyins: [] }
   } catch {
-    return { status: 'unavailable', pinyins: [] }
+    return staleAbsent() ?? { status: 'unavailable', pinyins: [] }
   }
 }
 

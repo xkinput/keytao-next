@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { verifyApiKey } from '@/lib/apiKeyAuth'
 import { inferPhrase } from '@/lib/services/phraseInference'
 
+export const maxDuration = 30
+
 // GET /api/v1/encode?word=xxx
 // API-key endpoint used by integrations such as keytao-bot. Returns the same
 // inferred code shape as /api/phrases/infer?word=xxx.

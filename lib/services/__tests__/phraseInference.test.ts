@@ -1,21 +1,51 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { findMany } = vi.hoisted(() => ({ findMany: vi.fn() }))
+const { findMany, findUnique, upsert } = vi.hoisted(() => ({
+  findMany: vi.fn(),
+  findUnique: vi.fn(),
+  upsert: vi.fn(),
+}))
 
 vi.mock('@/lib/prisma', () => ({
   prisma: {
     phrase: {
       findMany,
     },
+    zdicPinyinCache: {
+      findUnique,
+      upsert,
+    },
   },
 }))
 
 import { inferPhrase, inferPhrases } from '../phraseInference'
+import { setZdicLookupCacheClientForTests } from '../zdicLookupCache'
 
 describe('phrase inference encoding', () => {
   beforeEach(() => {
     findMany.mockReset()
     findMany.mockResolvedValue([])
+    findUnique.mockReset()
+    findUnique.mockImplementation(({ where }) => {
+      const { kind, entry } = where.kind_entry
+      const characterPinyins: Record<string, string[]> = {
+        '复': ['fù'],
+        '购': ['gòu'],
+        '率': ['shuài', 'lǜ'],
+        '表': ['biǎo'],
+      }
+      const pinyins = kind === 'char' ? characterPinyins[entry] : undefined
+      return Promise.resolve({
+        kind,
+        entry,
+        status: pinyins ? 'found' : 'absent',
+        pinyins: pinyins ?? [],
+        fetchedAt: new Date(),
+      })
+    })
+    upsert.mockReset()
+    upsert.mockResolvedValue(undefined)
+    setZdicLookupCacheClientForTests({ findUnique, upsert })
   })
 
   it('uses contextual lǜ codes in /api/phrases/infer data', async () => {

@@ -12,6 +12,8 @@ import {
   lockPhraseTableForWarningSnapshot,
 } from '@/lib/services/botWarningSnapshot'
 
+export const maxDuration = 30
+
 function getErrorCode(error: unknown): string | undefined {
   return typeof error === 'object' && error !== null && 'code' in error
     ? String((error as { code: unknown }).code)

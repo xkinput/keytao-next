@@ -3,6 +3,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { verifyBotToken } from '@/lib/botAuth'
 import { analyzeRequestedCode, encodePhrase } from '@/lib/services/keytaoEncoder'
 
+export const maxDuration = 30
+
 // Bot-only encoding route. Semantic pronunciation is accepted only from the
 // authenticated bot service, then independently validated by the encoder.
 export async function GET(request: NextRequest) {

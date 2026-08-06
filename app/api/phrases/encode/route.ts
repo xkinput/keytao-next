@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { analyzeRequestedCode, encodePhrase } from '@/lib/services/keytaoEncoder'
 import { MAX_CODE_LENGTH_ANY_TYPE } from '@/lib/constants/codeValidation'
 
+export const maxDuration = 30
+
 // GET /api/phrases/encode?word=xxx - Encode a word using keytao rules (public access)
 // Public and header-agnostic: only query params are read, so callers such as
 // keytao-bot may send extra headers (X-Bot-Token) without being rejected.

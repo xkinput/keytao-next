@@ -7,6 +7,8 @@ import { buildPriorityOrderWarnings } from '@/lib/services/batchPriorityOrderWar
 import { PhraseType } from '@/lib/constants/phraseTypes'
 import { validatePhraseInput } from '@/lib/validation/phraseInput'
 
+export const maxDuration = 30
+
 interface PRItemInput {
   id: string
   action: 'Create' | 'Change' | 'Delete'

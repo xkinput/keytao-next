@@ -7,12 +7,18 @@ const routeMocks = vi.hoisted(() => ({
   checkRateLimit: vi.fn(),
   requestSemanticPronunciation: vi.fn(),
   verifyBotToken: vi.fn(),
+  zdicFindUnique: vi.fn(),
+  zdicUpsert: vi.fn(),
 }))
 
 vi.mock('@/lib/prisma', () => ({
   prisma: {
     phrase: {
       findMany: vi.fn().mockResolvedValue([]),
+    },
+    zdicPinyinCache: {
+      findUnique: routeMocks.zdicFindUnique,
+      upsert: routeMocks.zdicUpsert,
     },
   },
 }))
@@ -95,6 +101,7 @@ import { inferPhrase, inferPhrases } from '../phraseInference'
 import { GET as encodePhraseRoute } from '../../../app/api/phrases/encode/route'
 import { GET as inferPhraseRoute } from '../../../app/api/phrases/infer/route'
 import { GET as botEncodePhraseRoute } from '../../../app/api/bot/phrases/encode/route'
+import { setZdicLookupCacheClientForTests } from '../zdicLookupCache'
 
 function stripTone(value: string): string {
   return value.normalize('NFD').replace(/\p{M}/gu, '').replaceAll('ü', 'v')
@@ -106,6 +113,12 @@ describe('semantic phrase pronunciation fallback', () => {
     routeMocks.checkRateLimit.mockReturnValue({ allowed: true, retryAfterMs: 0 })
     routeMocks.requestSemanticPronunciation.mockResolvedValue(null)
     routeMocks.verifyBotToken.mockResolvedValue(true)
+    routeMocks.zdicFindUnique.mockResolvedValue(null)
+    routeMocks.zdicUpsert.mockResolvedValue(undefined)
+    setZdicLookupCacheClientForTests({
+      findUnique: routeMocks.zdicFindUnique,
+      upsert: routeMocks.zdicUpsert,
+    })
     vi.clearAllMocks()
   })
 

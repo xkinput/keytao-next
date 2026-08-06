@@ -9,6 +9,8 @@ import {
   BatchUnresolvableTargetError,
 } from '@/lib/services/batchApprovalService'
 
+export const maxDuration = 30
+
 // POST /api/admin/batches/:id/approve - Approve a batch
 export async function POST(
   request: NextRequest,

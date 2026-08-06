@@ -1,5 +1,89 @@
-import { describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it, vi } from 'vitest'
+import type { EventEmitter as NodeEventEmitter } from 'node:events'
+
+const cacheMock = {
+  findUnique: vi.fn().mockResolvedValue(null),
+  upsert: vi.fn().mockResolvedValue(undefined),
+}
+
+vi.mock('https', async () => {
+  const { EventEmitter } = await import('node:events')
+
+  const htmlByEntry: Record<string, string> = {
+    '好': '<span class="z_d song">hǎo</span>',
+    '你': '<span class="z_d song">nǐ</span>',
+    '中': '<span class="z_d song">zhōng</span>',
+    '国': '<span class="z_d song">guó</span>',
+    '学': '<span class="z_d song">xué</span>',
+    '爱': '<span class="z_d song">ài</span>',
+    '咋': '<span class="z_d song">zǎ</span><span class="z_d song">zhā</span>',
+    '呼': '<span class="z_d song">hū</span>',
+    '尊': '<span class="z_d song">zūn</span>',
+    '行': '<span class="z_d song">háng</span><span class="z_d song">xíng</span>',
+    '长': '<span class="z_d song">cháng</span><span class="z_d song">zhǎng</span>',
+    '鳜': '<title>鳜 guì、jué - 汉典</title><span class="z_d song">not-pinyin</span>',
+    '鱼': '<span class="z_d song">yú</span>',
+    '小': '<span class="z_d song">xiǎo</span>',
+    '藏': '<span class="z_d song">cáng</span><span class="z_d song">zàng</span>',
+    '羚': '<span class="z_d song">líng</span>',
+    '复': '<span class="z_d song">fù</span>',
+    '购': '<span class="z_d song">gòu</span>',
+    '率': '<span class="z_d song">shuài</span><span class="z_d song">lǜ</span>',
+    '表': '<span class="z_d song">biǎo</span>',
+    '你好': '<span class="meta-pinyin">nǐ hǎo</span>',
+    '中国': '<span class="meta-pinyin">zhōng guó</span>',
+    '咋呼': '<span class="meta-pinyin">zhā hū</span>',
+    '尊行': '<span class="meta-pinyin">zūn xíng</span>',
+  }
+
+  return {
+    get: vi.fn((url: string, _options: unknown, callback: (response: NodeEventEmitter & {
+      statusCode: number
+      headers: Record<string, string>
+      resume: () => void
+      setEncoding: (_encoding: string) => void
+    }) => void) => {
+      const request = new EventEmitter() as NodeEventEmitter & {
+        setTimeout: (_timeout: number, _handler: () => void) => void
+        destroy: () => void
+      }
+      request.setTimeout = () => undefined
+      request.destroy = () => undefined
+
+      queueMicrotask(() => {
+        const entry = decodeURIComponent(new URL(url).pathname.replace('/hans/', ''))
+        const body = htmlByEntry[entry]
+        const statusCode = entry === '复购率' ? 429 : body ? 200 : 404
+        const response = new EventEmitter() as NodeEventEmitter & {
+          statusCode: number
+          headers: Record<string, string>
+          resume: () => void
+          setEncoding: (_encoding: string) => void
+        }
+        response.statusCode = statusCode
+        response.headers = {}
+        response.resume = () => undefined
+        response.setEncoding = () => undefined
+        callback(response)
+        if (body && statusCode >= 200 && statusCode < 300) {
+          queueMicrotask(() => {
+            response.emit('data', body)
+            response.emit('end')
+          })
+        }
+      })
+
+      return request
+    }),
+  }
+})
+
 import { analyzeRequestedCode, buildPhraseEncodingFromChars, encodePhonetic, getPhrasePinyins, parsePinyin, getPinyinFromZdic, encodeChar, encodePhrase, type CharEncoding } from '../keytaoEncoder'
+import { setZdicLookupCacheClientForTests } from '../zdicLookupCache'
+
+beforeAll(() => {
+  setZdicLookupCacheClientForTests(cacheMock)
+})
 
 // encodePhonetic(initial, final) → 2-char phonetic code
 // finals are as returned by pinyin-pro (toneType:'none')
@@ -387,11 +471,15 @@ describe('fixed fly-key phrase variants', () => {
   })
 })
 
-// ── getPinyinFromZdic (integration — real network) ───────────────────────────
-// These tests hit zdic.net; run them explicitly when needed.
-// vitest --reporter=verbose lib/services/__tests__/keytaoEncoder.test.ts
+// getPinyinFromZdic uses mocked zdic fixtures.
+// The file-level HTTPS mock keeps parser coverage deterministic and offline.
 
 describe('getPinyinFromZdic', { timeout: 15000 }, () => {
+  it('parses pinyin from the title when reading spans are unusable', async () => {
+    const result = await getPinyinFromZdic('鳜')
+    expect(result).toEqual(['guì', 'jué'])
+  })
+
   it.each([
     ['好', 'hǎo'],
     ['你', 'nǐ'],
@@ -410,7 +498,7 @@ describe('getPinyinFromZdic', { timeout: 15000 }, () => {
   })
 })
 
-// ── encodeChar + encodePhrase (integration) ──────────────────────────────────
+// encodeChar and encodePhrase use mocked zdic fixtures.
 
 describe('encodeChar', { timeout: 15000 }, () => {
   it('encodes 好 correctly', async () => {
@@ -498,10 +586,8 @@ describe('encodePhrase', { timeout: 30000 }, () => {
   })
 })
 
-// ── Polyphonic characters — first reading from zdic ──────────────────────────
-// NOTE: Only test a small number to avoid zdic rate-limiting mid-suite.
-// Each test here makes a fresh network request; earlier tests already populate
-// the cache for 好/你/中/学/国/鳜/鱼, so only uncached chars hit the network.
+// Polyphonic character tests use mocked zdic fixtures.
+// Each uncached character exercises the mocked HTTPS parser path once.
 
 describe('getPinyinFromZdic polyphonic chars', { timeout: 30000 }, () => {
   it('行 returns all readings: háng and xíng', async () => {
@@ -518,7 +604,4 @@ describe('getPinyinFromZdic polyphonic chars', { timeout: 30000 }, () => {
     expect(result[0]).toBe('cháng')
   })
 
-  // 重 was already fetched and cached by encodeChar tests above (中→zhōng shares cache miss
-  // but 重 is a separate char). Skip dedicated fetch to avoid rate-limit on rapid runs;
-  // covered indirectly via encodeChar('中') which uses zhōng from the same cache layer.
 })

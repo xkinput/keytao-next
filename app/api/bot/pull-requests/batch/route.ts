@@ -17,6 +17,8 @@ import { createPhraseTargetFingerprint } from '@/lib/services/phraseTargetBindin
 import { randomUUID } from 'crypto'
 import { containsMiaomiaoReviewBlockDelimiter } from '@/lib/validation/phraseInput'
 
+export const maxDuration = 30
+
 const MAX_ITEMS = 500
 const MAX_WORD_LENGTH = 100
 const MAX_CODE_LENGTH = 20

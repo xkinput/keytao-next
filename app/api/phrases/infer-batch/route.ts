@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { inferPhrases } from '@/lib/services/phraseInference'
 import { checkRateLimit } from '@/lib/rateLimit'
 
+export const maxDuration = 30
+
 const MAX_WORDS = 500
 
 function clientKey(request: NextRequest) {

@@ -495,3 +495,14 @@ model Sponsor {
 
   @@map("sponsors")
 }
+
+model ZdicPinyinCache {
+  kind      String
+  entry     String
+  status    String
+  pinyins   Json
+  fetchedAt DateTime
+
+  @@id([kind, entry])
+  @@map("zdic_pinyin_cache")
+}

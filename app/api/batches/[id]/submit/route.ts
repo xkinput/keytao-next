@@ -11,6 +11,8 @@ import {
   lockPhraseTableForWarningSnapshot,
 } from '@/lib/services/botWarningSnapshot'
 
+export const maxDuration = 30
+
 // POST /api/batches/:id/submit - Submit batch for review
 export async function POST(
   request: NextRequest,

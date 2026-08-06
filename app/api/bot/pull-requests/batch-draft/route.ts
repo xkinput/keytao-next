@@ -28,6 +28,8 @@ import type {
   BotBatchDeleteDraftDeletedItem,
 } from '@/lib/types/bot'
 
+export const maxDuration = 30
+
 const MAX_DRAFT_ITEMS = 500
 const MAX_DELETE_ITEMS = 500
 const MAX_WORD_LENGTH = 100
