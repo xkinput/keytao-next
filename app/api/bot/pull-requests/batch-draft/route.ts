@@ -16,7 +16,7 @@ import {
   buildBotWarningDigest,
   lockPhraseTableForWarningSnapshot,
 } from '@/lib/services/botWarningSnapshot'
-import { createPhraseTargetFingerprint } from '@/lib/services/phraseTargetBinding'
+import { createPhraseTargetFingerprint, PHRASE_TARGET_SNAPSHOT_SELECT } from '@/lib/services/phraseTargetBinding'
 import { randomUUID } from 'crypto'
 import { containsMiaomiaoReviewBlockDelimiter } from '@/lib/validation/phraseInput'
 import type {
@@ -421,10 +421,7 @@ export async function POST(request: NextRequest) {
                   code: item.code,
                   type: item.type as PhraseType,
                 },
-                select: {
-                  id: true, word: true, code: true, type: true, status: true,
-                  weight: true, remark: true, userId: true,
-                },
+                select: PHRASE_TARGET_SNAPSHOT_SELECT,
               })
               : null
             if ((item.action === 'Change' || item.action === 'Delete') && !target) {
