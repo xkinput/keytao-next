@@ -11,11 +11,38 @@ describe('phrase target fingerprint', () => {
     weight: 1, remark: null, userId: 42,
   }
 
-  it('changes when the same id is reused or any critical field changes', () => {
+  it('changes when any snapshot field changes', () => {
     const fingerprint = createPhraseTargetFingerprint(target)
-    expect(createPhraseTargetFingerprint({ ...target, word: '黏贴' })).not.toBe(fingerprint)
-    expect(createPhraseTargetFingerprint({ ...target, weight: 2 })).not.toBe(fingerprint)
-    expect(createPhraseTargetFingerprint({ ...target, id: 10 })).not.toBe(fingerprint)
+    const mutations = [
+      { id: 10 },
+      { word: '黏贴' },
+      { code: 'vztq' },
+      { type: 'Single' },
+      { status: 'Draft' },
+      { weight: 2 },
+      { remark: 'changed' },
+      { userId: 43 },
+    ]
+
+    for (const mutation of mutations) {
+      expect(createPhraseTargetFingerprint({ ...target, ...mutation })).not.toBe(fingerprint)
+    }
+  })
+
+  it('uses the same snapshot for bind and approval recomputation when the row has extra columns', async () => {
+    const row = {
+      ...target,
+      createAt: new Date('2026-02-01T00:00:00.000Z'),
+      updateAt: new Date('2026-02-02T00:00:00.000Z'),
+    }
+    const findFirst = vi.fn(async () => row)
+
+    const binding = await resolvePhraseTargetBinding({ findFirst } as never, {
+      action: 'Delete', word: target.word, code: target.code, phraseId: target.id,
+    })
+
+    expect(binding.targetFingerprint).toBe(createPhraseTargetFingerprint(target))
+    expect(createPhraseTargetFingerprint(row)).toBe(binding.targetFingerprint)
   })
 
   it('binds Change/Delete by stable entity id and fails closed when absent', async () => {

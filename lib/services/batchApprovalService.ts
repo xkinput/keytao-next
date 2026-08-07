@@ -12,7 +12,11 @@ import {
   buildBotWarningDigest,
   lockPhraseTableForWarningSnapshot,
 } from '@/lib/services/botWarningSnapshot'
-import { createPhraseTargetFingerprint } from '@/lib/services/phraseTargetBinding'
+import {
+  createPhraseTargetFingerprint,
+  PHRASE_TARGET_SNAPSHOT_SELECT,
+  type PhraseTargetSnapshot,
+} from '@/lib/services/phraseTargetBinding'
 
 export type BatchApprovalMode = 'admin' | 'bot-auto'
 
@@ -416,7 +420,7 @@ export async function approveSubmittedBatch({
 
     // Keep the planned ordering, but take the content from the locked re-read.
     const executionRows = executionOrder.map(pr => rowsById.get(pr.id)!)
-    const verifiedTargets = new Map<number, Awaited<ReturnType<typeof tx.phrase.findUniqueOrThrow>>>()
+    const verifiedTargets = new Map<number, PhraseTargetSnapshot>()
     for (const pr of executionRows) {
       if (pr.action !== 'Change' && pr.action !== 'Delete') continue
       const targetId = pr.targetPhraseId ?? pr.phraseId
@@ -425,6 +429,7 @@ export async function approveSubmittedBatch({
       }
       const target = await tx.phrase.findUnique({
         where: { id: targetId },
+        select: PHRASE_TARGET_SNAPSHOT_SELECT,
       })
       if (!target || createPhraseTargetFingerprint(target) !== pr.targetFingerprint) {
         throw new BatchApprovalTargetChangedError()

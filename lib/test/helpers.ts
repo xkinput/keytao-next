@@ -3,7 +3,10 @@ import { PhraseType, UserStatus, SignUpType } from '@prisma/client'
 import bcrypt from 'bcrypt'
 import { ConflictInfo } from '@/lib/services/conflictDetector'
 import { detectPhraseType } from '@/lib/constants/phraseTypes'
-import { createPhraseTargetFingerprint } from '@/lib/services/phraseTargetBinding'
+import {
+  createPhraseTargetFingerprint,
+  PHRASE_TARGET_SNAPSHOT_SELECT,
+} from '@/lib/services/phraseTargetBinding'
 
 export interface TestPhraseData {
   word: string
@@ -106,6 +109,7 @@ export async function createTestBatch(
             code: pr.code,
             type: expectedType,
           },
+          select: PHRASE_TARGET_SNAPSHOT_SELECT,
         })
     const created = await prisma.pullRequest.create({
       data: {
