@@ -9,6 +9,7 @@ function inference(overrides: Partial<InferResponse>): InferResponse {
     type: '二字词',
     codes: ['pffl', 'pfflo'],
     altCodes: [],
+    candidateOccupancy: [],
     flyKeyVariants: [],
     suggestion: null,
     suggestionStatus: 'occupied',

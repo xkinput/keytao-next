@@ -11,11 +11,18 @@ export interface InferPhraseOptions {
   semanticPronunciationResolver?: (word: string) => Promise<SemanticPronunciation | null>
 }
 
+export interface CandidateOccupancy {
+  code: string
+  occupants: Array<{ word: string; weight: number }>
+}
+
 export interface InferResponse {
   word: string
   type: string
   codes: string[]
   altCodes: string[]
+  /** Occupants for each verified candidate code, in candidate-chain order. */
+  candidateOccupancy: CandidateOccupancy[]
   flyKeyVariants: FlyKeyVariant[]
   pronunciationSource?: PhraseEncoding['pronunciationSource']
   standardPronunciationStatus?: PhraseEncoding['standardPronunciationStatus']
@@ -50,6 +57,26 @@ function chooseSuggestion(codes: string[], altCodes: string[], occupiedCodes: Se
   }
 
   return { suggestion: null, suggestionIndex: 0 }
+}
+
+function buildCandidateOccupancy(
+  codes: string[],
+  matches: Array<{ word: string; code: string; weight: number }>,
+): CandidateOccupancy[] {
+  const candidateCodes = new Set(codes)
+  const occupantsByCode = new Map<string, CandidateOccupancy['occupants']>()
+
+  for (const match of matches) {
+    if (!candidateCodes.has(match.code)) continue
+    const occupants = occupantsByCode.get(match.code) ?? []
+    occupants.push({ word: match.word, weight: match.weight })
+    occupantsByCode.set(match.code, occupants)
+  }
+
+  return codes.map(code => ({
+    code,
+    occupants: (occupantsByCode.get(code) ?? []).sort((a, b) => a.weight - b.weight),
+  }))
 }
 
 export async function inferPhrase(
@@ -101,6 +128,7 @@ export async function inferPhrase(
     type,
     codes,
     altCodes,
+    candidateOccupancy: buildCandidateOccupancy(allCodes, matches),
     flyKeyVariants: encoding.flyKeyVariants,
     pronunciationSource: encoding.pronunciationSource,
     standardPronunciationStatus: encoding.standardPronunciationStatus,
@@ -173,6 +201,7 @@ export async function inferPhrases(words: string[]): Promise<InferResponse[]> {
       type,
       codes,
       altCodes,
+      candidateOccupancy: buildCandidateOccupancy([...new Set([...codes, ...altCodes])], matches),
       flyKeyVariants,
       pronunciationSource,
       standardPronunciationStatus,

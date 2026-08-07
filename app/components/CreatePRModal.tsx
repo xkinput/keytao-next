@@ -134,6 +134,81 @@ interface DictParseItem {
   infer?: InferResponse
 }
 
+interface OccupiedCandidatePickerProps {
+  candidates: InferResponse['candidateOccupancy']
+  currentCode: string
+  currentWeight: string
+  onSelect: (candidate: InferResponse['candidateOccupancy'][number]) => void
+}
+
+function OccupiedCandidatePicker({
+  candidates,
+  currentCode,
+  currentWeight,
+  onSelect,
+}: OccupiedCandidatePickerProps) {
+  const occupiedCandidates = candidates.filter(candidate => candidate.occupants.length > 0)
+  const selectedCandidate = occupiedCandidates.find(candidate => candidate.code === currentCode)
+  const numericWeight = currentWeight.trim() === '' ? null : Number(currentWeight)
+
+  let selectedHint: string | null = null
+  if (selectedCandidate && numericWeight !== null && Number.isFinite(numericWeight)) {
+    const occupantWords = [...new Set(selectedCandidate.occupants.map(occupant => occupant.word))]
+    const quotedWords = occupantWords.map(word => `「${word}」`).join('、')
+    const occupantWeights = selectedCandidate.occupants.map(occupant => occupant.weight)
+    const minWeight = Math.min(...occupantWeights)
+    const maxWeight = Math.max(...occupantWeights)
+
+    if (numericWeight > maxWeight) {
+      selectedHint = `将与${quotedWords}形成重码，权重 ${numericWeight} 排在${occupantWords.length === 1 ? '其后' : '这些词条之后'}；如需排前，请改用更小的权重。`
+    } else if (numericWeight < minWeight) {
+      selectedHint = `将与${quotedWords}形成重码，权重 ${numericWeight} 排在${occupantWords.length === 1 ? '其前' : '这些词条之前'}；重码按权重升序排列。`
+    } else {
+      selectedHint = `将与${quotedWords}形成重码，权重 ${numericWeight} 按升序排列；权重越小越靠前。`
+    }
+  }
+
+  if (occupiedCandidates.length === 0) return null
+
+  return (
+    <div className="space-y-2 rounded-lg border border-warning-200/60 bg-warning-50/60 p-2 dark:bg-warning-100/5 xl:ml-auto xl:w-full xl:max-w-[18rem]">
+      <div className="space-y-0.5">
+        <p className="text-xs font-medium text-warning-700 dark:text-warning-400">候选编码均已占用</p>
+        <p className="text-[11px] leading-4 text-default-500">点击一项才会填写编码并形成重码。重码按权重升序排列（权重越小越靠前）。</p>
+      </div>
+      <div className="space-y-1.5">
+        {occupiedCandidates.map(candidate => {
+          const selected = currentCode === candidate.code
+          const occupants = candidate.occupants
+            .map(occupant => `「${occupant.word}」（${occupant.weight}）`)
+            .join('、')
+
+          return (
+            <Button
+              key={candidate.code}
+              type="button"
+              size="sm"
+              variant={selected ? 'solid' : 'flat'}
+              color={selected ? 'warning' : 'default'}
+              className="h-auto min-h-8 w-full justify-start px-2 py-1 text-left"
+              aria-label={`选择编码 ${candidate.code}，与${occupants}形成重码`}
+              onPress={() => onSelect(candidate)}
+            >
+              <span className="flex min-w-0 items-start gap-2">
+                <code className="shrink-0 font-mono text-xs font-semibold">{candidate.code}</code>
+                <span className="min-w-0 whitespace-normal text-[11px] leading-4 text-default-600">已有{occupants}</span>
+              </span>
+            </Button>
+          )
+        })}
+      </div>
+      {selectedHint && (
+        <p className="text-[11px] leading-4 text-warning-700 dark:text-warning-400">{selectedHint}</p>
+      )}
+    </div>
+  )
+}
+
 export default function CreatePRModal({
   isOpen,
   onClose,
@@ -1077,6 +1152,18 @@ export default function CreatePRModal({
     updateMeta(fieldId, { hasChecked: false, conflict: null })
   }
 
+  const applyOccupiedCandidate = (
+    fieldIndex: number,
+    fieldId: string,
+    candidate: InferResponse['candidateOccupancy'][number],
+  ) => {
+    const nextWeight = Math.max(...candidate.occupants.map(occupant => occupant.weight)) + 1
+    setValue(`items.${fieldIndex}.code`, candidate.code, { shouldDirty: true, shouldValidate: true })
+    setValue(`items.${fieldIndex}.weight`, String(nextWeight), { shouldDirty: true, shouldValidate: true })
+    autoFilledRef.current.delete(fieldId)
+    updateMeta(fieldId, { hasChecked: false, conflict: null })
+  }
+
   // Navigate to next/previous conflict or warning
   const navigateToIssue = (direction: 'next' | 'prev') => {
     const issueIndices: number[] = []
@@ -1511,6 +1598,19 @@ export default function CreatePRModal({
                                         </div>
                                       </div>
                                     )}
+
+                                    {(() => {
+                                      const inf = inferResults.get(field.id)
+                                      if (act === 'Delete' || inf?.suggestionStatus !== 'occupied') return null
+                                      return (
+                                        <OccupiedCandidatePicker
+                                          candidates={inf.candidateOccupancy}
+                                          currentCode={watch(`items.${index}.code`)}
+                                          currentWeight={watch(`items.${index}.weight`)}
+                                          onSelect={candidate => applyOccupiedCandidate(index, field.id, candidate)}
+                                        />
+                                      )
+                                    })()}
 
                                     {(() => {
                                       const inf = inferResults.get(field.id)
