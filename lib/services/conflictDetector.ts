@@ -1,6 +1,10 @@
 import { prisma } from '@/lib/prisma'
 import { PullRequestType, PhraseType } from '@prisma/client'
 import { hasHigherPriorityWeight } from '@/lib/constants/phraseTypes'
+import {
+  appendCodeWithinMaxLength,
+  getCodeValidationError,
+} from '@/lib/constants/codeValidation'
 
 export interface PhraseChange {
   action: PullRequestType
@@ -34,6 +38,27 @@ export interface CodeSuggestion {
   toCode?: string
   reason: string
   resolverIndex?: number  // Index of the resolver PR in the batch items array
+}
+
+/**
+ * Generate alternative codes based on input method logic.
+ */
+export function generateAlternativeCodes(code: string, type?: PhraseType): string[] {
+  const alternatives: string[] = []
+  const commonSuffixes = ['a', 'i', 'o', 'u', 'v']
+
+  for (const suffix of commonSuffixes) {
+    const alternative = appendCodeWithinMaxLength(code, suffix, type)
+    if (alternative) alternatives.push(alternative)
+  }
+
+  if (code.length > 0) {
+    const lastChar = code[code.length - 1]
+    const alternative = appendCodeWithinMaxLength(code, lastChar, type)
+    if (alternative) alternatives.push(alternative)
+  }
+
+  return alternatives
 }
 
 export class ConflictDetector {
@@ -298,33 +323,33 @@ export class ConflictDetector {
     const suggestions: CodeSuggestion[] = []
 
     // Suggestion 1: Move existing phrase to alternative code
-    const alternativeCodes = this.generateAlternativeCodes(existing.code)
+    const alternativeCodes = generateAlternativeCodes(existing.code, existing.type)
     for (const altCode of alternativeCodes) {
       const isAvailable = await this.isCodeAvailable(altCode, existing.type)
       if (isAvailable) {
-        suggestions.push({
+        this.pushSuggestion(suggestions, {
           action: 'Move',
           word: existing.word,
           fromCode: existing.code,
           toCode: altCode,
           reason: `将 "${existing.word}" 移动到次选编码 "${altCode}"`
-        })
+        }, existing.type)
         break // Only suggest one alternative
       }
     }
 
     // Suggestion 2: Use alternative code for proposed word
-    const proposedAlts = this.generateAlternativeCodes(proposed.code)
+    const proposedAlts = generateAlternativeCodes(proposed.code, proposed.type)
     for (const altCode of proposedAlts) {
       const isAvailable = await this.isCodeAvailable(altCode, proposed.type)
       if (isAvailable) {
-        suggestions.push({
+        this.pushSuggestion(suggestions, {
           action: 'Adjust',
           word: proposed.word,
           fromCode: proposed.code,
           toCode: altCode,
           reason: `使用次选编码 "${altCode}" 替代`
-        })
+        }, proposed.type)
         break
       }
     }
@@ -345,24 +370,27 @@ export class ConflictDetector {
   }
 
   /**
-   * Generate alternative codes based on input method logic
+   * Keep invalid generated codes out of suggestion payloads even if a future
+   * generator bypasses the length-aware append helper.
    */
-  private generateAlternativeCodes(code: string): string[] {
-    const alternatives: string[] = []
-
-    // Add one more character
-    const commonSuffixes = ['a', 'i', 'o', 'u', 'v']
-    for (const suffix of commonSuffixes) {
-      alternatives.push(code + suffix)
+  private pushSuggestion(
+    suggestions: CodeSuggestion[],
+    suggestion: CodeSuggestion,
+    type?: PhraseType
+  ): void {
+    if (suggestion.toCode) {
+      const validationError = getCodeValidationError(suggestion.toCode, type)
+      if (validationError) {
+        console.warn('[conflictDetector] Dropped invalid code suggestion', {
+          action: suggestion.action,
+          code: suggestion.toCode,
+          type: type ?? null,
+          validationError,
+        })
+        return
+      }
     }
-
-    // Duplicate last character
-    if (code.length > 0) {
-      const lastChar = code[code.length - 1]
-      alternatives.push(code + lastChar)
-    }
-
-    return alternatives
+    suggestions.push(suggestion)
   }
 
   /**

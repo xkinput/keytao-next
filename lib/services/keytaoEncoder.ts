@@ -2,6 +2,7 @@ import * as fs from 'fs'
 import * as https from 'https'
 import * as path from 'path'
 import { customPinyin, pinyin } from 'pinyin-pro'
+import { appendCodeWithinMaxLength } from '@/lib/constants/codeValidation'
 import { readZdicPinyinCache, writeZdicPinyinCache } from './zdicLookupCache'
 
 // ── Data loading ──────────────────────────────────────────────────────────────
@@ -595,12 +596,20 @@ function firstShapeKey(enc: CharEncoding): string {
   return enc.shapeCode?.[0] ?? ''
 }
 
-function buildCodes(base: string, shapeSteps: string[]): string[] {
+function buildCodes(base: string, shapeSteps: string[], type: 'Single' | 'Phrase'): string[] {
   const codes = [base]
   let current = base
   for (const s of shapeSteps) {
     if (!s) break
-    current += s
+    const next = appendCodeWithinMaxLength(current, s, type)
+    if (!next) {
+      console.warn('[keytaoEncoder] Dropped over-length generated code', {
+        code: current + s,
+        type,
+      })
+      break
+    }
+    current = next
     codes.push(current)
   }
   return codes
@@ -658,7 +667,8 @@ function buildFlyKeyVariants(
   chars: CharEncoding[],
   pinyinInfos: Array<{ initial: string; final: string }>,
   base: string,
-  shapeSteps: string[]
+  shapeSteps: string[],
+  codeType: 'Single' | 'Phrase'
 ): FlyKeyVariant[] {
   const positions = phraseCodePositions(chars.length)
   const choicesByPosition = positions.map((charIndex) => {
@@ -686,7 +696,7 @@ function buildFlyKeyVariants(
       if (changes.length === 0) return
       const altBase = buildBaseFromChoices(chars.length, selected)
       if (altBase === base) return
-      variants.push({ baseCode: altBase, codes: buildCodes(altBase, shapeSteps), changes })
+      variants.push({ baseCode: altBase, codes: buildCodes(altBase, shapeSteps, codeType), changes })
       return
     }
     for (const choice of choicesByPosition[positionIndex]) {
@@ -802,8 +812,9 @@ export function buildPhraseEncodingFromChars(word: string, chars: CharEncoding[]
     shapeSteps = [firstShapeKey(chars[0]), firstShapeKey(chars[1])]
   }
 
-  const codes = buildCodes(base, shapeSteps)
-  const flyKeyVariants = buildFlyKeyVariants(chars, pinyinInfos, base, shapeSteps)
+  const codeType = n === 1 ? 'Single' : 'Phrase'
+  const codes = buildCodes(base, shapeSteps, codeType)
+  const flyKeyVariants = buildFlyKeyVariants(chars, pinyinInfos, base, shapeSteps, codeType)
   const altCodes = [...new Set(flyKeyVariants.flatMap(variant => variant.codes))]
 
   return { input: word, type, chars, codes, altCodes, flyKeyVariants }

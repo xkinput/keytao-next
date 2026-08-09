@@ -77,6 +77,18 @@ export function getMaxCodeLength(type?: PhraseType | string | null): number {
 }
 
 /**
+ * Append a generated code fragment without crossing the per-type limit.
+ */
+export function appendCodeWithinMaxLength(
+  code: string,
+  suffix: string,
+  type?: PhraseType | string | null
+): string | null {
+  if (code.length + suffix.length > getMaxCodeLength(type)) return null
+  return code + suffix
+}
+
+/**
  * Validate phrase code format and length
  */
 export function isValidCode(code: string, type?: PhraseType | string | null): boolean {
