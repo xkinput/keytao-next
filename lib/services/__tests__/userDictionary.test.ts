@@ -31,4 +31,13 @@ describe('userDictionary', () => {
     expect(yaml).toContain('version: "2026-07-05"')
     expect(yaml).toContain('键道\tjmdc\t100')
   })
+
+  it('rejects an explicit weight below the selected type base', () => {
+    expect(() => normalizeUserDictionaryInput({
+      word: 'https://keytao.example',
+      code: 'link',
+      type: 'Link',
+      weight: 9999,
+    })).toThrow('链接的权重不能低于基础值 10000')
+  })
 })

@@ -5,7 +5,7 @@ import { checkBatchConflictsWithWeight } from '@/lib/services/batchConflictServi
 import { buildDependencies } from '@/lib/services/batchDependencyService'
 import { buildSkippedCandidateSlotWarnings } from '@/lib/services/batchSkippedCodeWarnings'
 import { PullRequestType } from '@prisma/client'
-import { PhraseType } from '@/lib/constants/phraseTypes'
+import { getPhraseWeightValidationError, isValidPhraseType, PhraseType } from '@/lib/constants/phraseTypes'
 import type { BotCreatePRRequest, BotCreatePRResponse, BotConflictInfo, BotWarningInfo, BotDeleteNoteInfo } from '@/lib/types/bot'
 import { assertNoBotDraftBatch, assertNoOtherBotDraftWithContent, BatchContentLockedError, claimBatchContentMutation, lockBotDraftUser } from '@/lib/services/batchContentGuard'
 import { findCurrentBotDraftBatch, NEW_BOT_DRAFT_BATCH_IDENTITY } from '@/lib/services/botDraftBatch'
@@ -150,6 +150,22 @@ export async function POST(request: NextRequest) {
           { success: false, message: `项目 #${i + 1}: 不支持的操作类型` },
           { status: 400 }
         )
+      }
+      const phraseType = item.type || 'Phrase'
+      if (!isValidPhraseType(phraseType)) {
+        return NextResponse.json<BotCreatePRResponse>(
+          { success: false, message: `项目 #${i + 1}: 不支持的词库类型` },
+          { status: 400 }
+        )
+      }
+      if (item.weight !== undefined && item.weight !== null) {
+        const weightError = getPhraseWeightValidationError(item.weight, phraseType)
+        if (weightError) {
+          return NextResponse.json<BotCreatePRResponse>(
+            { success: false, message: `项目 #${i + 1}: ${weightError}` },
+            { status: 400 }
+          )
+        }
       }
       if (item.word.length > MAX_WORD_LENGTH || item.code.length > MAX_CODE_LENGTH) {
         return NextResponse.json<BotCreatePRResponse>(

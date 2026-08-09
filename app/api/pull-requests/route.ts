@@ -3,7 +3,7 @@ import { getSession } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { conflictDetector } from '@/lib/services/conflictDetector'
 import { Prisma, PullRequestStatus, PullRequestType } from '@prisma/client'
-import { isValidPhraseType } from '@/lib/constants/phraseTypes'
+import { getPhraseWeightValidationError, isValidPhraseType, type PhraseType } from '@/lib/constants/phraseTypes'
 import { resolvePhraseTargetBinding } from '@/lib/services/phraseTargetBinding'
 import { BatchContentLockedError, claimBatchContentMutation } from '@/lib/services/batchContentGuard'
 import { containsMiaomiaoReviewBlockDelimiter } from '@/lib/validation/phraseInput'
@@ -62,6 +62,12 @@ export async function POST(request: NextRequest) {
 
     if (type && !isValidPhraseType(type)) {
       return NextResponse.json({ error: '无效的词库类型' }, { status: 400 })
+    }
+    if (weight !== undefined && weight !== null) {
+      const weightError = getPhraseWeightValidationError(weight, (type || 'Phrase') as PhraseType)
+      if (weightError) {
+        return NextResponse.json({ error: weightError }, { status: 400 })
+      }
     }
 
     if (
@@ -181,7 +187,7 @@ export async function POST(request: NextRequest) {
           phraseId: finalPhraseId || undefined,
           targetPhraseId: targetBinding.targetPhraseId,
           targetFingerprint: targetBinding.targetFingerprint,
-          weight: finalWeight || undefined,
+          weight: finalWeight ?? undefined,
           remark: remark || null,
           type: type || undefined,
           userId: session.id,

@@ -3,7 +3,7 @@ import { getSession } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { conflictDetector } from '@/lib/services/conflictDetector'
 import { PullRequestType, PhraseType as PrismaPhraseType } from '@prisma/client'
-import { isValidPhraseType, type PhraseType } from '@/lib/constants/phraseTypes'
+import { getPhraseWeightValidationError, isValidPhraseType, type PhraseType } from '@/lib/constants/phraseTypes'
 import { calculateWeightForType } from '@/lib/services/batchConflictService'
 import { checkIsAdmin } from '@/lib/adminAuth'
 import { resolvePhraseTargetBinding } from '@/lib/services/phraseTargetBinding'
@@ -158,6 +158,17 @@ export async function PUT(
                 )
             ) {
                 return NextResponse.json({ error: '词条、编码或备注格式错误' }, { status: 400 })
+            }
+            if (weight !== undefined) {
+                const effectiveType = (
+                    type
+                    || (typeof itemId === 'number' ? persistedPullRequestsById.get(itemId)?.type : undefined)
+                    || 'Phrase'
+                ) as PhraseType
+                const weightError = getPhraseWeightValidationError(weight, effectiveType)
+                if (weightError) {
+                    return NextResponse.json({ error: weightError }, { status: 400 })
+                }
             }
 
             items.push({

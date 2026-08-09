@@ -4,7 +4,7 @@ import type { Prisma } from '@prisma/client'
 
 import { verifyApiKey } from '@/lib/apiKeyAuth'
 import { prisma } from '@/lib/prisma'
-import { detectPhraseType, isValidPhraseType, type PhraseType } from '@/lib/constants/phraseTypes'
+import { detectPhraseType, getPhraseWeightValidationError, isValidPhraseType, type PhraseType } from '@/lib/constants/phraseTypes'
 import { checkBatchConflictsWithWeight } from '@/lib/services/batchConflictService'
 import { resolvePhraseTargetBinding } from '@/lib/services/phraseTargetBinding'
 import {
@@ -160,7 +160,7 @@ export async function POST(request: NextRequest) {
         code,
         oldWord,
         type,
-        weight: normalizeWeight(item.weight),
+        weight: normalizeWeight(item.weight, type),
         remark: item.remark,
       }
     })
@@ -473,12 +473,14 @@ function normalizeType(word: string, code: string, explicit?: string): PhraseTyp
   return detectPhraseType(word, code)
 }
 
-function normalizeWeight(weight: unknown): number | undefined {
+function normalizeWeight(weight: unknown, type: PhraseType): number | undefined {
   if (weight === undefined || weight === null || weight === '') return undefined
   const parsed = typeof weight === 'number' ? weight : Number(weight)
   if (!Number.isInteger(parsed) || parsed < 0) {
-    throw new Error(`权重必须是非负整数：${String(weight)}`)
+    throw new DraftRequestError(`权重必须是非负整数：${String(weight)}`, 400)
   }
+  const weightError = getPhraseWeightValidationError(parsed, type)
+  if (weightError) throw new DraftRequestError(weightError, 400)
   return parsed
 }
 

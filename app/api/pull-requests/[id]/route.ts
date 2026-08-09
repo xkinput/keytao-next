@@ -5,7 +5,7 @@ import { conflictDetector } from '@/lib/services/conflictDetector'
 import { rebuildBatchDependencies } from '@/lib/services/batchDependencyService'
 import { Prisma, PullRequestType } from '@prisma/client'
 import { checkIsAdmin } from '@/lib/adminAuth'
-import { isValidPhraseType } from '@/lib/constants/phraseTypes'
+import { getPhraseWeightValidationError, isValidPhraseType, type PhraseType } from '@/lib/constants/phraseTypes'
 import { resolvePhraseTargetBinding } from '@/lib/services/phraseTargetBinding'
 import { BatchContentLockedError, claimBatchContentMutation } from '@/lib/services/batchContentGuard'
 import { containsMiaomiaoReviewBlockDelimiter } from '@/lib/validation/phraseInput'
@@ -179,6 +179,13 @@ export async function PATCH(
     if (type && !isValidPhraseType(type)) {
       return NextResponse.json({ error: '无效的词库类型' }, { status: 400 })
     }
+    if (weight !== undefined && weight !== null) {
+      const phraseType = (type || pr.type || 'Phrase') as PhraseType
+      const weightError = getPhraseWeightValidationError(weight, phraseType)
+      if (weightError) {
+        return NextResponse.json({ error: weightError }, { status: 400 })
+      }
+    }
 
     if (
       remark !== undefined
@@ -236,7 +243,7 @@ export async function PATCH(
       code: normalizedCode,
       action: action as PullRequestType,
       type: type || undefined,
-      weight: weight || undefined,
+      weight: weight ?? undefined,
       remark: remark !== undefined ? (remark || null) : undefined,
       hasConflict: conflict.hasConflict,
       conflictReason: conflict.hasConflict ? conflict.impact : null,

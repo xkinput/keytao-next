@@ -82,6 +82,27 @@ export const PHRASE_TYPE_CONFIGS: Record<PhraseType, PhraseTypeConfig> = {
 export const PHRASE_TYPES = Object.keys(PHRASE_TYPE_CONFIGS) as PhraseType[]
 
 /**
+ * Weight contract used by every explicit write route.
+ * Lower numeric weights rank earlier. Each type starts at its configured base
+ * and may only accumulate upward; an explicit value must never be below base.
+ */
+export function getPhraseWeightValidationError(
+  weight: unknown,
+  type: PhraseType
+): string | null {
+  if (!Number.isInteger(weight)) return '权重必须是整数'
+  const baseWeight = getDefaultWeight(type)
+  if ((weight as number) < baseWeight) {
+    return `${getPhraseTypeLabel(type)}的权重不能低于基础值 ${baseWeight}`
+  }
+  return null
+}
+
+export function hasHigherPriorityWeight(weight: number, otherWeight: number): boolean {
+  return weight < otherWeight
+}
+
+/**
  * Get default weight for a phrase type
  */
 export function getDefaultWeight(type: PhraseType): number {

@@ -1,5 +1,6 @@
 import { prisma } from '@/lib/prisma'
 import { PullRequestType, PhraseType } from '@prisma/client'
+import { hasHigherPriorityWeight } from '@/lib/constants/phraseTypes'
 
 export interface PhraseChange {
   action: PullRequestType
@@ -329,11 +330,14 @@ export class ConflictDetector {
     }
 
     // Suggestion 3: Cancel if proposed has lower priority
-    if (existing.weight > (proposed.weight || 0)) {
+    if (
+      proposed.weight !== undefined
+      && hasHigherPriorityWeight(existing.weight, proposed.weight)
+    ) {
       suggestions.push({
         action: 'Cancel',
         word: proposed.word,
-        reason: `现有词条 "${existing.word}" 权重更高，建议取消修改`
+        reason: `现有词条 "${existing.word}" 权重更低、优先级更高，建议取消修改`
       })
     }
 

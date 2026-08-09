@@ -1,4 +1,4 @@
-import { detectPhraseType, getDefaultWeight, isValidPhraseType, type PhraseType } from '@/lib/constants/phraseTypes'
+import { detectPhraseType, getDefaultWeight, getPhraseWeightValidationError, isValidPhraseType, type PhraseType } from '@/lib/constants/phraseTypes'
 import { containsMiaomiaoReviewBlockDelimiter } from '@/lib/validation/phraseInput'
 
 export const USER_DICT_FILE_NAME = 'user.dict.yaml'
@@ -49,6 +49,8 @@ function normalizeWeight(value: unknown, type: PhraseType): number {
   if (!Number.isInteger(parsed) || parsed < 0 || parsed > MAX_WEIGHT) {
     throw new UserDictionaryInputError('权重格式不正确')
   }
+  const weightError = getPhraseWeightValidationError(parsed, type)
+  if (weightError) throw new UserDictionaryInputError(weightError)
 
   return parsed
 }

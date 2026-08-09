@@ -4,7 +4,7 @@ import { requireVerifiedBotUser } from '@/lib/botUserAuth'
 import { checkBatchConflictsWithWeight } from '@/lib/services/batchConflictService'
 import { buildSkippedCandidateSlotWarnings } from '@/lib/services/batchSkippedCodeWarnings'
 import { PullRequestType } from '@prisma/client'
-import { detectPhraseType, isValidPhraseType, PhraseType } from '@/lib/constants/phraseTypes'
+import { detectPhraseType, getPhraseWeightValidationError, isValidPhraseType, PhraseType } from '@/lib/constants/phraseTypes'
 import { assertNoBotDraftBatch, assertNoOtherBotDraftWithContent, BatchContentLockedError, claimBatchContentMutation, lockBotDraftUser } from '@/lib/services/batchContentGuard'
 import { BOT_DRAFT_BATCH_DESCRIPTION, findCurrentBotDraftBatch, NEW_BOT_DRAFT_BATCH_IDENTITY } from '@/lib/services/botDraftBatch'
 import {
@@ -35,6 +35,10 @@ const MAX_DELETE_ITEMS = 500
 const MAX_WORD_LENGTH = 100
 const MAX_CODE_LENGTH = 20
 const MAX_REMARK_LENGTH = 500
+
+class BatchDraftInputError extends Error {
+  status = 400
+}
 
 /**
  * Bot API: Bulk add items to draft batch (tolerant mode)
@@ -251,7 +255,7 @@ export async function POST(request: NextRequest) {
         code,
         oldWord,
         type,
-        weight: normalizeWeight(item.weight),
+        weight: normalizeWeight(item.weight, type),
         remark: item.remark,
         needsManualReview: item.needsManualReview ?? false,
       }
@@ -502,7 +506,7 @@ export async function POST(request: NextRequest) {
       draftTotal: draftItems.length,
     })
   } catch (error: unknown) {
-    if (error instanceof BatchContentLockedError) {
+    if (error instanceof BatchContentLockedError || error instanceof BatchDraftInputError) {
       return NextResponse.json<BotBatchDraftResponse>(
         { success: false, message: error.message, successCount: 0, failedCount: 0, skippedCount: 0, warnedCount: 0, failed: [], skipped: [], warned: [], draftItems: [], draftTotal: 0 },
         { status: error.status }
@@ -540,12 +544,14 @@ function normalizeType(word: string, code: string, explicit?: string): PhraseTyp
   return detectPhraseType(word, code)
 }
 
-function normalizeWeight(weight: unknown): number | undefined {
+function normalizeWeight(weight: unknown, type: PhraseType): number | undefined {
   if (weight === undefined || weight === null || weight === '') return undefined
   const parsed = typeof weight === 'number' ? weight : Number(weight)
   if (!Number.isInteger(parsed) || parsed < 0) {
-    throw new Error(`权重必须是非负整数：${String(weight)}`)
+    throw new BatchDraftInputError(`权重必须是非负整数：${String(weight)}`)
   }
+  const weightError = getPhraseWeightValidationError(parsed, type)
+  if (weightError) throw new BatchDraftInputError(weightError)
   return parsed
 }
 

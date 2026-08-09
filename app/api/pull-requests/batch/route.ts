@@ -4,7 +4,7 @@ import { prisma } from '@/lib/prisma'
 import { checkBatchConflictsWithWeight } from '@/lib/services/batchConflictService'
 import { buildDependencies } from '@/lib/services/batchDependencyService'
 import { PullRequestType } from '@prisma/client'
-import { PhraseType } from '@/lib/constants/phraseTypes'
+import { getPhraseWeightValidationError, isValidPhraseType, PhraseType } from '@/lib/constants/phraseTypes'
 import { resolvePhraseTargetBinding } from '@/lib/services/phraseTargetBinding'
 import { BatchContentLockedError, claimBatchContentMutation } from '@/lib/services/batchContentGuard'
 import {
@@ -66,6 +66,20 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '备注格式错误' }, { status: 400 })
     }
 
+    for (let i = 0; i < prItems.length; i++) {
+      const item = prItems[i] as BatchPullRequestItem
+      const phraseType = item.type || 'Phrase'
+      if (!isValidPhraseType(phraseType)) {
+        return NextResponse.json({ error: `项目 #${i + 1}: 无效的词库类型` }, { status: 400 })
+      }
+      if (item.weight !== undefined && item.weight !== null) {
+        const weightError = getPhraseWeightValidationError(item.weight, phraseType)
+        if (weightError) {
+          return NextResponse.json({ error: `项目 #${i + 1}: ${weightError}` }, { status: 400 })
+        }
+      }
+    }
+
     // Validate all changes using unified conflict detection
     const validationItems = (prItems as BatchPullRequestItem[]).map((change, idx) => ({
       id: idx.toString(),
@@ -74,7 +88,7 @@ export async function POST(request: NextRequest) {
       oldWord: change.oldWord || undefined,
       code: change.code || '',
       type: (change.type || 'Phrase') as PhraseType,
-      weight: change.weight || undefined
+      weight: change.weight ?? undefined
     }))
 
     const results = await checkBatchConflictsWithWeight(validationItems)
@@ -146,7 +160,7 @@ export async function POST(request: NextRequest) {
               phraseId: change.phraseId || undefined,
               targetPhraseId: binding.targetPhraseId,
               targetFingerprint: binding.targetFingerprint,
-              weight: change.weight || undefined,
+              weight: change.weight ?? undefined,
               remark: change.remark || null,
               type: change.type || undefined,
               userId: session.id,

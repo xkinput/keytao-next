@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
-import { detectPhraseType, getDefaultWeight, isValidPhraseType, type PhraseType } from '@/lib/constants/phraseTypes'
+import { detectPhraseType, getDefaultWeight, getPhraseWeightValidationError, isValidPhraseType, type PhraseType } from '@/lib/constants/phraseTypes'
 
 function normalizeDraftType(word: string, code: string, value: string | null): PhraseType {
   if (value && isValidPhraseType(value)) return value
@@ -30,6 +30,20 @@ export async function POST(request: NextRequest) {
 
     if (!batch) {
       return NextResponse.json({ error: '没有找到可导入的草稿批次' }, { status: 404 })
+    }
+
+    for (const item of batch.pullRequests) {
+      if (item.action === 'Delete') continue
+      const word = item.word?.trim() ?? ''
+      const code = item.code?.trim() ?? ''
+      const type = normalizeDraftType(word, code, item.type)
+      const weightError = getPhraseWeightValidationError(
+        item.weight ?? getDefaultWeight(type),
+        type,
+      )
+      if (weightError) {
+        return NextResponse.json({ error: weightError }, { status: 400 })
+      }
     }
 
     let createdOrUpdated = 0
