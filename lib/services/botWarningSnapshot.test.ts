@@ -14,7 +14,7 @@ describe('buildBotWarningDigest', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     collectSkippedCandidateSlotDependencies.mockResolvedValue([
-      { type: 'Phrase', code: 'ab' },
+      { code: 'ab' },
     ])
   })
 
@@ -30,7 +30,7 @@ describe('buildBotWarningDigest', () => {
     expect(findMany).toHaveBeenCalledWith(expect.objectContaining({
       where: {
         OR: expect.arrayContaining([
-          { type: 'Phrase', code: 'ab' },
+          { code: 'ab' },
         ]),
       },
       select: expect.objectContaining({ status: true }),

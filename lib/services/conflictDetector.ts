@@ -5,6 +5,7 @@ import {
   appendCodeWithinMaxLength,
   getCodeValidationError,
 } from '@/lib/constants/codeValidation'
+import { isCodeAvailableAcrossTypes } from './codeOccupancy'
 
 export interface PhraseChange {
   action: PullRequestType
@@ -325,7 +326,7 @@ export class ConflictDetector {
     // Suggestion 1: Move existing phrase to alternative code
     const alternativeCodes = generateAlternativeCodes(existing.code, existing.type)
     for (const altCode of alternativeCodes) {
-      const isAvailable = await this.isCodeAvailable(altCode, existing.type)
+      const isAvailable = await isCodeAvailableAcrossTypes(altCode)
       if (isAvailable) {
         this.pushSuggestion(suggestions, {
           action: 'Move',
@@ -341,7 +342,7 @@ export class ConflictDetector {
     // Suggestion 2: Use alternative code for proposed word
     const proposedAlts = generateAlternativeCodes(proposed.code, proposed.type)
     for (const altCode of proposedAlts) {
-      const isAvailable = await this.isCodeAvailable(altCode, proposed.type)
+      const isAvailable = await isCodeAvailableAcrossTypes(altCode)
       if (isAvailable) {
         this.pushSuggestion(suggestions, {
           action: 'Adjust',
@@ -391,16 +392,6 @@ export class ConflictDetector {
       }
     }
     suggestions.push(suggestion)
-  }
-
-  /**
-   * Check if a code is available
-   */
-  private async isCodeAvailable(code: string, type?: PhraseType): Promise<boolean> {
-    const existing = await prisma.phrase.findFirst({
-      where: { code, type: type || undefined }
-    })
-    return !existing
   }
 
   /**

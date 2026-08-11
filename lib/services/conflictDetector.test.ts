@@ -62,3 +62,48 @@ describe('ConflictDetector code length cap', () => {
     expect(suggestedCodes.every((code) => code.length <= 6)).toBe(true)
   })
 })
+
+describe('ConflictDetector cross-type alternative availability', () => {
+  beforeEach(() => {
+    prismaMocks.findFirst.mockReset()
+    prismaMocks.findFirst.mockImplementation(({ where }: { where: Record<string, unknown> }) => {
+      if (where.word === '新增词') return null
+
+      if (where.code === 'abc') {
+        return {
+          id: 1,
+          word: '现有词',
+          code: 'abc',
+          weight: 100,
+          userId: 1,
+          type: 'Phrase',
+        }
+      }
+
+      if (where.code === 'abca' && where.type === undefined) {
+        return {
+          id: 2,
+          word: 'English occupant',
+          code: 'abca',
+          weight: 100,
+          userId: 1,
+          type: 'English',
+        }
+      }
+
+      return null
+    })
+  })
+
+  it('does not suggest an alternative code occupied by another type', async () => {
+    const result = await new ConflictDetector().checkConflict({
+      action: 'Create',
+      word: '新增词',
+      code: 'abc',
+      type: 'Phrase',
+    })
+
+    expect(result.suggestions.map(suggestion => suggestion.toCode)).not.toContain('abca')
+    expect(result.suggestions.map(suggestion => suggestion.toCode)).toContain('abci')
+  })
+})

@@ -67,7 +67,7 @@ export async function buildBotWarningDigest(
       OR: [
         ...(codes.length > 0 ? [{ code: { in: codes } }] : []),
         ...(words.length > 0 ? [{ word: { in: words } }] : []),
-        ...skippedSlotDependencies.map(({ type, code }) => ({ type, code })),
+        ...skippedSlotDependencies.map(({ code }) => ({ code })),
       ],
     },
     select: { id: true, word: true, code: true, type: true, status: true, weight: true, userId: true },
