@@ -16,6 +16,10 @@ vi.mock('https', async () => {
     '国': '<span class="z_d song">guó</span>',
     '学': '<span class="z_d song">xué</span>',
     '爱': '<span class="z_d song">ài</span>',
+    '阿': '<title>阿 ā、ē - 汉典</title>',
+    '勒': '<title>勒 lè、lēi - 汉典</title>',
+    '泰': '<span class="z_d song">tài</span>',
+    '噪': '<title>噪 a - 汉典</title><span class="z_d song">a</span>',
     '咋': '<span class="z_d song">zǎ</span><span class="z_d song">zhā</span>',
     '呼': '<span class="z_d song">hū</span>',
     '尊': '<span class="z_d song">zūn</span>',
@@ -475,6 +479,21 @@ describe('fixed fly-key phrase variants', () => {
 // The file-level HTTPS mock keeps parser coverage deterministic and offline.
 
 describe('getPinyinFromZdic', { timeout: 15000 }, () => {
+  it('parses single-vowel pinyin from the real 阿 title', async () => {
+    const result = await getPinyinFromZdic('阿')
+    expect(result).toEqual(['ā', 'ē'])
+  })
+
+  it('parses multiple pinyin syllables from the 勒 title', async () => {
+    const result = await getPinyinFromZdic('勒')
+    expect(result).toEqual(['lè', 'lēi'])
+  })
+
+  it('rejects bare untoned single-letter noise from spans and titles', async () => {
+    const result = await getPinyinFromZdic('噪')
+    expect(result).toEqual([])
+  })
+
   it('parses pinyin from the title when reading spans are unusable', async () => {
     const result = await getPinyinFromZdic('鳜')
     expect(result).toEqual(['guì', 'jué'])
@@ -522,6 +541,13 @@ describe('encodeChar', { timeout: 15000 }, () => {
 })
 
 describe('encodePhrase', { timeout: 30000 }, () => {
+  it('encodes 阿勒泰 without zdic-unavailable when character lookups succeed', async () => {
+    const result = await encodePhrase('阿勒泰')
+
+    expect(result.pronunciationSource).not.toBe('zdic-unavailable')
+    expect(result.chars.map(char => char.pronunciationLookupStatus)).toEqual(['found', 'found', 'found'])
+  })
+
   it('encodes 你好 (2-char)', async () => {
     const r = await encodePhrase('你好')
     expect(r.type).toBe('二字词')

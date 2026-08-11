@@ -207,8 +207,17 @@ interface ZdicPinyinLookup {
 const zdicEntryPinyinCache = new Map<string, ZdicPinyinLookup>()
 const zdicCharacterPinyinCache = new Map<string, ZdicPinyinLookup>()
 
-// Matches ASCII-based pinyin with at least one toned vowel (no bopomofo ㄅㄆ etc.)
+// Matches pinyin characters only (no bopomofo ㄅㄆ etc.).
 const PINYIN_ONLY_RE = /^[a-züāáǎàēéěèīíǐìōóǒòūúǔùǖǘǚǜ]+$/
+const PINYIN_VOWEL_RE = /[aeiouüāáǎàēéěèīíǐìōóǒòūúǔùǖǘǚǜ]/
+const SINGLE_PINYIN_LETTER_RE = /^[a-züāáǎàēéěèīíǐìōóǒòūúǔùǖǘǚǜ]$/
+const PINYIN_TONE_MARK_RE = /[āáǎàēéěèīíǐìōóǒòūúǔùǖǘǚǜ]/
+
+function isPinyinSyllable(token: string): boolean {
+  return PINYIN_ONLY_RE.test(token)
+    && PINYIN_VOWEL_RE.test(token)
+    && (!SINGLE_PINYIN_LETTER_RE.test(token) || PINYIN_TONE_MARK_RE.test(token))
+}
 
 function splitPinyinText(text: string): string[] {
   return text
@@ -216,7 +225,7 @@ function splitPinyinText(text: string): string[] {
     .replace(/&nbsp;/g, ' ')
     .split(/[、，,\s]+/)
     .map(s => s.trim())
-    .filter(s => PINYIN_ONLY_RE.test(s))
+    .filter(isPinyinSyllable)
 }
 
 const ZDIC_REQUEST_TIMEOUT_MS = 4000
@@ -431,7 +440,7 @@ async function lookupCharacterPinyinsFromZdic(char: string): Promise<ZdicPinyinL
     // Extract all <span class="z_d song">…</span> values, keep only pinyin (not bopomofo)
     const all = [...html.matchAll(/class="z_d song">([^<\s]+)/g)]
       .map(m => m[1])
-      .filter(s => PINYIN_ONLY_RE.test(s))
+      .filter(isPinyinSyllable)
     const deduped = [...new Set(all)]
     if (deduped.length > 0) {
       const result: ZdicPinyinLookup = { status: 'found', pinyins: deduped }
@@ -444,7 +453,7 @@ async function lookupCharacterPinyinsFromZdic(char: string): Promise<ZdicPinyinL
     // TONED_PINYIN_RE fails on syllables like guì/jué where the tone mark isn't first after the initial
     const titleMatch = html.match(/<title>[^\s<]+\s+([^<]+?)\s*-\s*汉典<\/title>/)
     if (titleMatch) {
-      const titlePinyins = titleMatch[1].split(/[、，,\s]+/).filter(s => PINYIN_ONLY_RE.test(s) && s.length >= 2)
+      const titlePinyins = titleMatch[1].split(/[、，,\s]+/).filter(isPinyinSyllable)
       if (titlePinyins.length > 0) {
         const result: ZdicPinyinLookup = { status: 'found', pinyins: titlePinyins }
         void writeZdicPinyinCache('char', char, { status: 'found', pinyins: result.pinyins })
