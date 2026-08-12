@@ -23,6 +23,15 @@ function request(body: unknown): NextRequest {
   })
 }
 
+function redirectWithRawUtf8Location(location: string): Response {
+  // Fetch exposes raw response-header bytes as single-byte code units.
+  const headerValue = Array.from(
+    new TextEncoder().encode(location),
+    byte => String.fromCharCode(byte),
+  ).join('')
+  return new Response(null, { status: 301, headers: { Location: headerValue } })
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
   mockVerifyBotToken.mockResolvedValue(true)
@@ -114,11 +123,13 @@ describe('POST /api/bot/evidence/fetch', () => {
     }))
   })
 
-  it('follows the handian redirect from www.zdic.net to the allowlisted apex host', async () => {
+  it('does not double encode an already percent-encoded redirect Location', async () => {
     vi.mocked(fetch)
       .mockResolvedValueOnce(new Response(null, {
         status: 301,
-        headers: { Location: 'https://zdic.net/hans/%E8%AF%89%E8%AE%BC%E8%B4%B9' },
+        headers: {
+          Location: 'https://zdic.net/hans/%E8%AF%89%E8%AE%BC%E8%B4%B9?related=%E4%BD%A0%E8%BF%98',
+        },
       }))
       .mockResolvedValueOnce(new Response(
         '<script>doNotLeak()</script><p>诉讼费 拼音 sù sòng fèi</p>',
@@ -139,8 +150,35 @@ describe('POST /api/bot/evidence/fetch', () => {
       'https://www.zdic.net/hans/%E8%AF%89%E8%AE%BC%E8%B4%B9',
     )
     expect(String(vi.mocked(fetch).mock.calls[1][0])).toBe(
-      'https://zdic.net/hans/%E8%AF%89%E8%AE%BC%E8%B4%B9',
+      'https://zdic.net/hans/%E8%AF%89%E8%AE%BC%E8%B4%B9?related=%E4%BD%A0%E8%BF%98',
     )
+  })
+
+  it('follows a handian redirect whose Location path contains raw Unicode', async () => {
+    const initialUrl = 'https://www.zdic.net/hans/%E8%AF%89%E8%AE%BC%E8%B4%B9'
+    const targetUrl = 'https://zdic.net/hans/%E8%AF%89%E8%AE%BC%E8%B4%B9?related=%E4%BD%A0%E8%BF%98'
+    vi.mocked(fetch).mockImplementation(async input => {
+      const url = String(input)
+      if (url === initialUrl) {
+        return redirectWithRawUtf8Location('https://zdic.net/hans/诉讼费?related=你还')
+      }
+      if (url === targetUrl) {
+        return new Response('<p>诉讼费 拼音 sù sòng fèi</p>', { status: 200 })
+      }
+      return new Response(null, { status: 404 })
+    })
+
+    const { POST } = await import('./route')
+    const response = await POST(request({ sourceId: 'handian', word: '诉讼费' }))
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      ok: true,
+      status: 200,
+      text: '诉讼费 拼音 sù sòng fèi',
+    })
+    expect(fetch).toHaveBeenCalledTimes(2)
+    expect(String(vi.mocked(fetch).mock.calls[1][0])).toBe(targetUrl)
   })
 
   it('short-circuits a fresh absence and refetches it after the 24-hour TTL', async () => {
@@ -233,11 +271,10 @@ describe('POST /api/bot/evidence/fetch', () => {
     }))
   })
 
-  it('blocks off-domain redirects without retrying or caching them', async () => {
-    vi.mocked(fetch).mockResolvedValue(new Response(null, {
-      status: 302,
-      headers: { Location: 'https://evil.example/stolen' },
-    }))
+  it('blocks a normalized raw-Unicode redirect to a host outside the allowlist', async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      redirectWithRawUtf8Location('https://evil.example/诉讼费?related=你还'),
+    )
 
     const { POST } = await import('./route')
     const response = await POST(request({ sourceId: 'baidu_baike', word: '汉典' }))

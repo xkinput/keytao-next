@@ -269,6 +269,31 @@ function isAllowedUrl(url: URL, allowedHostnames: readonly string[]): boolean {
     && !url.password
 }
 
+function decodeUtf8LocationHeader(value: string): string {
+  const bytes = new Uint8Array(value.length)
+  let hasNonAsciiByte = false
+
+  for (let index = 0; index < value.length; index += 1) {
+    const codeUnit = value.charCodeAt(index)
+    if (codeUnit > 0xff) return value
+    bytes[index] = codeUnit
+    hasNonAsciiByte ||= codeUnit >= 0x80
+  }
+
+  if (!hasNonAsciiByte) return value
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+  } catch {
+    return value
+  }
+}
+
+function resolveAndNormalizeRedirectUrl(location: string, baseUrl: URL): URL {
+  const decodedLocation = decodeUtf8LocationHeader(location)
+  // URL resolution encodes raw Unicode in paths and queries while preserving percent escapes.
+  return new URL(decodedLocation, baseUrl)
+}
+
 async function readBoundedHtml(response: Response): Promise<string> {
   if (!response.body) return ''
 
@@ -315,7 +340,7 @@ async function fetchAttempt(
         if (!location || redirectCount === MAX_REDIRECTS) {
           return { status: 'unavailable', retryable: false }
         }
-        const redirectedUrl = new URL(location, currentUrl)
+        const redirectedUrl = resolveAndNormalizeRedirectUrl(location, currentUrl)
         if (!isAllowedUrl(redirectedUrl, allowedHostnames)) {
           return { status: 'unavailable', retryable: false }
         }
