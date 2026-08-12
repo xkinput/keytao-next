@@ -507,6 +507,17 @@ model ZdicPinyinCache {
   @@map("zdic_pinyin_cache")
 }
 
+model BotEvidenceCache {
+  sourceId  String
+  word      String
+  status    String
+  text      String?  @db.Text
+  fetchedAt DateTime
+
+  @@id([sourceId, word])
+  @@map("bot_evidence_cache")
+}
+
 /// Vendored offline dictionary readings used as advisory review evidence.
 model PronunciationReference {
   word    String
