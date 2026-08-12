@@ -28,7 +28,8 @@
     "init:role": "tsx scripts/initRole.ts",
     "init:user": "tsx scripts/initUser.ts",
     "init:bot-user": "tsx scripts/initBotUser.ts",
-    "init:all": "pnpm run init:permission && pnpm run init:role && pnpm run init:user"
+    "init:all": "pnpm run init:permission && pnpm run init:role && pnpm run init:user",
+    "import:reference-review-data": "node --import tsx scripts/importReferenceReviewData.ts"
   },
   "dependencies": {
     "@gsap/react": "^2.1.2",

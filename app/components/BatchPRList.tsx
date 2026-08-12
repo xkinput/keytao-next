@@ -213,6 +213,14 @@ export default function BatchPRList({
                         </div>
                     </CardHeader>
                     <CardBody>
+                        {pr.aiReview?.referenceEvidence && (
+                            <p
+                                className="mb-2 truncate text-tiny text-default-500"
+                                title={pr.aiReview.referenceEvidence.line}
+                            >
+                                {pr.aiReview.referenceEvidence.line}
+                            </p>
+                        )}
                         {pr.aiReview?.reviewRecord ? (
                             <div className="mb-2 flex flex-wrap items-center gap-1 text-tiny text-default-500">
                                 <span className="inline-flex items-center gap-1 rounded-md bg-primary-50 px-2 py-1 text-primary dark:bg-primary-100/10">

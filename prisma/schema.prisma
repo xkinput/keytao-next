@@ -506,3 +506,22 @@ model ZdicPinyinCache {
   @@id([kind, entry])
   @@map("zdic_pinyin_cache")
 }
+
+/// Vendored offline dictionary readings used as advisory review evidence.
+model PronunciationReference {
+  word    String
+  reading String
+  source  String
+
+  @@id([word, reading, source])
+  @@index([word])
+  @@map("pronunciation_references")
+}
+
+/// Vendored jieba corpus frequency used as advisory ordering evidence.
+model CorpusFrequency {
+  word      String @id
+  frequency Int
+
+  @@map("corpus_frequencies")
+}

@@ -99,6 +99,12 @@ vi.mock('@/lib/prisma', () => ({
       count: vi.fn(),
       groupBy: vi.fn(),
     },
+    pronunciationReference: {
+      findMany: vi.fn(),
+    },
+    corpusFrequency: {
+      findMany: vi.fn(),
+    },
     codeConflict: {
       create: vi.fn(),
     },
@@ -168,6 +174,8 @@ beforeEach(() => {
   mockPrisma.pullRequest.findMany.mockResolvedValue([])
   mockPrisma.pullRequest.count.mockResolvedValue(0)
   mockPrisma.pullRequest.updateMany.mockResolvedValue({ count: 1 })
+  mockPrisma.pronunciationReference.findMany.mockResolvedValue([])
+  mockPrisma.corpusFrequency.findMany.mockResolvedValue([])
   mockPrisma.$executeRawUnsafe.mockResolvedValue(undefined)
   mockPrisma.$transaction.mockImplementation(async (operation: unknown) => {
     if (typeof operation === 'function') {
@@ -518,6 +526,12 @@ describe('API abuse guards', () => {
       status: 200,
       json: async () => ({ success: true, aiReview: botAiReview }),
     } as Response)
+    mockPrisma.pronunciationReference.findMany.mockResolvedValue([
+      { word: '安泊', reading: 'ān bó', source: 'zdic_cibs' },
+    ])
+    mockPrisma.corpusFrequency.findMany.mockResolvedValue([
+      { word: '安泊', frequency: 88 },
+    ])
     mockPrisma.batch.findUnique.mockResolvedValue({
       id: 'batch-1',
       status: 'Submitted',
@@ -548,6 +562,10 @@ describe('API abuse guards', () => {
     expect(res?.status).toBe(200)
     expect(data?.aiReview.riskCounts.botReviewed).toBe(1)
     expect(data?.focusItem).toMatchObject({ prId: 1 })
+    expect(data?.focusItem.referenceEvidence).toMatchObject({
+      dictionaryPresent: true,
+      frequency: 88,
+    })
     expect(fetch).toHaveBeenCalledWith(
       'http://localhost:8080/api/keytao/batches/review',
       expect.objectContaining({ method: 'POST' })

@@ -34,6 +34,71 @@ export interface MiaomiaoBatchReviewResponse {
   warning?: string
 }
 
+function bindLocalReferenceEvidence(
+  botReview: BatchAiReviewResult,
+  localReview: BatchAiReviewResult,
+): BatchAiReviewResult {
+  const localItems = new Map(localReview.items.map(item => [item.prId, item]))
+  const items = botReview.items.map((item) => {
+    // Trusted offline evidence is server-owned advisory input. Never accept a
+    // bot-authored replacement, and never use agreement to lower review gates.
+    const botItem = { ...item }
+    delete botItem.referenceEvidence
+    const localItem = localItems.get(item.prId)
+    const referenceEvidence = localItem?.referenceEvidence
+    if (!referenceEvidence) return botItem
+
+    if (referenceEvidence.validation !== 'mismatch') {
+      return { ...botItem, referenceEvidence }
+    }
+
+    const reasons = [...botItem.reasons]
+    const suggestions = [...botItem.suggestions]
+    const mismatchReason = '离线参考读音均无法推出当前编码，请复核读音或编码。'
+    const mismatchSuggestion = '对照参考读音与键道音码映射核对；参考一致也不能解除既有人工复核要求。'
+    if (!reasons.includes(mismatchReason)) reasons.push(mismatchReason)
+    if (!suggestions.includes(mismatchSuggestion)) suggestions.push(mismatchSuggestion)
+    return {
+      ...botItem,
+      status: botItem.status === 'pass' ? 'attention' as const : botItem.status,
+      severity: botItem.status === 'pass' ? 'warning' as const : botItem.severity,
+      reasons,
+      suggestions,
+      referenceEvidence,
+    }
+  })
+  const pass = items.filter(item => item.status === 'pass').length
+  const attention = items.filter(item => item.status === 'attention').length
+  const manualReview = items.filter(item => item.status === 'manual_review').length
+  const localChains = new Map(
+    localReview.codeChains.map(chain => [`${chain.type}:${chain.code}`, chain]),
+  )
+  const codeChains = botReview.codeChains.map((chain) => {
+    const localChain = localChains.get(`${chain.type}:${chain.code}`)
+    if (!localChain) return chain
+    localChains.delete(`${chain.type}:${chain.code}`)
+    return {
+      ...chain,
+      before: localChain.before,
+      after: localChain.after,
+      recommendations: [...new Set([...chain.recommendations, ...localChain.recommendations])],
+    }
+  })
+  codeChains.push(...localChains.values())
+  return {
+    ...botReview,
+    verdict: manualReview > 0 ? 'manual_review' : attention > 0 ? 'needs_attention' : 'pass',
+    riskCounts: {
+      pass,
+      attention,
+      manualReview,
+      botReviewed: items.filter(item => item.reviewRecord).length,
+    },
+    items,
+    codeChains,
+  }
+}
+
 function botReviewUrl(): string {
   const baseUrl = (process.env.BOT_API_URL || 'http://localhost:8080').replace(/\/+$/, '')
   return `${baseUrl}/api/keytao/batches/review`
@@ -86,7 +151,7 @@ export async function requestMiaomiaoBatchReviewDetailed(input: {
   }
 
   return {
-    aiReview: data.aiReview,
+    aiReview: bindLocalReferenceEvidence(data.aiReview, input.localReview),
     warning: data.warning,
   }
 }

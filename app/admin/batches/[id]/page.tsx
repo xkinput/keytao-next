@@ -130,6 +130,9 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
       .filter(note =>
         note.recommendation.includes('首位')
         || note.recommendation.includes('提频')
+        || note.recommendation.includes('语料频次')
+        || note.recommendation.includes('词典收录')
+        || note.recommendation.includes('语料参考')
         || note.recommendation.includes('移除')
         || note.recommendation.includes('移入')
         || note.recommendation.includes('移出')

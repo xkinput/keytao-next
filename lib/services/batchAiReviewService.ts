@@ -11,6 +11,12 @@ import type {
 } from '@/lib/types/batchAiReview'
 import type { ConflictInfo } from './conflictDetector'
 import { getMiaomiaoEvidenceHighlights, parseMiaomiaoReviewRemark as parseStructuredRemark } from './miaomiaoReviewRemark'
+import {
+  buildReferenceEvidence,
+  hasDictionaryReference,
+  loadReferenceWordData,
+  type ReferenceWordData,
+} from './referenceReviewService'
 
 type PullRequestAction = 'Create' | 'Change' | 'Delete'
 
@@ -372,7 +378,8 @@ function collectLanguageChecks(pr: ReviewPullRequest, reasons: string[], suggest
 
 function buildReviewItem(
   pr: ReviewPullRequest,
-  moves: MovePair[]
+  moves: MovePair[],
+  referenceByWord: Map<string, ReferenceWordData>,
 ): BatchAiReviewItem {
   const word = getWord(pr)
   const code = getCode(pr)
@@ -476,6 +483,18 @@ function buildReviewItem(
     }
   }
 
+  // Offline references are advisory review input only. Agreement must never lower
+  // status, clear a needsManualReview seal, or alter approval authorization,
+  // digests, CAS, or seal-vs-block semantics; only a mismatch may raise a warning.
+  const referenceEvidence = pr.action === 'Create' || pr.action === 'Change'
+    ? buildReferenceEvidence(referenceByWord.get(word), code, reviewRecord?.pronunciation)
+    : undefined
+  if (referenceEvidence?.validation === 'mismatch') {
+    raiseStatus(state, 'attention', 'warning')
+    addUnique(reasons, '离线参考读音均无法推出当前编码，请复核读音或编码。')
+    addUnique(suggestions, '对照参考读音与键道音码映射核对；参考一致也不能解除既有人工复核要求。')
+  }
+
   const title = (() => {
     if (structuredReview) return structuredReview.title
     if (!reviewRecord && pr.action !== 'Delete') return '缺少喵备注'
@@ -494,10 +513,27 @@ function buildReviewItem(
     reasons: reasons.length > 0 ? reasons : [`「${word}」@${code} 未发现明显冲突。`],
     suggestions: suggestions.length > 0 ? suggestions : ['可结合编码链位置做最终确认。'],
     reviewRecord,
+    referenceEvidence,
   }
 }
 
-async function buildCodeChains(prs: ReviewPullRequest[], moves: MovePair[]): Promise<BatchAiReviewCodeChain[]> {
+function referenceFields(
+  word: string,
+  referenceByWord: Map<string, ReferenceWordData>,
+): Pick<BatchAiReviewChainEntry, 'referenceFrequency' | 'dictionaryPresent'> {
+  const reference = referenceByWord.get(word)
+  if (!reference) return {}
+  return {
+    referenceFrequency: reference.frequency ?? undefined,
+    dictionaryPresent: hasDictionaryReference(reference),
+  }
+}
+
+async function buildCodeChains(
+  prs: ReviewPullRequest[],
+  moves: MovePair[],
+  referenceByWord: Map<string, ReferenceWordData>,
+): Promise<BatchAiReviewCodeChain[]> {
   const affectedGroups = new Map<string, { type: PhraseType; code: string }>()
   for (const pr of prs) {
     const code = getCode(pr)
@@ -531,6 +567,11 @@ async function buildCodeChains(prs: ReviewPullRequest[], moves: MovePair[]): Pro
     ],
   })
 
+  const currentReferenceData = await loadReferenceWordData(currentPhrases.map(phrase => phrase.word))
+  for (const [word, reference] of currentReferenceData) {
+    referenceByWord.set(word, reference)
+  }
+
   const chains = new Map<string, BatchAiReviewChainEntry[]>()
   for (const group of affectedGroups.values()) {
     chains.set(chainKey(group.type, group.code), [])
@@ -545,6 +586,7 @@ async function buildCodeChains(prs: ReviewPullRequest[], moves: MovePair[]): Pro
       type,
       weight: phrase.weight,
       source: 'current',
+      ...referenceFields(phrase.word, referenceByWord),
     })
   }
 
@@ -579,6 +621,7 @@ async function buildCodeChains(prs: ReviewPullRequest[], moves: MovePair[]): Pro
             source: 'draft',
             action: pr.action,
             prId: pr.id,
+            ...referenceFields(word, referenceByWord),
           }
         } else {
           after.push({
@@ -589,6 +632,7 @@ async function buildCodeChains(prs: ReviewPullRequest[], moves: MovePair[]): Pro
             source: 'draft',
             action: pr.action,
             prId: pr.id,
+            ...referenceFields(word, referenceByWord),
           })
         }
       } else if (pr.action === 'Create') {
@@ -602,6 +646,7 @@ async function buildCodeChains(prs: ReviewPullRequest[], moves: MovePair[]): Pro
             source: 'draft',
             action: pr.action,
             prId: pr.id,
+            ...referenceFields(word, referenceByWord),
           })
         }
       }
@@ -640,6 +685,8 @@ function buildChainRecommendations(
   after: BatchAiReviewChainEntry[],
   moves: MovePair[]
 ): string[] {
+  // Corpus and dictionary facts affect advice text only; stored weights and the
+  // canonical before/after chain order remain untouched review inputs.
   const recommendations: string[] = []
   const beforeWords = new Set(before.map(entry => entry.word))
   const afterWords = new Set(after.map(entry => entry.word))
@@ -659,11 +706,42 @@ function buildChainRecommendations(
   }
 
   if (firstBefore && firstAfter && firstBefore.word !== firstAfter.word) {
-    recommendations.push(`首位将从 ${formatEntry(firstBefore)} 变为 ${formatEntry(firstAfter)}，需要确认新首位确实更常用或更符合编码目标。`)
+    if (
+      firstAfter.referenceFrequency !== undefined
+      && firstBefore.referenceFrequency !== undefined
+    ) {
+      const relation = firstAfter.referenceFrequency > firstBefore.referenceFrequency
+        ? '支持'
+        : firstAfter.referenceFrequency < firstBefore.referenceFrequency ? '不支持' : '无法区分'
+      recommendations.push(
+        `语料频次${relation}「${firstAfter.word}」置于「${firstBefore.word}」之前：${firstAfter.referenceFrequency} ${firstAfter.referenceFrequency === firstBefore.referenceFrequency ? '=' : firstAfter.referenceFrequency > firstBefore.referenceFrequency ? '>' : '<'} ${firstBefore.referenceFrequency}。`,
+      )
+    } else if (
+      typeof firstAfter.dictionaryPresent === 'boolean'
+      && typeof firstBefore.dictionaryPresent === 'boolean'
+      && firstAfter.dictionaryPresent !== firstBefore.dictionaryPresent
+    ) {
+      const supported = firstAfter.dictionaryPresent === true
+      recommendations.push(
+        `词典收录${supported ? '支持' : '不支持'}「${firstAfter.word}」置于「${firstBefore.word}」之前；仍需结合语境确认。`,
+      )
+    } else {
+      recommendations.push(`首位将从 ${formatEntry(firstBefore)} 变为 ${formatEntry(firstAfter)}，需要确认新首位确实更常用或更符合编码目标。`)
+    }
   }
 
   for (const entry of added) {
     const index = after.findIndex(item => item.word === entry.word && item.prId === entry.prId)
+    const adjacent = index > 0 ? after[index - 1] : after[1]
+    const hasFrequencyComparison = adjacent
+      && entry.referenceFrequency !== undefined
+      && adjacent.referenceFrequency !== undefined
+    const hasDictionaryComparison = adjacent
+      && entry.dictionaryPresent !== undefined
+      && adjacent.dictionaryPresent !== undefined
+      && entry.dictionaryPresent !== adjacent.dictionaryPresent
+    if (hasFrequencyComparison || hasDictionaryComparison) continue
+
     if (index > 0) {
       recommendations.push(`新增 ${formatEntry(entry)} 位于第 ${index + 1} 位，前面还有 ${formatEntry(after[index - 1])}；如果目标是提频，需要常用度证据。`)
     } else if (after.length > 1) {
@@ -676,7 +754,33 @@ function buildChainRecommendations(
   }
 
   if (after.length > 1) {
-    recommendations.push(`建议顺序：${after.slice(0, 5).map(formatEntry).join(' > ')}${after.length > 5 ? ' > ...' : ''}。`)
+    const hasReferenceFacts = after.some(entry => (
+      entry.referenceFrequency !== undefined || entry.dictionaryPresent !== undefined
+    ))
+    if (hasReferenceFacts) {
+      const referenceOrder = after
+        .map((entry, index) => ({ entry, index }))
+        .sort((a, b) => {
+          const frequencyA = a.entry.referenceFrequency ?? -1
+          const frequencyB = b.entry.referenceFrequency ?? -1
+          if (frequencyA !== frequencyB) return frequencyB - frequencyA
+          const dictionaryRankA = a.entry.dictionaryPresent === true ? 2 : a.entry.dictionaryPresent === false ? 1 : 0
+          const dictionaryRankB = b.entry.dictionaryPresent === true ? 2 : b.entry.dictionaryPresent === false ? 1 : 0
+          if (dictionaryRankA !== dictionaryRankB) return dictionaryRankB - dictionaryRankA
+          return a.index - b.index
+        })
+        .slice(0, 5)
+        .map(({ entry }) => {
+          const facts = [
+            entry.referenceFrequency === undefined ? null : `频次 ${entry.referenceFrequency}`,
+            entry.dictionaryPresent === true ? '词典收录' : null,
+          ].filter((fact): fact is string => fact !== null)
+          return facts.length > 0 ? `${formatEntry(entry)}（${facts.join('，')}）` : formatEntry(entry)
+        })
+      recommendations.push(`语料参考顺序：${referenceOrder.join(' > ')}${after.length > 5 ? ' > ...' : ''}。`)
+    } else {
+      recommendations.push(`建议顺序：${after.slice(0, 5).map(formatEntry).join(' > ')}${after.length > 5 ? ' > ...' : ''}。`)
+    }
   }
 
   if (recommendations.length === 0) {
@@ -759,8 +863,15 @@ function buildHeadline(items: BatchAiReviewItem[]): string {
 
 export async function buildBatchAiReview(batch: BuildBatchAiReviewInput): Promise<BatchAiReviewResult> {
   const moves = detectCodeMoves(batch.pullRequests)
-  const items = batch.pullRequests.map(pr => buildReviewItem(pr, moves))
-  const codeChains = await buildCodeChains(batch.pullRequests, moves)
+  const referenceWords = batch.pullRequests
+    .filter(pr => pr.action === 'Create' || pr.action === 'Change')
+    .map(getWord)
+  const referenceByWord = await loadReferenceWordData(referenceWords)
+
+  // Reference agreement enriches evidence only. It is intentionally not an
+  // approval gate and cannot lower existing manual-review or warning status.
+  const items = batch.pullRequests.map(pr => buildReviewItem(pr, moves, referenceByWord))
+  const codeChains = await buildCodeChains(batch.pullRequests, moves, referenceByWord)
 
   const manualReview = items.filter(item => item.status === 'manual_review').length
   const attention = items.filter(item => item.status === 'attention').length

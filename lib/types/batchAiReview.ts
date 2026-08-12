@@ -17,6 +17,24 @@ export interface BatchAiReviewRecord {
   evidence: string[]
 }
 
+export type BatchReferenceValidation = 'match' | 'mismatch' | 'not_applicable'
+
+export interface BatchReferenceReading {
+  reading: string
+  sources: string[]
+  codeConsistent: boolean
+}
+
+export interface BatchReferenceEvidence {
+  dictionaryPresent: boolean
+  frequency: number | null
+  validation: BatchReferenceValidation
+  claimedReading?: string
+  claimedReadingPresent?: boolean
+  readings: BatchReferenceReading[]
+  line: string
+}
+
 export interface BatchAiReviewItem {
   prId: number
   status: BatchAiReviewStatus
@@ -25,6 +43,7 @@ export interface BatchAiReviewItem {
   reasons: string[]
   suggestions: string[]
   reviewRecord?: BatchAiReviewRecord
+  referenceEvidence?: BatchReferenceEvidence
 }
 
 export interface BatchAiReviewChainEntry {
@@ -35,6 +54,8 @@ export interface BatchAiReviewChainEntry {
   source: 'current' | 'draft'
   action?: string
   prId?: number
+  referenceFrequency?: number
+  dictionaryPresent?: boolean
 }
 
 export interface BatchAiReviewCodeChain {
