@@ -114,6 +114,35 @@ describe('POST /api/bot/evidence/fetch', () => {
     }))
   })
 
+  it('follows the handian redirect from www.zdic.net to the allowlisted apex host', async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(new Response(null, {
+        status: 301,
+        headers: { Location: 'https://zdic.net/hans/%E8%AF%89%E8%AE%BC%E8%B4%B9' },
+      }))
+      .mockResolvedValueOnce(new Response(
+        '<script>doNotLeak()</script><p>诉讼费 拼音 sù sòng fèi</p>',
+        { status: 200 },
+      ))
+
+    const { POST } = await import('./route')
+    const response = await POST(request({ sourceId: 'handian', word: '诉讼费' }))
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      ok: true,
+      status: 200,
+      text: '诉讼费 拼音 sù sòng fèi',
+    })
+    expect(fetch).toHaveBeenCalledTimes(2)
+    expect(String(vi.mocked(fetch).mock.calls[0][0])).toBe(
+      'https://www.zdic.net/hans/%E8%AF%89%E8%AE%BC%E8%B4%B9',
+    )
+    expect(String(vi.mocked(fetch).mock.calls[1][0])).toBe(
+      'https://zdic.net/hans/%E8%AF%89%E8%AE%BC%E8%B4%B9',
+    )
+  })
+
   it('short-circuits a fresh absence and refetches it after the 24-hour TTL', async () => {
     const freshAbsence = {
       status: 'absent',

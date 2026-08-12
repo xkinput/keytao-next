@@ -22,6 +22,7 @@ type WordScope = 'all' | 'single_character' | 'multi_character'
 
 interface EvidenceSourcePolicy {
   hostname: string
+  hostnameAliases?: readonly string[]
   buildUrl: (encodedWord: string) => string
   followExactWordAnchor: boolean
   wordScope: WordScope
@@ -32,6 +33,7 @@ interface EvidenceSourcePolicy {
 const EVIDENCE_SOURCES: Record<BotEvidenceSourceId, EvidenceSourcePolicy> = {
   handian: {
     hostname: 'www.zdic.net',
+    hostnameAliases: ['zdic.net'],
     buildUrl: word => `https://www.zdic.net/hans/${word}`,
     followExactWordAnchor: false,
     wordScope: 'all',
@@ -258,9 +260,10 @@ function boundText(value: string): string {
   return [...value].slice(0, BOT_EVIDENCE_TEXT_LIMIT).join('')
 }
 
-function isAllowedUrl(url: URL, expectedHostname: string): boolean {
+function isAllowedUrl(url: URL, allowedHostnames: readonly string[]): boolean {
+  const hostname = url.hostname.toLowerCase().replace(/\.$/, '')
   return url.protocol === 'https:'
-    && url.hostname.toLowerCase().replace(/\.$/, '') === expectedHostname
+    && allowedHostnames.includes(hostname)
     && url.port === ''
     && !url.username
     && !url.password
@@ -288,7 +291,7 @@ async function readBoundedHtml(response: Response): Promise<string> {
 
 async function fetchAttempt(
   initialUrl: string,
-  expectedHostname: string,
+  allowedHostnames: readonly string[],
 ): Promise<FetchResult> {
   let currentUrl = new URL(initialUrl)
   const controller = new AbortController()
@@ -296,7 +299,7 @@ async function fetchAttempt(
 
   try {
     for (let redirectCount = 0; redirectCount <= MAX_REDIRECTS; redirectCount += 1) {
-      if (!isAllowedUrl(currentUrl, expectedHostname)) {
+      if (!isAllowedUrl(currentUrl, allowedHostnames)) {
         return { status: 'unavailable', retryable: false }
       }
 
@@ -313,7 +316,7 @@ async function fetchAttempt(
           return { status: 'unavailable', retryable: false }
         }
         const redirectedUrl = new URL(location, currentUrl)
-        if (!isAllowedUrl(redirectedUrl, expectedHostname)) {
+        if (!isAllowedUrl(redirectedUrl, allowedHostnames)) {
           return { status: 'unavailable', retryable: false }
         }
         currentUrl = redirectedUrl
@@ -339,18 +342,18 @@ async function fetchAttempt(
   return { status: 'unavailable', retryable: false }
 }
 
-async function resilientFetch(url: string, expectedHostname: string): Promise<FetchResult> {
-  const first = await fetchAttempt(url, expectedHostname)
+async function resilientFetch(url: string, allowedHostnames: readonly string[]): Promise<FetchResult> {
+  const first = await fetchAttempt(url, allowedHostnames)
   if (first.status !== 'unavailable' || !first.retryable) return first
 
   await new Promise(resolve => setTimeout(resolve, FETCH_RETRY_BACKOFF_MS))
-  return fetchAttempt(url, expectedHostname)
+  return fetchAttempt(url, allowedHostnames)
 }
 
 function exactWordSameDomainAnchorUrl(
   html: string,
   searchUrl: string,
-  expectedHostname: string,
+  allowedHostnames: readonly string[],
   word: string,
 ): string {
   const search = new URL(searchUrl)
@@ -365,7 +368,7 @@ function exactWordSameDomainAnchorUrl(
       const candidate = new URL(decodeHtmlEntities(hrefMatch[2]).trim(), search)
       if (
         candidate.protocol === search.protocol
-        && isAllowedUrl(candidate, expectedHostname)
+        && isAllowedUrl(candidate, allowedHostnames)
       ) {
         return candidate.toString()
       }
@@ -389,18 +392,19 @@ export async function fetchBotEvidence(
   }
 
   const source = EVIDENCE_SOURCES[sourceId]
+  const allowedHostnames = [source.hostname, ...(source.hostnameAliases ?? [])]
   const initialUrl = source.buildUrl(encodeURIComponent(word))
-  let result = await resilientFetch(initialUrl, source.hostname)
+  let result = await resilientFetch(initialUrl, allowedHostnames)
 
   if (result.status === 'found' && source.followExactWordAnchor) {
     const entryUrl = exactWordSameDomainAnchorUrl(
       result.html,
       initialUrl,
-      source.hostname,
+      allowedHostnames,
       word,
     )
     result = entryUrl
-      ? await resilientFetch(entryUrl, source.hostname)
+      ? await resilientFetch(entryUrl, allowedHostnames)
       : { status: 'absent' }
   }
 
