@@ -303,10 +303,11 @@ export async function runGithubAutoSync(options: GithubAutoSyncOptions = {}): Pr
     })
 
     const releaseDate = new Date().toISOString().split('T')[0]
+    const mergeBody = `自动同步 KeyTao 词库。\n\nSync task: ${task.id}`
     const merge = await githubService.mergePullRequest(
       pr.number,
       `Update dictionaries - ${releaseDate}`,
-      `自动同步 KeyTao 词库。\n\nSync task: ${task.id}`
+      trailers ? `${mergeBody}\n\n${trailers}` : mergeBody
     )
     const { latestTag, nextTag } = await githubService.getNextReleaseTag('patch')
     const releaseBody = [
