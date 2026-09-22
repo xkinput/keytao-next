@@ -189,6 +189,7 @@ export async function PATCH(
 
     if (
       remark !== undefined
+      && remark !== null
       && (
         typeof remark !== 'string'
         || remark.length > MAX_REMARK_LENGTH

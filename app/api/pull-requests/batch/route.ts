@@ -56,6 +56,7 @@ export async function POST(request: NextRequest) {
 
     const invalidRemark = (prItems as BatchPullRequestItem[]).find(change => (
       change.remark !== undefined
+      && change.remark !== null
       && (
         typeof change.remark !== 'string'
         || change.remark.length > MAX_REMARK_LENGTH

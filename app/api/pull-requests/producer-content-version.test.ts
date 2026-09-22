@@ -120,6 +120,19 @@ describe('web pull-request producer content versions', () => {
     await expect(response.json()).resolves.toMatchObject({ contentVersion: 4 })
   })
 
+  it('accepts a null remark on an existing-batch create', async () => {
+    const { POST } = await import('./route')
+    const response = await POST(jsonRequest('http://localhost/api/pull-requests', 'POST', {
+      ...validItem,
+      batchId: 'batch-1',
+      expectedContentVersion: 3,
+      remark: null,
+    }))
+
+    expect(response.status).toBe(200)
+    expect(mocks.prisma.$transaction).toHaveBeenCalled()
+  })
+
   it('rejects old PATCH and DELETE clients before mutating content', async () => {
     const detail = await import('./[id]/route')
     const patchResponse = await detail.PATCH(

@@ -72,6 +72,7 @@ export async function POST(request: NextRequest) {
 
     if (
       remark !== undefined
+      && remark !== null
       && (
         typeof remark !== 'string'
         || remark.length > 500
