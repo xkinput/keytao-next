@@ -186,7 +186,7 @@ export async function GET(
             })
         }
 
-        const isExecuted = ['Approved', 'Published'].includes(batch.status)
+        const isExecuted = batch.status === 'Approved'
         const changes: TypeChangeGroup[] = []
         const rejected: RejectedOperation[] = []
         let addedCount = 0

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { checkAdminPermission } from '@/lib/adminAuth'
+import { PUBLISHED_BATCH_WHERE } from '@/lib/batchPublished'
 
 export async function GET() {
   // 验证管理员权限
@@ -28,6 +29,7 @@ export async function GET() {
       totalBatches,
       recentSubmittedBatches,
       recentApprovedBatches,
+      publishedBatches,
     ] = await Promise.all([
       prisma.phrase.count(),
       prisma.issue.count(),
@@ -60,7 +62,7 @@ export async function GET() {
       // 近7天提交的批次数量
       prisma.batch.count({
         where: {
-          status: { in: ['Submitted', 'Approved', 'Rejected', 'Published'] },
+          status: { in: ['Submitted', 'Approved', 'Rejected'] },
           updateAt: { gte: sevenDaysAgo },
         },
       }),
@@ -71,6 +73,7 @@ export async function GET() {
           updateAt: { gte: sevenDaysAgo },
         },
       }),
+      prisma.batch.count({ where: PUBLISHED_BATCH_WHERE }),
     ])
 
     // 转换词条类型统计为对象
@@ -84,6 +87,7 @@ export async function GET() {
       acc[item.status] = item._count.id
       return acc
     }, {} as Record<string, number>)
+    batchStatusStats.Published = publishedBatches
 
     return NextResponse.json({
       totalPhrases,

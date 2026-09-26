@@ -169,7 +169,6 @@ export default function ProfilePage() {
       Submitted: 'primary',
       Approved: 'success',
       Rejected: 'danger',
-      Published: 'secondary',
       Pending: 'warning'
     }
     return colors[status] || 'default'

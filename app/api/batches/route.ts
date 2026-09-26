@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
+import { PUBLISHED_BATCH_WHERE } from '@/lib/batchPublished'
 import { BatchStatus, Prisma } from '@prisma/client'
 
 // GET /api/batches - List batches
@@ -18,7 +19,9 @@ export async function GET(request: NextRequest) {
     const session = await getSession()
 
     const where: Prisma.BatchWhereInput = {}
-    if (status && Object.values(BatchStatus).includes(status as BatchStatus)) {
+    if (status === 'Published') {
+      Object.assign(where, PUBLISHED_BATCH_WHERE)
+    } else if (status && Object.values(BatchStatus).includes(status as BatchStatus)) {
       where.status = status as BatchStatus
     }
     if (onlyMine && !session) {
@@ -44,7 +47,7 @@ export async function GET(request: NextRequest) {
       where.pullRequests = { some: {} }
     }
 
-    const [batches, total] = await Promise.all([
+    const [batches, total, latestSyncTask] = await Promise.all([
       prisma.batch.findMany({
         where,
         include: {
@@ -84,11 +87,18 @@ export async function GET(request: NextRequest) {
         skip: (page - 1) * pageSize,
         take: pageSize
       }),
-      prisma.batch.count({ where })
+      prisma.batch.count({ where }),
+      prisma.syncTask.findFirst({
+        where: { status: 'Completed', completedAt: { not: null } },
+        orderBy: { completedAt: 'desc' },
+        take: 1,
+        select: { completedAt: true }
+      })
     ])
 
     return NextResponse.json({
       batches,
+      lastSyncedAt: latestSyncTask?.completedAt?.toISOString() ?? null,
       pagination: {
         page,
         pageSize,

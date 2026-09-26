@@ -86,7 +86,7 @@ interface BatchDetail {
   id: string
   contentVersion: number
   description: string
-  status: 'Draft' | 'Submitted' | 'Approved' | 'Rejected' | 'Published'
+  status: 'Draft' | 'Submitted' | 'Approved' | 'Rejected'
   createAt: string
   updateAt: string
   creator: {

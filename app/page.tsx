@@ -22,7 +22,7 @@ import BatchCardSkeleton from '@/app/components/BatchCardSkeleton'
 interface Batch {
   id: string
   description: string
-  status: 'Draft' | 'Submitted' | 'Approved' | 'Rejected' | 'Published'
+  status: 'Draft' | 'Submitted' | 'Approved' | 'Rejected'
   createAt: string
   creator: {
     id: number
@@ -58,12 +58,19 @@ interface Batch {
 
 interface BatchesResponse {
   batches: Batch[]
+  lastSyncedAt: string | null
   pagination: {
     page: number
     pageSize: number
     total: number
     totalPages: number
   }
+}
+
+function formatSyncTime(value: string) {
+  const date = new Date(value)
+  const pad = (part: number) => String(part).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
 }
 
 export default function BatchesPage() {
@@ -168,6 +175,7 @@ export default function BatchesPage() {
               ) : (
                 <>共 {data?.pagination?.total || 0} 个</>
               )}
+              {data?.lastSyncedAt && ` · GitHub 同步于 ${formatSyncTime(data.lastSyncedAt)}`}
             </p>
           </div>
           <div className="flex items-center gap-2 md:pb-1">

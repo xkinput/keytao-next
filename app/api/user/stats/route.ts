@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getSession } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
+import { PUBLISHED_BATCH_WHERE } from '@/lib/batchPublished'
 
 export async function GET() {
   try {
@@ -22,10 +23,18 @@ export async function GET() {
     })
 
     // Get batches by status
-    const batchesByStatus = await prisma.batch.groupBy({
+    const batchStatusGroups = await prisma.batch.groupBy({
       by: ['status'],
       where: { creatorId: userId },
       _count: true
+    })
+
+    const batchesByStatus = batchStatusGroups.reduce((acc, item) => {
+      acc[item.status] = item._count
+      return acc
+    }, {} as Record<string, number>)
+    batchesByStatus.Published = await prisma.batch.count({
+      where: { creatorId: userId, ...PUBLISHED_BATCH_WHERE }
     })
 
     // Get pull requests by status
@@ -56,10 +65,7 @@ export async function GET() {
     return NextResponse.json({
       batchesCount,
       pullRequestsCount,
-      batchesByStatus: batchesByStatus.reduce((acc, item) => {
-        acc[item.status] = item._count
-        return acc
-      }, {} as Record<string, number>),
+      batchesByStatus,
       pullRequestsByStatus: pullRequestsByStatus.reduce((acc, item) => {
         acc[item.status] = item._count
         return acc

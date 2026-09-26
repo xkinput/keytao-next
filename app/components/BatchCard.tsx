@@ -17,7 +17,7 @@ interface BatchCardProps {
   batch: {
     id: string
     description: string
-    status: 'Draft' | 'Submitted' | 'Approved' | 'Rejected' | 'Published'
+    status: 'Draft' | 'Submitted' | 'Approved' | 'Rejected'
     createAt: string
     creator: {
       id: number

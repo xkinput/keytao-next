@@ -83,8 +83,6 @@ enum BatchStatus {
   Approved
   /// 已拒绝
   Rejected
-  /// 已发布
-  Published
 }
 
 /// 同步任务状态

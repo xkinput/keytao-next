@@ -17,7 +17,7 @@ import toast from 'react-hot-toast'
 
 interface BatchActionsDropdownProps {
   batchId: string
-  status: 'Draft' | 'Submitted' | 'Approved' | 'Rejected' | 'Published'
+  status: 'Draft' | 'Submitted' | 'Approved' | 'Rejected'
   creatorId: number
   onSuccess?: () => void | Promise<unknown>
   size?: 'sm' | 'md' | 'lg'

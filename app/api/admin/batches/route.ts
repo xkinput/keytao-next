@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { checkAdminPermission } from '@/lib/adminAuth'
+import { PUBLISHED_BATCH_WHERE } from '@/lib/batchPublished'
 
 // GET /api/admin/batches - Get batches for admin review
 export async function GET(request: NextRequest) {
@@ -14,8 +15,8 @@ export async function GET(request: NextRequest) {
     const status = searchParams.get('status') || 'Submitted'
 
     const batches = await prisma.batch.findMany({
-      where: {
-        status: status as 'Draft' | 'Submitted' | 'Approved' | 'Rejected' | 'Published'
+      where: status === 'Published' ? PUBLISHED_BATCH_WHERE : {
+        status: status as 'Draft' | 'Submitted' | 'Approved' | 'Rejected'
       },
       include: {
         creator: {

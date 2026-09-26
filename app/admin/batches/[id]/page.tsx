@@ -66,7 +66,7 @@ interface PullRequest {
 interface BatchDetail {
   id: string
   description: string
-  status: 'Draft' | 'Submitted' | 'Approved' | 'Rejected' | 'Published'
+  status: 'Draft' | 'Submitted' | 'Approved' | 'Rejected'
   createAt: string
   updateAt: string
   reviewNote: string | null
@@ -247,8 +247,7 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
     const map: Record<string, string> = {
       Submitted: '待审核',
       Approved: '已批准',
-      Rejected: '已拒绝',
-      Published: '已发布'
+      Rejected: '已拒绝'
     }
     return map[status] || status
   }

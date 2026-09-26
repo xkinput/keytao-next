@@ -20,7 +20,7 @@ import { BATCH_STATUS_MAP, STATUS_COLOR_MAP } from '@/lib/constants/status'
 interface Batch {
   id: string
   description: string
-  status: 'Draft' | 'Submitted' | 'Approved' | 'Rejected' | 'Published'
+  status: 'Draft' | 'Submitted' | 'Approved' | 'Rejected'
   createAt: string
   creator: {
     id: number
