@@ -108,6 +108,7 @@ function Navbar() {
       icon: Database,
       items: [
         { label: '词库管理', href: '/phrases' },
+        { label: '词条历史', href: '/phrases/history' },
         { label: '我的词库', href: '/user-dictionary' },
         { label: 'GitHub 同步', href: '/sync' },
       ]
@@ -183,10 +184,19 @@ function Navbar() {
       .filter((c): c is MenuCategory => c !== null)
   }, [menuCategories, isAdmin, isRootAdmin])
 
+  const activeHref = menuCategories
+    .flatMap(category => category.items)
+    .filter(item => !item.isExternal)
+    .reduce((active, { href }) => {
+      const matches = href === '/'
+        ? pathname === '/'
+        : pathname === href || pathname.startsWith(`${href}/`)
+      return matches && href.length > active.length ? href : active
+    }, '')
+
   const isItemActive = useCallback((href: string) => {
-    if (href === '/') return pathname === '/'
-    return pathname === href || pathname.startsWith(`${href}/`)
-  }, [pathname])
+    return href === activeHref
+  }, [activeHref])
 
   const isCategoryActive = useCallback((category: MenuCategory) => {
     return category.items.some((item) => !item.isExternal && isItemActive(item.href))

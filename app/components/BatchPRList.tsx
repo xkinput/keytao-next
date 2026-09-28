@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import {
     Card,
     CardBody,
@@ -8,7 +9,7 @@ import {
     Button,
     Tooltip,
 } from '@/lib/heroui-compat'
-import { AlertTriangle, Bot } from 'lucide-react'
+import { AlertTriangle, Bot, History } from 'lucide-react'
 import CodePhrasesPopover from './CodePhrasesPopover'
 import { getPhraseTypeLabel, type PhraseType } from '@/lib/constants/phraseTypes'
 import type { BatchAiReviewItem, BatchAiReviewStatus } from '@/lib/types/batchAiReview'
@@ -193,6 +194,13 @@ export default function BatchPRList({
                             ) : null}
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
+                            <Link
+                                href={`/phrases/history?${new URLSearchParams({ word: pr.oldWord || pr.word || pr.phrase?.word || '', code: pr.code || pr.phrase?.code || '' })}`}
+                                aria-label="词条修改历史"
+                                className="rounded-md p-2 text-default-500 hover:bg-default-100 hover:text-primary focus-visible:outline-2 focus-visible:outline-primary"
+                            >
+                                <History className="h-4 w-4" />
+                            </Link>
                             {pr.aiReview?.reviewRecord && (
                                 <Tooltip content={pr.aiReview.reviewRecord.summary}>
                                     <Chip color="primary" size="sm" variant="flat" startContent={<Bot className="w-3 h-3" />}>

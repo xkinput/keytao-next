@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import Link from 'next/link'
 import {
   Table,
   TableHeader,
@@ -218,7 +219,14 @@ export default function PhrasesPage() {
             >
               {phrases.map((phrase) => (
                 <TableRow key={phrase.id}>
-                  <TableCell className="font-medium">{phrase.word}</TableCell>
+                  <TableCell className="font-medium">
+                    <Link
+                      href={`/phrases/history?${new URLSearchParams({ word: phrase.word, code: phrase.code })}`}
+                      className="text-primary hover:underline"
+                    >
+                      {phrase.word}
+                    </Link>
+                  </TableCell>
                   <TableCell className="font-mono text-sm">{phrase.code}</TableCell>
                   <TableCell>
                     <Chip color={getTypeColor(phrase.type)} variant="flat" size="sm">
