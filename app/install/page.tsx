@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { Button, Card, CardBody, Code, Listbox, ListboxItem, Progress, Alert, Link } from '@/lib/heroui-compat'
 import { Folder, File, Apple, Monitor, Check, Download, RefreshCw, Smartphone, TabletSmartphone, Lightbulb, Package, ClipboardList } from 'lucide-react'
 import { unzip } from 'fflate'
+import LinuxGuide from './LinuxGuide'
 
 const INSTALLER_RELEASES_URL = 'https://github.com/xkinput/keytao-app/releases'
 
@@ -86,7 +87,7 @@ export default function InstallPage() {
       path = '%APPDATA%\\Rime'
     } else if (platform.includes('linux') || userAgent.includes('linux')) {
       detectedOS = 'linux'
-      path = '~/.config/ibus/rime 或 ~/.config/fcitx/rime'
+      path = '~/.local/share/keytao'
     }
 
     setOsType(detectedOS)
@@ -175,20 +176,6 @@ export default function InstallPage() {
           description: 'Windows 平台的 Rime 输入法',
           url: 'https://rime.im/download/#Windows',
           installMethod: 'exe 安装包',
-        }
-      case 'linux':
-        return {
-          name: 'iBus-Rime 或 Fcitx-Rime',
-          description: 'Linux 平台的 Rime 输入法',
-          url: 'https://rime.im/download/#Linux',
-          installMethod: '通过包管理器安装',
-          commands: [
-            'sudo apt install ibus-rime  # Ubuntu/Debian',
-            'sudo pacman -S ibus-rime    # Arch Linux',
-            'sudo dnf install ibus-rime  # Fedora'
-          ],
-          nixosNote: '如果您使用 NixOS，可以选择专用的安装方式',
-          nixosUrl: 'https://github.com/xkinput/KeyTao/blob/master/INSTALL_NIXOS.md'
         }
       case 'android':
         return {
@@ -479,7 +466,7 @@ export default function InstallPage() {
       <div className="max-w-5xl mx-auto">
         <div className="mb-6">
           <h1 className="text-3xl font-bold">KeyTao 输入法方案安装</h1>
-          <p className="text-default-500 mt-2">自动下载并安装最新版本的 KeyTao 输入法方案到您的 Rime 配置目录</p>
+          <p className="text-default-500 mt-2">{osType === 'linux' ? '安装 KeyTao 应用与系统输入法，按桌面环境完成启用和方案部署' : '自动下载并安装最新版本的 KeyTao 输入法方案到您的 Rime 配置目录'}</p>
         </div>
 
         {/* Top-level installer banner */}
@@ -488,7 +475,7 @@ export default function InstallPage() {
           <div className="flex-1">
             <p className="font-semibold text-lg text-primary-700">推荐使用键道安装更新程序</p>
             <p className="text-sm text-default-600 mt-0.5">
-              支持 Windows / macOS / Linux，自动完成 Rime 平台与 KeyTao 方案的安装与更新，无需手动操作
+              {osType === 'linux' ? 'Linux 推荐安装 KeyTao deb/rpm，在 App 中安装、部署方案后，按下方指南启用系统输入法' : '支持 Windows / macOS / Linux，自动完成 Rime 平台与 KeyTao 方案的安装与更新，无需手动操作'}
             </p>
           </div>
           <Button
@@ -525,6 +512,8 @@ export default function InstallPage() {
             </CardBody>
           </Card>
 
+          {osType === 'linux' ? <LinuxGuide /> : (
+            <>
           {/* Rime Installation Guide Card */}
           {osType !== 'unknown' && (
             <Card>
@@ -978,13 +967,6 @@ export default function InstallPage() {
                         <li><Code size="sm">C:\Users\用户名\Documents\Rime</Code> - 替代目录</li>
                       </>
                     )}
-                    {osType === 'linux' && (
-                      <>
-                        <li><Code size="sm">~/.config/ibus/rime/</Code> - iBus-Rime</li>
-                        <li><Code size="sm">~/.config/fcitx/rime/</Code> - Fcitx-Rime</li>
-                        <li><Code size="sm">~/.local/share/fcitx5/rime/</Code> - Fcitx5-Rime</li>
-                      </>
-                    )}
                     {osType === 'android' && (
                       <>
                         <li><Code size="sm">/sdcard/rime/</Code> - 同文输入法标准目录</li>
@@ -1005,6 +987,8 @@ export default function InstallPage() {
               </div>
             </CardBody>
           </Card>
+            </>
+          )}
         </div>
       </div>
     </div>
