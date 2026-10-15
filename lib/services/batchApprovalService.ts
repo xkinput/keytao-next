@@ -18,7 +18,7 @@ import {
   type PhraseTargetSnapshot,
 } from '@/lib/services/phraseTargetBinding'
 
-export type BatchApprovalMode = 'admin' | 'bot-auto'
+export type BatchApprovalMode = 'admin' | 'bot-auto' | 'community-vote'
 
 export interface ApproveSubmittedBatchOptions {
   batchId: string
