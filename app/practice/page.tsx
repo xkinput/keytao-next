@@ -49,6 +49,7 @@ import {
   buildPracticeDictionary,
   createPracticeItemsFromText,
   parseRimeDictContent,
+  resolveSchemeDictionaryNames,
   type PracticeDictionary,
   type PracticeEntry,
 } from '@/lib/services/keytaoPracticeDictionary'
@@ -1441,6 +1442,8 @@ export default function KeyTaoPracticePage() {
     const entries: PracticeEntry[] = []
     const deployFiles: RimeDeployFile[] = []
     const sourceFiles: string[] = []
+    const yamlFiles = new Map<string, string>()
+    const dictionaryFiles: Array<{ name: string; basename: string; content: string }> = []
 
     for (const zipEntry of Object.values(zip.files)) {
       if (zipEntry.dir) continue
@@ -1453,14 +1456,29 @@ export default function KeyTaoPracticePage() {
         })
       }
 
-      if (zipEntry.name.endsWith('.dict.yaml')) {
+      if (zipEntry.name.toLowerCase().endsWith('.yaml')) {
         const content = await zipEntry.async('text')
-        const parsedEntries = parseRimeDictContent(content, zipEntry.name)
-        if (parsedEntries.length === 0) continue
-        for (const entry of parsedEntries) entries.push(entry)
-        sourceFiles.push(zipEntry.name)
+        const basename = zipEntry.name.split('/').at(-1) ?? zipEntry.name
+        if (!yamlFiles.has(basename)) yamlFiles.set(basename, content)
+        if (zipEntry.name.endsWith('.dict.yaml')) {
+          dictionaryFiles.push({ name: zipEntry.name, basename, content })
+        }
       }
     }
+
+    const parseDictionaryFiles = (names: Set<string> | null) => {
+      for (const file of dictionaryFiles) {
+        if (names && !names.has(file.basename.slice(0, -'.dict.yaml'.length))) continue
+        const parsedEntries = parseRimeDictContent(file.content, file.name)
+        if (parsedEntries.length === 0) continue
+        for (const entry of parsedEntries) entries.push(entry)
+        sourceFiles.push(file.name)
+      }
+    }
+
+    const dictionaryNames = resolveSchemeDictionaryNames(yamlFiles)
+    parseDictionaryFiles(dictionaryNames)
+    if (dictionaryNames && entries.length === 0) parseDictionaryFiles(null)
 
     if (entries.length === 0) {
       throw new Error('压缩包里没有可识别的 Rime .dict.yaml 词典')

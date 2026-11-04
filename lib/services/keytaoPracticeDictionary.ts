@@ -46,6 +46,69 @@ function compareCandidates(a: PracticeEntry, b: PracticeEntry): number {
   return compareEntries(a, b)
 }
 
+export function resolveSchemeDictionaryNames(yamlFiles: ReadonlyMap<string, string>): Set<string> | null {
+  const readScalar = (value: string) => value.trim().replace(/^['"]|['"]$/g, '')
+  const readSchemaIds = (content: string) => Array.from(
+    content.matchAll(/^[ \t]*-[ \t]+schema:[ \t]*([^#\r\n]*)/gm),
+    (match) => readScalar(match[1])
+  ).filter(Boolean)
+
+  let schemaIds = readSchemaIds(yamlFiles.get('default.custom.yaml') ?? '')
+  if (schemaIds.length === 0) schemaIds = readSchemaIds(yamlFiles.get('default.yaml') ?? '')
+  if (schemaIds.length === 0) return null
+
+  const dictionaryNames = new Set<string>()
+  const addDictionary = (name: string) => {
+    const content = yamlFiles.get(`${name}.dict.yaml`)
+    if (content === undefined || dictionaryNames.has(name)) return
+    dictionaryNames.add(name)
+
+    let inImportTables = false
+    for (const line of content.split(/\r?\n/)) {
+      if (line === '...') break
+      if (!inImportTables) {
+        inImportTables = /^[ \t]*import_tables:[ \t]*(?:#.*)?$/.test(line)
+        continue
+      }
+
+      const item = line.match(/^[ \t]*-[ \t]+([^#]*)/)
+      if (item) {
+        const importedName = readScalar(item[1])
+        if (importedName) addDictionary(importedName)
+      } else if (/^[^\s#]/.test(line)) {
+        break
+      }
+    }
+  }
+
+  for (const id of schemaIds) {
+    const patch = yamlFiles.get(`${id}.custom.yaml`)
+      ?.match(/^[ \t]*translator\/dictionary:[ \t]*([^#\r\n]*)/m)
+    let dictionaryName = patch ? readScalar(patch[1]) : ''
+
+    if (!patch) {
+      let inTranslator = false
+      for (const line of (yamlFiles.get(`${id}.schema.yaml`) ?? '').split(/\r?\n/)) {
+        if (!inTranslator) {
+          inTranslator = /^translator:[ \t]*(?:#.*)?$/.test(line)
+          continue
+        }
+        if (/^[^\s#]/.test(line)) break
+
+        const dictionary = line.match(/^[ \t]+dictionary:[ \t]*([^#]*)/)
+        if (dictionary) {
+          dictionaryName = readScalar(dictionary[1])
+          break
+        }
+      }
+    }
+
+    if (dictionaryName) addDictionary(dictionaryName)
+  }
+
+  return dictionaryNames.size > 0 ? dictionaryNames : null
+}
+
 export function parseRimeDictContent(content: string, source = 'inline.dict.yaml'): PracticeEntry[] {
   const entries: PracticeEntry[] = []
   const lines = content.split(/\r?\n/)
