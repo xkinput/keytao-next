@@ -56,7 +56,7 @@ function migratePracticeStore(persistedState: unknown, version: number): Partial
 export const usePracticeStore = create<PracticeStore>()(
   persist(
     (set) => ({
-      selectedSchemeKey: 'keytao',
+      selectedSchemeKey: 'xmjd',
       cachedSchemeVersions: EMPTY_CACHED_SCHEMES,
       practiceSource: 'common500',
       selectedArticleId: 'builtin:default-longform',
