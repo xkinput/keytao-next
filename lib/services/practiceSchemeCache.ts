@@ -1,4 +1,4 @@
-export type PracticeSchemeKey = 'keytao' | 'xmjd' | 'txjx' | 'keydo'
+export type PracticeSchemeKey = 'keytao' | 'xmjd' | 'xmjd-feiding' | 'txjx' | 'keydo'
 
 export interface CachedPracticeSchemeVersion {
   schemeKey: PracticeSchemeKey
