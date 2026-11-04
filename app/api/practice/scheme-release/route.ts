@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-type PracticeSchemeKey = 'keytao' | 'xmjd' | 'txjx' | 'keydo'
+type PracticeSchemeKey = 'keytao' | 'xmjd' | 'xmjd-feiding' | 'txjx' | 'keydo'
 
 interface ReleaseAssetSchemeSource {
   type: 'release-asset'
@@ -28,6 +28,14 @@ const PRACTICE_SCHEME_SOURCES: Record<PracticeSchemeKey, PracticeSchemeSource> =
     assetName: 'xmjd6.zip',
     label: '星猫键道',
   },
+  // Same release's non-top-up package: differs from xmjd only by translator/enable_sentence
+  'xmjd-feiding': {
+    type: 'release-asset',
+    owner: 'hugh7007',
+    repo: 'xmjd6-rere',
+    assetName: 'feiding-xmjd6.zip',
+    label: '星猫键道（非顶）',
+  },
   txjx: {
     type: 'release-asset',
     owner: 'wzxmer',
@@ -45,7 +53,13 @@ const PRACTICE_SCHEME_SOURCES: Record<PracticeSchemeKey, PracticeSchemeSource> =
 }
 
 function isPracticeSchemeKey(value: string | null): value is PracticeSchemeKey {
-  return value === 'keytao' || value === 'xmjd' || value === 'txjx' || value === 'keydo'
+  return (
+    value === 'keytao' ||
+    value === 'xmjd' ||
+    value === 'xmjd-feiding' ||
+    value === 'txjx' ||
+    value === 'keydo'
+  )
 }
 
 function findAsset(assets: { name: string; browser_download_url: string }[], source: ReleaseAssetSchemeSource) {

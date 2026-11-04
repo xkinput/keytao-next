@@ -30,6 +30,7 @@ interface PracticeStore {
 const EMPTY_CACHED_SCHEMES: CachedSchemeVersions = {
   keytao: [],
   xmjd: [],
+  'xmjd-feiding': [],
   txjx: [],
   keydo: [],
 }

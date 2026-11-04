@@ -128,12 +128,19 @@ interface PracticeSchemeReleaseInfo {
 const PRACTICE_SCHEME_OPTIONS: Array<{ key: PracticeSchemeKey; label: string; asset: string }> = [
   { key: 'keytao', label: '键道6', asset: 'keytao-linux' },
   { key: 'xmjd', label: '星猫键道', asset: 'xmjd6.zip' },
+  { key: 'xmjd-feiding', label: '星猫键道（非顶）', asset: 'feiding-xmjd6.zip' },
   { key: 'txjx', label: '天行键', asset: 'txjx.zip' },
   { key: 'keydo', label: '键道·我流', asset: 'nightly zip' },
 ]
 
 function isPracticeSchemeKey(value: string | null): value is PracticeSchemeKey {
-  return value === 'keytao' || value === 'xmjd' || value === 'txjx' || value === 'keydo'
+  return (
+    value === 'keytao' ||
+    value === 'xmjd' ||
+    value === 'xmjd-feiding' ||
+    value === 'txjx' ||
+    value === 'keydo'
+  )
 }
 
 function getSingleSelectionValue(keys: 'all' | Set<Key>) {
