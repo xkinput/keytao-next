@@ -28,7 +28,7 @@ const PRACTICE_SCHEME_SOURCES: Record<PracticeSchemeKey, PracticeSchemeSource> =
     assetName: 'xmjd6.zip',
     label: '星猫键道',
   },
-  // 同一个 release 里的非顶功发行包，词库内容与 xmjd 相同，只差顶功开关
+  // Same release's non-top-up package: differs from xmjd only by translator/enable_sentence
   'xmjd-feiding': {
     type: 'release-asset',
     owner: 'hugh7007',
