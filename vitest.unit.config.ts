@@ -17,10 +17,11 @@ const DATABASE_BACKED_TESTS = [
 ]
 
 export default defineConfig({
+  envDir: false,
   test: {
     environment: 'node',
     globals: true,
-    include: ['lib/**/*.test.ts', 'app/**/*.test.ts'],
+    include: ['lib/**/*.test.ts', 'app/**/*.test.ts', 'workers/**/*.test.ts'],
     exclude: ['lib/test/**', 'node_modules/**', ...DATABASE_BACKED_TESTS],
   },
   resolve: {
