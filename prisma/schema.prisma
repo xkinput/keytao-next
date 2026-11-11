@@ -99,6 +99,11 @@ enum SyncTaskStatus {
   Cancelled
 }
 
+enum SchemePackageStatus {
+  PENDING
+  READY
+}
+
 // User model
 model User {
   id         Int        @id @default(autoincrement())
@@ -129,6 +134,8 @@ model User {
   linkKeys             LinkKey[]     @relation("UserLinkKeys")
   apiKeys              ApiKey[]      @relation("UserApiKeys")
   userDictionaryEntries UserDictionaryEntry[] @relation("UserDictionaryEntries")
+  schemeProfile        SchemeProfile?
+  schemePackages       SchemePackage[]
 
   @@map("users")
 }
@@ -277,6 +284,36 @@ model UserDictionaryEntry {
   @@index([userId, code])
   @@index([userId, word, type])
   @@map("user_dictionary_entries")
+}
+
+model SchemeProfile {
+  id       Int      @id @default(autoincrement())
+  userId   Int      @unique
+  data     Json
+  createAt DateTime @default(now())
+  updateAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("scheme_profiles")
+}
+
+model SchemePackage {
+  id         Int                 @id @default(autoincrement())
+  userId     Int
+  schemeKey  String
+  name       String
+  version    String?
+  size       Int
+  sha256     String
+  storageKey String              @unique
+  status     SchemePackageStatus @default(PENDING)
+  createAt   DateTime            @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("scheme_packages")
 }
 
 /// 标签 - 用于搜索关联词条

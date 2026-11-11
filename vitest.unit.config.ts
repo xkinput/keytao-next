@@ -17,6 +17,7 @@ const DATABASE_BACKED_TESTS = [
 ]
 
 export default defineConfig({
+  envDir: false,
   test: {
     environment: 'node',
     globals: true,
