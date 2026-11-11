@@ -21,7 +21,7 @@ export default defineConfig({
   test: {
     environment: 'node',
     globals: true,
-    include: ['lib/**/*.test.ts', 'app/**/*.test.ts'],
+    include: ['lib/**/*.test.ts', 'app/**/*.test.ts', 'workers/**/*.test.ts'],
     exclude: ['lib/test/**', 'node_modules/**', ...DATABASE_BACKED_TESTS],
   },
   resolve: {

@@ -101,9 +101,12 @@ beforeEach(() => {
   mocks.getSession.mockResolvedValue({ id: USER_ID, name: 'testuser' })
   mocks.checkRateLimit.mockReturnValue({ allowed: true, retryAfterMs: 0 })
   mocks.configured.mockReturnValue(true)
-  mocks.presignPut.mockResolvedValue({ url: 'https://storage.invalid/upload', headers: { 'content-length': '1024' } })
-  mocks.presignGet.mockResolvedValue('https://storage.invalid/download')
-  mocks.headObject.mockResolvedValue({ size: 1024 })
+  mocks.presignPut.mockResolvedValue({
+    url: 'https://files.keytao.rea.ink/u/upload-token',
+    headers: { 'Content-Length': '1024', 'Content-Type': 'application/zip' },
+  })
+  mocks.presignGet.mockResolvedValue('https://files.keytao.rea.ink/d/download-token')
+  mocks.headObject.mockResolvedValue({ size: 1024, sha256: SHA256 })
   mocks.deleteObject.mockResolvedValue(undefined)
   mocks.profile.findUnique.mockResolvedValue(null)
   mocks.profile.upsert.mockResolvedValue({ data: {}, updateAt: CREATED_AT })
@@ -228,7 +231,10 @@ describe('scheme package metadata', () => {
     const { POST } = await import('./scheme-packages/route')
     const res = await POST(request('POST', { ...packageMetadata, userId: 99, storageKey: 'arbitrary' }))
     expect(res.status).toBe(201)
-    expect(await res.json()).toEqual({ id: 12, uploadUrl: 'https://storage.invalid/upload', headers: { 'content-length': '1024' } })
+    expect(await res.json()).toEqual({
+      id: 12, uploadUrl: 'https://files.keytao.rea.ink/u/upload-token',
+      headers: { 'Content-Length': '1024', 'Content-Type': 'application/zip' },
+    })
     expect(mocks.packages.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({
       ...packageMetadata, userId: USER_ID, status: 'PENDING',
       storageKey: expect.stringMatching(/^scheme-packages\/7\/[0-9a-f-]{36}\.zip$/),
@@ -329,7 +335,7 @@ describe('scheme package metadata', () => {
 })
 
 describe('scheme package completion and ownership', () => {
-  it('marks the package READY after verifying its declared size', async () => {
+  it('marks the package READY after verifying its declared size and checksum', async () => {
     const { POST } = await import('./scheme-packages/[id]/complete/route')
     const res = await POST(request('POST', undefined, '/12/complete'), context())
     expect(res.status).toBe(200)
@@ -346,7 +352,18 @@ describe('scheme package completion and ownership', () => {
   })
 
   it('deletes a mismatched object but keeps PENDING metadata while its PUT URL is valid', async () => {
-    mocks.headObject.mockResolvedValue({ size: 1025 })
+    mocks.headObject.mockResolvedValue({ size: 1025, sha256: SHA256 })
+    const { POST } = await import('./scheme-packages/[id]/complete/route')
+    const res = await POST(request('POST', undefined, '/12/complete'), context())
+    expect(res.status).toBe(400)
+    expect(mocks.deleteObject).toHaveBeenCalledWith(pendingPackage.storageKey)
+    expect(mocks.packages.delete).not.toHaveBeenCalled()
+    expect(mocks.packages.deleteMany).not.toHaveBeenCalled()
+    expect(mocks.packages.update).not.toHaveBeenCalled()
+  })
+
+  it('deletes an object with a mismatched checksum but keeps its PENDING metadata', async () => {
+    mocks.headObject.mockResolvedValue({ size: pendingPackage.size, sha256: 'b'.repeat(64) })
     const { POST } = await import('./scheme-packages/[id]/complete/route')
     const res = await POST(request('POST', undefined, '/12/complete'), context())
     expect(res.status).toBe(400)
@@ -371,7 +388,7 @@ describe('scheme package completion and ownership', () => {
     let record: typeof pendingPackage | null = { ...pendingPackage }
     mocks.packages.findUnique.mockImplementation(async () => record)
     mocks.packages.delete.mockImplementation(async () => { record = null })
-    mocks.headObject.mockResolvedValueOnce(null).mockResolvedValueOnce({ size: pendingPackage.size })
+    mocks.headObject.mockResolvedValueOnce(null).mockResolvedValueOnce({ size: pendingPackage.size, sha256: SHA256 })
     const { POST } = await import('./scheme-packages/[id]/complete/route')
 
     expect((await POST(request('POST', undefined, '/12/complete'), context())).status).toBe(400)
@@ -415,7 +432,7 @@ describe('scheme package completion and ownership', () => {
     const { GET } = await import('./scheme-packages/[id]/route')
     const res = await GET(request('GET', undefined, '/12'), context())
     expect(res.status).toBe(302)
-    expect(res.headers.get('location')).toBe('https://storage.invalid/download')
+    expect(res.headers.get('location')).toBe('https://files.keytao.rea.ink/d/download-token')
     expect(mocks.presignGet).toHaveBeenCalledWith(pendingPackage.storageKey, expect.any(String))
   })
 
@@ -452,7 +469,7 @@ describe('scheme package completion and ownership', () => {
   })
 
   it('preserves metadata when mismatch cleanup fails', async () => {
-    mocks.headObject.mockResolvedValue({ size: 1 })
+    mocks.headObject.mockResolvedValue({ size: 1, sha256: SHA256 })
     mocks.deleteObject.mockRejectedValue(new Error('Storage unavailable'))
     const { POST } = await import('./scheme-packages/[id]/complete/route')
     const res = await POST(request('POST', undefined, '/12/complete'), context())

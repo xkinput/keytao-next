@@ -1,15 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { deleteObject, headObject, isObjectStorageConfigured, presignGet, presignPut, presignS3Url } from './objectStorage'
+import { deleteObject, headObject, isObjectStorageConfigured, presignGet, presignPut } from './objectStorage'
+import { signToken, verifyToken } from '../workers/scheme-files/src/token'
 
+const key = 'scheme-packages/7/12345678-1234-1234-1234-123456789abc.zip'
 const sha256 = 'a'.repeat(64)
+const secret = 'test-files-signing-secret'
+const nowSeconds = 1794355200
 const fetchMock = vi.fn()
 
 beforeEach(() => {
-  vi.stubEnv('S3_ENDPOINT', 'https://storage.example.test')
-  vi.stubEnv('S3_BUCKET', 'scheme-bucket')
-  vi.stubEnv('S3_ACCESS_KEY_ID', 'test-access-key')
-  vi.stubEnv('S3_SECRET_ACCESS_KEY', 'test-secret-key')
-  vi.stubEnv('S3_REGION', '')
+  vi.stubEnv('FILES_BASE_URL', 'https://files.example.test')
+  vi.stubEnv('FILES_SIGNING_SECRET', secret)
   vi.useFakeTimers()
   vi.setSystemTime(new Date('2026-11-11T00:00:00.000Z'))
   vi.stubGlobal('fetch', fetchMock)
@@ -23,81 +24,113 @@ afterEach(() => {
 })
 
 describe('object storage signing', () => {
-  it('matches the official AWS S3 presigned GET example', () => {
-    const url = new URL(presignS3Url({
-      method: 'GET',
-      url: new URL('https://examplebucket.s3.amazonaws.com/test.txt'),
-      accessKeyId: 'AKIAIOSFODNN7EXAMPLE',
-      secretAccessKey: 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',
-      region: 'us-east-1',
-      now: new Date('2013-05-24T00:00:00.000Z'),
-      expiresIn: 86400,
-    }))
-
-    expect(url.searchParams.get('X-Amz-Signature')).toBe('aeeed9bbccd4d02ee5c0109b86d86835f995330da4c265957d157751f604d404')
-  })
-
-  it('signs the upload length and uses a path-style URL expiring in ten minutes', () => {
-    const result = presignPut('scheme-packages/1/a b.zip', { contentLength: 123, sha256 })
+  it('signs uploads that the Worker verifies with the same ten-minute token', async () => {
+    const result = presignPut(key, { contentLength: 123, sha256 })
     const url = new URL(result.url)
+    const payload = { op: 'put' as const, key, size: 123, sha256, exp: nowSeconds + 600 }
 
-    expect(url.origin).toBe('https://storage.example.test')
-    expect(url.pathname).toBe('/scheme-bucket/scheme-packages/1/a%20b.zip')
-    expect(url.searchParams.get('X-Amz-Expires')).toBe('600')
-    expect(url.searchParams.get('X-Amz-SignedHeaders')).toBe('content-length;host')
-    expect(url.searchParams.get('X-Amz-Credential')).toContain('/auto/s3/aws4_request')
-    expect(result.headers).toEqual({ 'Content-Length': '123' })
-    expect(presignPut('scheme-packages/1/a b.zip', { contentLength: 124, sha256 }).url).not.toBe(result.url)
+    expect(url.origin).toBe('https://files.example.test')
+    expect(url.pathname).toBe(`/u/${await signToken(payload, secret)}`)
+    await expect(verifyToken(url.pathname.slice(3), secret, 'put', nowSeconds)).resolves.toEqual(payload)
+    expect(result.headers).toEqual({ 'Content-Length': '123', 'Content-Type': 'application/zip' })
   })
 
-  it('includes a safely escaped attachment filename in the signed download URL', () => {
-    const url = new URL(presignGet('scheme-packages/1/a.zip', '方案"\r\n.zip'))
+  it('signs attachment downloads for the Worker', async () => {
+    const filename = '方案.zip'
+    const url = new URL(presignGet(key, filename))
+    const payload = { op: 'get' as const, key, filename, exp: nowSeconds + 600 }
 
-    expect(url.searchParams.get('response-content-disposition')).toBe('attachment; filename="___.zip"; filename*=UTF-8\'\'%E6%96%B9%E6%A1%88%22.zip')
-    expect(url.searchParams.get('X-Amz-SignedHeaders')).toBe('host')
-    expect(url.searchParams.get('X-Amz-Expires')).toBe('600')
+    expect(url.origin).toBe('https://files.example.test')
+    expect(url.pathname).toBe(`/d/${await signToken(payload, secret)}`)
+    await expect(verifyToken(url.pathname.slice(3), secret, 'get', nowSeconds)).resolves.toEqual(payload)
   })
 
-  it('detects missing configuration and refuses to sign', () => {
-    vi.stubEnv('S3_SECRET_ACCESS_KEY', '')
+  it('uses the custom files domain by default', () => {
+    vi.stubEnv('FILES_BASE_URL', '')
+
+    expect(new URL(presignGet(key, 'scheme.zip')).origin).toBe('https://files.keytao.rea.ink')
+  })
+
+  it('preserves the shared signing secret bytes', async () => {
+    const exactSecret = ` ${secret}\n`
+    vi.stubEnv('FILES_SIGNING_SECRET', exactSecret)
+    const url = new URL(presignGet(key, 'scheme.zip'))
+
+    await expect(verifyToken(url.pathname.slice(3), exactSecret, 'get', nowSeconds))
+      .resolves.toEqual({ op: 'get', key, filename: 'scheme.zip', exp: nowSeconds + 600 })
+  })
+
+  it('requires only the files signing secret and refuses to sign when it is missing', () => {
+    expect(isObjectStorageConfigured()).toBe(true)
+    vi.stubEnv('FILES_SIGNING_SECRET', '')
 
     expect(isObjectStorageConfigured()).toBe(false)
-    expect(() => presignGet('a.zip', 'a.zip')).toThrow('Object storage is not configured')
+    expect(() => presignGet(key, 'scheme.zip')).toThrow('Object storage is not configured')
     expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    'https://user:password@files.example.test',
+    'https://files.example.test?query=value',
+    'https://files.example.test#fragment',
+    'https://files.example.test/path',
+    'file:///tmp/files',
+    'invalid-url',
+  ])('rejects unsafe files base URLs: %s', (baseUrl) => {
+    expect(isObjectStorageConfigured()).toBe(true)
+    vi.stubEnv('FILES_BASE_URL', baseUrl)
+
+    expect(isObjectStorageConfigured()).toBe(false)
+    expect(() => presignGet(key, 'scheme.zip')).toThrow('Object storage is not configured')
   })
 })
 
 describe('object storage requests', () => {
-  it('returns the object length from a signed HEAD request', async () => {
-    fetchMock.mockResolvedValue(new Response(null, { headers: { 'Content-Length': '321' } }))
+  it('returns verified size and sha256 from an authorized Worker head request', async () => {
+    fetchMock.mockResolvedValue(Response.json({ size: 321, sha256 }))
 
-    await expect(headObject('scheme-packages/1/a.zip')).resolves.toEqual({ size: 321 })
-    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/scheme-bucket/scheme-packages/1/a.zip?'), expect.objectContaining({ method: 'HEAD', redirect: 'error' }))
+    await expect(headObject(key)).resolves.toEqual({ size: 321, sha256 })
+    const [url, options] = fetchMock.mock.calls[0]
+    expect(options).toEqual(expect.objectContaining({ method: 'POST', redirect: 'error', cache: 'no-store' }))
+    expect(url).toMatch(/^https:\/\/files\.example\.test\/internal\/head\//)
+    await expect(verifyToken(new URL(url).pathname.split('/').at(-1)!, secret, 'head', nowSeconds))
+      .resolves.toEqual({ op: 'head', key, exp: nowSeconds + 600 })
   })
 
   it('returns null only for a missing object', async () => {
-    fetchMock.mockResolvedValue(new Response(null, { status: 404 }))
-    await expect(headObject('a.zip')).resolves.toBeNull()
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 404 }))
+    await expect(headObject(key)).resolves.toBeNull()
 
-    fetchMock.mockResolvedValue(new Response(null, { status: 403 }))
-    await expect(headObject('a.zip')).rejects.toThrow('Object storage HEAD failed (403)')
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 403 }))
+    await expect(headObject(key)).rejects.toThrow('Object storage HEAD failed (403)')
   })
 
-  it.each([null, 'invalid', '-1', '1.5'])('rejects an invalid HEAD object length: %s', async (length) => {
-    fetchMock.mockResolvedValue(new Response(null, { headers: length === null ? {} : { 'Content-Length': length } }))
+  it.each([
+    null,
+    { size: '321', sha256 },
+    { size: -1, sha256 },
+    { size: 1.5, sha256 },
+    { size: 321 },
+    { size: 321, sha256: 'invalid' },
+  ])('rejects invalid Worker object metadata: %j', async (metadata) => {
+    fetchMock.mockResolvedValue(Response.json(metadata))
 
-    await expect(headObject('a.zip')).rejects.toThrow('Object storage returned an invalid size')
+    await expect(headObject(key)).rejects.toThrow('Object storage returned invalid metadata')
   })
 
-  it('deletes an object and treats a missing object as already deleted', async () => {
+  it('deletes through an authorized Worker request and treats a missing object as deleted', async () => {
     fetchMock.mockResolvedValueOnce(new Response(null, { status: 204 }))
-    await expect(deleteObject('a.zip')).resolves.toBeUndefined()
-    expect(fetchMock).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ method: 'DELETE', redirect: 'error' }))
+    await expect(deleteObject(key)).resolves.toBeUndefined()
+    const [url, options] = fetchMock.mock.calls[0]
+    expect(options).toEqual(expect.objectContaining({ method: 'POST', redirect: 'error', cache: 'no-store' }))
+    expect(url).toMatch(/^https:\/\/files\.example\.test\/internal\/delete\//)
+    await expect(verifyToken(new URL(url).pathname.split('/').at(-1)!, secret, 'delete', nowSeconds))
+      .resolves.toEqual({ op: 'delete', key, exp: nowSeconds + 600 })
 
     fetchMock.mockResolvedValueOnce(new Response(null, { status: 404 }))
-    await expect(deleteObject('a.zip')).resolves.toBeUndefined()
+    await expect(deleteObject(key)).resolves.toBeUndefined()
 
     fetchMock.mockResolvedValueOnce(new Response(null, { status: 500 }))
-    await expect(deleteObject('a.zip')).rejects.toThrow('Object storage DELETE failed (500)')
+    await expect(deleteObject(key)).rejects.toThrow('Object storage DELETE failed (500)')
   })
 })

@@ -29,9 +29,9 @@ export async function POST(
         return NextResponse.json({ id, status: 'READY' })
       }
       const object = await headObject(record.storageKey)
-      if (!object || object.size !== record.size) {
+      if (!object || object.size !== record.size || object.sha256 !== record.sha256) {
         if (object) await deleteObject(record.storageKey)
-        return NextResponse.json({ error: '方案包大小不匹配，请重新上传' }, { status: 400 })
+        return NextResponse.json({ error: '方案包大小或校验和不匹配，请重新上传' }, { status: 400 })
       }
       const ready = await tx.schemePackage.count({ where: { userId: session.id, status: 'READY' } })
       if (ready >= MAX_READY_PACKAGES) {
