@@ -265,30 +265,6 @@ export function convertToRimeDicts(
 
     const content = generateRimeYaml(dict);
     result.set(fileName, content);
-
-    // Special handling for Single type: also generate keytao-dz and keytao-cx
-    // These three files have the same content but different yaml headers
-    if (type === PhraseType.Single) {
-      // keytao-dz.dict.yaml (used by keytao-dz schema)
-      const dzDict: RimeDict = {
-        name: 'keytao-dz',
-        version: 'Q1',
-        sort: 'by_weight',
-        entries,
-        type,
-      };
-      result.set('keytao-dz.dict.yaml', generateRimeYaml(dzDict));
-
-      // keytao-cx.dict.yaml (used by keytao-cx schema)
-      const cxDict: RimeDict = {
-        name: 'keytao-cx',
-        version: 'Q1',
-        sort: 'by_weight',
-        entries,
-        type,
-      };
-      result.set('keytao-cx.dict.yaml', generateRimeYaml(cxDict));
-    }
   }
 
   return result;
@@ -329,27 +305,6 @@ export function convertPhrasesToRimeDicts(
 
     const content = generateRimeYaml(dict);
     result.set(fileName, content);
-
-    // Special handling for Single type: also generate keytao-dz and keytao-cx
-    if (type === PhraseType.Single) {
-      const dzDict: RimeDict = {
-        name: 'keytao-dz',
-        version: 'Q1',
-        sort: 'by_weight',
-        entries,
-        type,
-      };
-      result.set('keytao-dz.dict.yaml', generateRimeYaml(dzDict));
-
-      const cxDict: RimeDict = {
-        name: 'keytao-cx',
-        version: 'Q1',
-        sort: 'by_weight',
-        entries,
-        type,
-      };
-      result.set('keytao-cx.dict.yaml', generateRimeYaml(cxDict));
-    }
   }
 
   return result;
