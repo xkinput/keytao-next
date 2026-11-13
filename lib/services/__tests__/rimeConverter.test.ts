@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   convertPhrasesToRimeDicts,
+  convertToRimeDicts,
   getAffectedPhraseTypesFromPullRequests,
 } from '@/lib/services/rimeConverter'
 
@@ -77,6 +78,36 @@ describe('rimeConverter', () => {
     expect(affectedTypes).toEqual([PhraseType.Single, PhraseType.Phrase])
   })
 
+  it('generates only the single dictionary from Single pull requests', () => {
+    const dicts = convertToRimeDicts([
+      {
+        id: 1,
+        createAt: new Date(),
+        updateAt: new Date(),
+        phraseId: null,
+        targetPhraseId: null,
+        targetFingerprint: null,
+        needsManualReview: false,
+        word: '测',
+        oldWord: null,
+        code: 'ce',
+        type: PhraseType.Single,
+        status: 'Approved',
+        action: PullRequestType.Create,
+        remark: null,
+        weight: 1,
+        hasConflict: false,
+        conflictReason: null,
+        userId: 1,
+        batchId: 'batch-1',
+      },
+    ])
+
+    expect(Array.from(dicts.keys())).toEqual(['keytao.single.dict.yaml'])
+    expect(dicts.has('keytao-dz.dict.yaml')).toBe(false)
+    expect(dicts.has('keytao-cx.dict.yaml')).toBe(false)
+  })
+
   it('generates only selected dictionary files and keeps empty affected types', () => {
     const dicts = convertPhrasesToRimeDicts(
       [
@@ -102,10 +133,10 @@ describe('rimeConverter', () => {
 
     expect(Array.from(dicts.keys())).toEqual([
       'keytao.single.dict.yaml',
-      'keytao-dz.dict.yaml',
-      'keytao-cx.dict.yaml',
       'keytao.phrase.dict.yaml',
     ])
+    expect(dicts.has('keytao-dz.dict.yaml')).toBe(false)
+    expect(dicts.has('keytao-cx.dict.yaml')).toBe(false)
     expect(dicts.get('keytao.single.dict.yaml')).toContain('version: "2026.03.08"')
     expect(dicts.get('keytao.phrase.dict.yaml')).toContain('name: keytao.phrase')
     expect(dicts.get('keytao.phrase.dict.yaml')).not.toContain('测\tce\t1')
