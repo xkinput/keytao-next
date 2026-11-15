@@ -86,7 +86,7 @@ async function callCommunityApprove(body?: unknown, request = communityApproveRe
 }
 
 beforeEach(() => {
-  vi.clearAllMocks()
+  vi.resetAllMocks()
   mockRequireVerifiedBotUser.mockResolvedValue({ authorized: true, user: CREATOR, platform: 'qq' })
   mockApproveSubmittedBatch.mockResolvedValue({ batch: { id: 'batch-1', status: 'Approved' } })
   mockPrisma.batch.findUnique.mockResolvedValue(batchWith([pr()]))
@@ -97,6 +97,116 @@ beforeEach(() => {
 })
 
 describe('POST /api/bot/batches/:id/community-approve', () => {
+  it.each(['R:ROOT', 'R:MANAGER'])('approves with one server-resolved %s voter', async role => {
+    mockPrisma.user.findFirst.mockResolvedValueOnce({ ...BOUND_USERS[0], roles: [{ value: role }] })
+
+    const res = await callCommunityApprove(payload({ voters: [VOTERS[0]] }))
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({
+      success: true,
+      approvedBy: 'admin',
+      message: '批次已由管理员审核通过',
+      batch: { id: 'batch-1', status: 'Approved' },
+      voters: ['投票者甲'],
+    })
+    expect(mockApproveSubmittedBatch).toHaveBeenCalledExactlyOnceWith({
+      batchId: 'batch-1',
+      reviewNote: '管理员批准：投票者甲',
+      mode: 'admin',
+      allowDelete: true,
+      expectedContentVersion: 0,
+      reviewerId: BOUND_USERS[0].id,
+    })
+    expect(mockPrisma.user.findFirst).toHaveBeenCalledExactlyOnceWith({
+      where: { qqId: '100', status: 'ENABLE' },
+      select: { id: true, name: true, nickname: true, roles: { select: { value: true } } },
+    })
+  })
+
+  it('keeps prior votes and records the administrator as reviewer', async () => {
+    mockPrisma.user.findFirst.mockResolvedValueOnce(BOUND_USERS[0])
+      .mockResolvedValueOnce({ ...BOUND_USERS[1], roles: [{ value: 'R:MANAGER' }] })
+
+    const res = await callCommunityApprove(payload({ voters: VOTERS.slice(0, 2) }))
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({ approvedBy: 'admin', voters: ['投票者甲', '投票者乙'] })
+    expect(mockApproveSubmittedBatch).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      mode: 'admin', reviewerId: BOUND_USERS[1].id, reviewNote: '管理员批准：投票者乙',
+    }))
+  })
+
+  it.each([
+    ['normal', [{ value: 'R:NORMAL' }]],
+    ['bot', [{ value: 'R:BOT' }]],
+    ['unknown', [{ value: 'R:UNKNOWN', name: '管理员' }]],
+    ['missing', undefined],
+    ['null', null],
+    ['empty', []],
+    ['non-array', { value: 'R:ROOT' }],
+    ['malformed entries', [null, {}, 'R:ROOT']],
+  ])('refuses a single voter with %s roles', async (_name, roles) => {
+    mockPrisma.user.findFirst.mockResolvedValueOnce({ ...BOUND_USERS[0], roles })
+
+    const res = await callCommunityApprove(payload({ voters: [VOTERS[0]] }))
+
+    expect(res.status).toBe(400)
+    expect(await res.json()).toMatchObject({ success: false })
+    expect(mockApproveSubmittedBatch).not.toHaveBeenCalled()
+  })
+
+  it('still requires three non-admin voters', async () => {
+    const res = await callCommunityApprove(payload({ voters: VOTERS.slice(0, 2) }))
+
+    expect(res.status).toBe(400)
+    expect(mockApproveSubmittedBatch).not.toHaveBeenCalled()
+  })
+
+  it('refuses an administrator bound to the creator account', async () => {
+    mockPrisma.user.findFirst.mockResolvedValueOnce({ ...CREATOR, roles: [{ value: 'R:ROOT' }] })
+
+    const res = await callCommunityApprove(payload({ voters: [VOTERS[0]] }))
+
+    expect(res.status).toBe(400)
+    expect(await res.json()).toMatchObject({ message: '批次创建者不能参与投票' })
+    expect(mockApproveSubmittedBatch).not.toHaveBeenCalled()
+  })
+
+  it('does not accept creator admin privileges as a substitute for voter privileges', async () => {
+    mockRequireVerifiedBotUser.mockResolvedValue({
+      authorized: true, user: { ...CREATOR, roles: [{ value: 'R:ROOT' }] }, platform: 'qq',
+    })
+
+    const res = await callCommunityApprove(payload({ voters: [VOTERS[0]] }))
+
+    expect(res.status).toBe(400)
+    expect(mockApproveSubmittedBatch).not.toHaveBeenCalled()
+  })
+
+  it('refuses repeated admin accounts across platform identities', async () => {
+    mockPrisma.user.findFirst.mockResolvedValue({ ...BOUND_USERS[0], roles: [{ value: 'R:MANAGER' }] })
+
+    const res = await callCommunityApprove(payload({ voters: VOTERS.slice(0, 2) }))
+
+    expect(res.status).toBe(400)
+    expect(mockApproveSubmittedBatch).not.toHaveBeenCalled()
+  })
+
+  it('uses admin approval for bare deletes', async () => {
+    mockPrisma.batch.findUnique.mockResolvedValue(batchWith([
+      pr({ action: 'Delete', word: '删词', code: 'shci', needsManualReview: true }),
+    ]))
+    mockPrisma.user.findFirst.mockResolvedValueOnce({ ...BOUND_USERS[0], roles: [{ value: 'R:MANAGER' }] })
+
+    const res = await callCommunityApprove(payload({ voters: [VOTERS[0]] }))
+
+    expect(res.status).toBe(200)
+    expect(mockApproveSubmittedBatch).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      mode: 'admin', allowDelete: true, reviewerId: BOUND_USERS[0].id,
+    }))
+  })
+
   it('approves manual-review items with three bound voters and records their display names', async () => {
     mockPrisma.batch.findUnique.mockResolvedValue(batchWith([
       pr(),
@@ -285,7 +395,7 @@ describe('POST /api/bot/batches/:id/community-approve', () => {
     ['array body', []],
     ['unsupported top-level field', payload({ reviewNote: 'caller-controlled note' })],
     ['missing voters', payload({ voters: undefined })],
-    ['two voters', payload({ voters: VOTERS.slice(0, 2) })],
+    ['empty voters', payload({ voters: [] })],
     ['twenty-one voters', payload({ voters: Array.from({ length: 21 }, (_, i) => ({ platform: 'qq', platformId: String(i) })) })],
     ['non-object voter', payload({ voters: [VOTERS[0], VOTERS[1], null] })],
     ['caller-supplied voter user id', payload({ voters: [VOTERS[0], VOTERS[1], { ...VOTERS[2], userId: 12 }] })],

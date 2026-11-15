@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireVerifiedBotUser } from '@/lib/botUserAuth'
+import { ADMIN_ROLE_VALUES } from '@/lib/constants/roles'
 import {
   isValidPlatform,
   resolveUserByPlatform,
@@ -69,13 +70,13 @@ export async function POST(
     }
     if (
       !Array.isArray(voters)
-      || voters.length < 3
+      || voters.length < 1
       || voters.length > 20
       || !voters.every(isVoterIdentity)
     ) {
       return NextResponse.json({
         success: false,
-        message: '需要 3 至 20 位使用已绑定 QQ 或 Telegram 账号的投票人',
+        message: '需要 1 至 20 位使用已绑定 QQ 或 Telegram 账号的投票人',
       }, { status: 400 })
     }
 
@@ -127,12 +128,14 @@ export async function POST(
     if (voterIds.has(creator.id)) {
       return NextResponse.json({ success: false, message: '批次创建者不能参与投票' }, { status: 400 })
     }
-    if (voterIds.size !== boundVoters.length || voterIds.size < 3) {
+    const admin = boundVoters.find(voter => Array.isArray(voter.roles)
+      && voter.roles.some(role => ADMIN_ROLE_VALUES.includes(role?.value)))
+    if (voterIds.size !== boundVoters.length || (!admin && voterIds.size < 3)) {
       return NextResponse.json({ success: false, message: '至少需要 3 位不同的投票人，投票人不能重复' }, { status: 400 })
     }
 
     const deleteRisk = classifyBatchDeleteRisk(batch.pullRequests)
-    if (deleteRisk.hasBareDelete) {
+    if (!admin && deleteRisk.hasBareDelete) {
       return NextResponse.json({
         success: false,
         message: '含纯删除项的批次不能投票通过，已保留给管理员审核',
@@ -141,18 +144,20 @@ export async function POST(
     }
 
     const voterNames = boundVoters.map(voter => voter.nickname || voter.name || String(voter.id))
+    const adminName = admin && (admin.nickname || admin.name || String(admin.id))
     const result = await approveSubmittedBatch({
       batchId: id,
-      reviewNote: `群友投票通过：${voterNames.join('、')}`,
-      mode: 'community-vote',
-      allowDelete: false,
+      reviewNote: admin ? `管理员批准：${adminName}` : `群友投票通过：${voterNames.join('、')}`,
+      mode: admin ? 'admin' : 'community-vote',
+      allowDelete: !!admin,
       expectedContentVersion: expectedContentVersion as number,
-      reviewerId: creator.id,
+      reviewerId: admin?.id ?? creator.id,
     })
 
     return NextResponse.json({
       success: true,
-      message: '批次已由群友投票审核通过',
+      message: admin ? '批次已由管理员审核通过' : '批次已由群友投票审核通过',
+      ...(admin ? { approvedBy: 'admin' } : {}),
       batch: {
         id: result.batch.id,
         status: result.batch.status,
