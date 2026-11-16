@@ -274,6 +274,7 @@ model UserDictionaryEntry {
   remark String?
   /// Prefer this entry over public entries with the same word and type.
   replacePublic Boolean @default(true)
+  remove Boolean @default(false)
 
   // Relations
   user   User @relation("UserDictionaryEntries", fields: [userId], references: [id], onDelete: Cascade)

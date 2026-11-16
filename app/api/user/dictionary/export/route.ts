@@ -29,6 +29,7 @@ export async function GET(request: NextRequest) {
         word: true,
         code: true,
         weight: true,
+        remove: true,
       },
     })
 
