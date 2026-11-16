@@ -22,12 +22,14 @@ export interface UserDictionaryInput {
   weight: number
   remark: string | null
   replacePublic: boolean
+  remove: boolean
 }
 
 export interface UserDictionaryYamlEntry {
   word: string
   code: string
   weight: number
+  remove?: boolean
 }
 
 function normalizeText(value: unknown): string {
@@ -83,13 +85,16 @@ export function normalizeUserDictionaryInput(input: Record<string, unknown>): Us
     throw new UserDictionaryInputError('备注不能包含喵喵复审块标记')
   }
 
+  const remove = input.remove === true
+
   return {
     word,
     code,
     type,
     weight: normalizeWeight(input.weight, type),
     remark: remark || null,
-    replacePublic: input.replacePublic === undefined ? true : Boolean(input.replacePublic),
+    replacePublic: !remove && (input.replacePublic === undefined ? true : Boolean(input.replacePublic)),
+    remove,
   }
 }
 
@@ -118,7 +123,7 @@ export function buildUserDictionaryYaml(
   ]
 
   for (const entry of entries) {
-    if (!entry.word || !entry.code || /[\t\r\n]/.test(entry.word) || /[\t\r\n]/.test(entry.code)) {
+    if (entry.remove || !entry.word || !entry.code || /[\t\r\n]/.test(entry.word) || /[\t\r\n]/.test(entry.code)) {
       continue
     }
     lines.push(`${entry.word}\t${entry.code}\t${entry.weight}`)

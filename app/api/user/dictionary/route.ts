@@ -37,12 +37,13 @@ export async function POST(request: NextRequest) {
     const input = normalizeUserDictionaryInput(body)
 
     const entry = await prisma.$transaction(async (tx) => {
-      if (input.replacePublic) {
+      if (input.replacePublic && !input.remove) {
         await tx.userDictionaryEntry.deleteMany({
           where: {
             userId: session.id,
             word: input.word,
             type: input.type,
+            remove: false,
             NOT: { code: input.code },
           },
         })
@@ -61,6 +62,7 @@ export async function POST(request: NextRequest) {
           weight: input.weight,
           remark: input.remark,
           replacePublic: input.replacePublic,
+          remove: input.remove,
         },
         create: {
           userId: session.id,
@@ -70,6 +72,7 @@ export async function POST(request: NextRequest) {
           weight: input.weight,
           remark: input.remark,
           replacePublic: input.replacePublic,
+          remove: input.remove,
         },
       })
     })

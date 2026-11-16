@@ -33,6 +33,7 @@ interface UserDictionaryEntry {
   weight: number
   remark: string | null
   replacePublic: boolean
+  remove: boolean
   updateAt: string
 }
 
@@ -48,6 +49,7 @@ interface UserDictionaryForm {
   weight: string
   remark: string
   replacePublic: boolean
+  remove: boolean
 }
 
 const emptyForm: UserDictionaryForm = {
@@ -57,6 +59,7 @@ const emptyForm: UserDictionaryForm = {
   weight: String(getDefaultWeight('Phrase')),
   remark: '',
   replacePublic: true,
+  remove: false,
 }
 
 function getTypeColor(type: PhraseType) {
@@ -152,7 +155,8 @@ export default function UserDictionaryPage() {
         type: form.type,
         weight: Number(form.weight),
         remark: form.remark,
-        replacePublic: form.replacePublic,
+        replacePublic: !form.remove && form.replacePublic,
+        remove: form.remove,
       }
       const url = editingId ? `/api/user/dictionary/${editingId}` : '/api/user/dictionary'
       await apiRequest(url, {
@@ -179,6 +183,7 @@ export default function UserDictionaryPage() {
       weight: String(entry.weight),
       remark: entry.remark ?? '',
       replacePublic: entry.replacePublic,
+      remove: entry.remove,
     })
     setError('')
     setMessage('')
@@ -281,9 +286,12 @@ export default function UserDictionaryPage() {
                   <SelectItem key={option.value}>{option.label}</SelectItem>
                 ))}
               </Select>
-              <Input label="权重" type="number" value={form.weight} onValueChange={(weight: string) => updateForm({ weight })} />
+              <Input label="权重" type="number" value={form.weight} onValueChange={(weight: string) => updateForm({ weight })} isDisabled={form.remove} />
               <Textarea label="备注" value={form.remark} onValueChange={(remark: string) => updateForm({ remark })} minRows={2} />
-              <Switch isSelected={form.replacePublic} onValueChange={(replacePublic: boolean) => updateForm({ replacePublic })}>
+              <Switch isSelected={form.remove} onValueChange={(remove: boolean) => updateForm({ remove })}>
+                移除原版词条
+              </Switch>
+              <Switch isSelected={!form.remove && form.replacePublic} onValueChange={(replacePublic: boolean) => updateForm({ replacePublic })} isDisabled={form.remove}>
                 同词默认覆盖公开词库
               </Switch>
 
@@ -319,7 +327,7 @@ export default function UserDictionaryPage() {
                         </Chip>
                       </TableCell>
                       <TableCell>{entry.weight}</TableCell>
-                      <TableCell>{entry.replacePublic ? '是' : '否'}</TableCell>
+                      <TableCell>{entry.remove ? <Chip color="danger" variant="flat" size="sm">移除</Chip> : entry.replacePublic ? '是' : '否'}</TableCell>
                       <TableCell className="max-w-xs truncate">{entry.remark || '-'}</TableCell>
                       <TableCell>
                         <div className="flex gap-1">
