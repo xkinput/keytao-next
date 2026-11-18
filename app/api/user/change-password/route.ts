@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getSession, validatePassword } from '@/lib/auth'
+import { getSession, signToken, validatePassword } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import bcrypt from 'bcrypt'
 
@@ -47,12 +47,23 @@ export async function POST(request: NextRequest) {
     const hashedPassword = await bcrypt.hash(newPassword, 10)
 
     // Update password
-    await prisma.user.update({
-      where: { id: session.id },
-      data: { password: hashedPassword }
+    const [updatedUser] = await prisma.user.updateManyAndReturn({
+      where: { id: session.id, tokenVersion: session.tv ?? 0, status: 'ENABLE' },
+      data: { password: hashedPassword, tokenVersion: { increment: 1 } },
+      select: { id: true, name: true, tokenVersion: true },
     })
 
-    return NextResponse.json({ message: '密码修改成功' })
+    if (!updatedUser) {
+      return NextResponse.json({ error: '登录已失效，请重新登录' }, { status: 401 })
+    }
+
+    const token = await signToken({
+      id: updatedUser.id,
+      name: updatedUser.name ?? session.name,
+      tv: updatedUser.tokenVersion,
+    })
+
+    return NextResponse.json({ message: '密码修改成功', token })
   } catch (error) {
     console.error('Change password error:', error)
     return NextResponse.json({ error: '服务器内部错误' }, { status: 500 })

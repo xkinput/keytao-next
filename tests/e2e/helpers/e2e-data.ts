@@ -52,8 +52,8 @@ function jwtSecret() {
   return new TextEncoder().encode(process.env.JWT_SECRET || 'your-secret-key')
 }
 
-async function signE2EToken(user: Pick<User, 'id' | 'name'>) {
-  return new SignJWT({ id: user.id, name: user.name })
+async function signE2EToken(user: Pick<User, 'id' | 'name' | 'tokenVersion'>) {
+  return new SignJWT({ id: user.id, name: user.name, tv: user.tokenVersion })
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
     .setExpirationTime('7d')

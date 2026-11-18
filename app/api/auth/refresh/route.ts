@@ -36,22 +36,19 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 })
     }
 
-    // A signed token alone is not enough: the account may have been deleted,
-    // disabled or banned since the token was issued. Refusing to re-issue caps
-    // the damage at the remaining lifetime of the current token.
     const user = await prisma.user.findUnique({
       where: { id: payload.id },
-      select: { id: true, name: true, status: true },
+      select: { id: true, name: true, status: true, tokenVersion: true },
     })
 
-    if (!user || user.status !== 'ENABLE') {
+    if (!user || user.status !== 'ENABLE' || user.tokenVersion !== payload.tv) {
       return NextResponse.json({ error: '账号不可用' }, { status: 401 })
     }
 
-    const newToken = await signToken({ id: user.id, name: user.name ?? payload.name })
+    const newToken = await signToken({ id: user.id, name: user.name ?? payload.name, tv: user.tokenVersion })
     return NextResponse.json({ token: newToken })
   } catch (err) {
     console.error('Refresh token error:', err)
-    return NextResponse.json({ error: '刷新失败' }, { status: 500 })
+    return NextResponse.json({ error: '刷新失败' }, { status: 503 })
   }
 }

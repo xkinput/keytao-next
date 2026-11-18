@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { NextRequest } from 'next/server'
+import { AuthInfrastructureError } from '@/lib/auth'
 
 const mocks = vi.hoisted(() => ({
   getSession: vi.fn(),
@@ -19,7 +20,10 @@ const mocks = vi.hoisted(() => ({
   transaction: vi.fn(),
 }))
 
-vi.mock('@/lib/auth', () => ({ getSession: mocks.getSession }))
+vi.mock('@/lib/auth', async importOriginal => ({
+  ...await importOriginal<typeof import('@/lib/auth')>(),
+  getSession: mocks.getSession,
+}))
 vi.mock('@/lib/rateLimit', () => ({ checkRateLimit: mocks.checkRateLimit }))
 vi.mock('@/lib/objectStorage', async importOriginal => ({
   ...await importOriginal<typeof import('@/lib/objectStorage')>(),
@@ -134,6 +138,16 @@ afterEach(() => {
 })
 
 describe('scheme sync authentication and rate limits', () => {
+  it.each(routeCases)('$name returns 503 when session verification is unavailable', async ({ invoke }) => {
+    mocks.getSession.mockRejectedValueOnce(new AuthInfrastructureError('Pool unavailable'))
+    const res = await invoke()
+    expect(res.status).toBe(503)
+    expect(mocks.checkRateLimit).not.toHaveBeenCalled()
+    expect(mocks.profile.upsert).not.toHaveBeenCalled()
+    expect(mocks.packages.create).not.toHaveBeenCalled()
+    expect(mocks.deleteObject).not.toHaveBeenCalled()
+  })
+
   it.each(routeCases)('$name requires authentication', async ({ invoke }) => {
     mocks.getSession.mockResolvedValue(null)
     const res = await invoke()

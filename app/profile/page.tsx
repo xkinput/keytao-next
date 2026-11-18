@@ -44,8 +44,8 @@ interface UserStats {
 export default function ProfilePage() {
   const router = useRouter()
   const user = useAuthStore(state => state.user)
-  const token = useAuthStore(state => state.token)
   const setAuth = useAuthStore(state => state.setAuth)
+  const clearAuth = useAuthStore(state => state.clearAuth)
 
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
@@ -53,6 +53,8 @@ export default function ProfilePage() {
   const [isChangingPassword, setIsChangingPassword] = useState(false)
   const [passwordError, setPasswordError] = useState('')
   const [passwordSuccess, setPasswordSuccess] = useState(false)
+  const [isLoggingOut, setIsLoggingOut] = useState(false)
+  const [logoutError, setLogoutError] = useState('')
 
   const [isEditingProfile, setIsEditingProfile] = useState(false)
   const [editNickname, setEditNickname] = useState('')
@@ -97,8 +99,9 @@ export default function ProfilePage() {
         }
       })
 
-      if (token) {
-        setAuth(token, data.user)
+      const currentAuth = useAuthStore.getState()
+      if (currentAuth.token && currentAuth.user?.id === data.user.id) {
+        setAuth(currentAuth.token, { ...currentAuth.user, ...data.user })
       }
 
       setProfileSuccess(true)
@@ -122,6 +125,8 @@ export default function ProfilePage() {
   }, [profileSuccess])
 
   const handleChangePassword = async () => {
+    if (isChangingPassword || isLoggingOut || !user) return
+
     setPasswordError('')
     setPasswordSuccess(false)
 
@@ -143,7 +148,8 @@ export default function ProfilePage() {
     setIsChangingPassword(true)
 
     try {
-      await apiRequest<{ message: string }>('/api/user/change-password', {
+      const data = await apiRequest<{ message: string; token: string }>('/api/user/change-password', {
+        withAuth: true,
         method: 'POST',
         body: {
           currentPassword,
@@ -151,6 +157,7 @@ export default function ProfilePage() {
         }
       })
 
+      setAuth(data.token, user)
       setPasswordSuccess(true)
       setCurrentPassword('')
       setNewPassword('')
@@ -160,6 +167,22 @@ export default function ProfilePage() {
       setPasswordError(error instanceof Error ? error.message : '修改密码失败，请稍后重试')
     } finally {
       setIsChangingPassword(false)
+    }
+  }
+
+  const handleLogoutAll = async () => {
+    if (isChangingPassword || isLoggingOut) return
+
+    setLogoutError('')
+    setIsLoggingOut(true)
+    try {
+      await apiRequest('/api/auth/logout-all', { method: 'POST', withAuth: true })
+      clearAuth()
+      router.replace('/login')
+    } catch (error) {
+      setLogoutError(error instanceof Error ? error.message : '退出失败，请稍后重试')
+    } finally {
+      setIsLoggingOut(false)
     }
   }
 
@@ -394,7 +417,7 @@ export default function ProfilePage() {
                   placeholder="请输入当前密码"
                   value={currentPassword}
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCurrentPassword(e.target.value)}
-                  isDisabled={isChangingPassword}
+                  isDisabled={isChangingPassword || isLoggingOut}
                 />
                 <Input
                   type="password"
@@ -402,7 +425,7 @@ export default function ProfilePage() {
                   placeholder="请输入新密码（至少6个字符）"
                   value={newPassword}
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewPassword(e.target.value)}
-                  isDisabled={isChangingPassword}
+                  isDisabled={isChangingPassword || isLoggingOut}
                 />
                 <Input
                   type="password"
@@ -410,25 +433,43 @@ export default function ProfilePage() {
                   placeholder="请再次输入新密码"
                   value={confirmPassword}
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) => setConfirmPassword(e.target.value)}
-                  isDisabled={isChangingPassword}
+                  isDisabled={isChangingPassword || isLoggingOut}
                 />
 
                 {passwordError && (
-                  <p className="text-sm text-danger">{passwordError}</p>
+                  <p role="alert" className="text-sm text-danger">{passwordError}</p>
                 )}
 
                 {passwordSuccess && (
-                  <p className="text-sm text-success">密码修改成功！</p>
+                  <p role="status" className="text-sm text-success">密码修改成功！</p>
                 )}
 
                 <Button
                   color="primary"
                   onPress={handleChangePassword}
                   isLoading={isChangingPassword}
-                  isDisabled={isChangingPassword}
+                  isDisabled={isChangingPassword || isLoggingOut}
                 >
                   修改密码
                 </Button>
+
+                <Divider />
+
+                <div className="space-y-2" aria-live="polite">
+                  <Button
+                    type="button"
+                    color="danger"
+                    variant="flat"
+                    onPress={handleLogoutAll}
+                    isLoading={isLoggingOut}
+                    isDisabled={isChangingPassword || isLoggingOut}
+                  >
+                    {isLoggingOut ? '退出中…' : '退出所有设备'}
+                  </Button>
+                  {logoutError && (
+                    <p role="alert" className="text-sm text-danger">{logoutError}</p>
+                  )}
+                </div>
               </div>
             </CardBody>
           </Card>

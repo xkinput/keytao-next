@@ -115,6 +115,7 @@ model User {
   password   String?
   email      String?    @unique
   status     UserStatus @default(ENABLE)
+  tokenVersion Int      @default(0)
   signUpType SignUpType @default(USERNAME)
 
   // Platform bindings
