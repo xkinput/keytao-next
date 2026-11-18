@@ -1,5 +1,6 @@
-import { SignJWT, jwtVerify } from 'jose'
+import { SignJWT, jwtVerify, errors } from 'jose'
 import { headers } from 'next/headers'
+import { prisma } from '@/lib/prisma'
 
 const jwtSecret = process.env.JWT_SECRET
 
@@ -11,11 +12,16 @@ const secret = new TextEncoder().encode(jwtSecret || 'your-secret-key')
 export interface JWTPayload {
   id: number
   name: string
+  tv?: number
   iat?: number
   exp?: number
 }
 
-export async function signToken(payload: Omit<JWTPayload, 'iat' | 'exp'>): Promise<string> {
+export class AuthInfrastructureError extends Error {
+  readonly name = 'AuthInfrastructureError'
+}
+
+export async function signToken(payload: Omit<JWTPayload, 'iat' | 'exp'> & { tv: number }): Promise<string> {
   return await new SignJWT(payload as Record<string, unknown>)
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
@@ -25,10 +31,22 @@ export async function signToken(payload: Omit<JWTPayload, 'iat' | 'exp'>): Promi
 
 export async function verifyToken(token: string): Promise<JWTPayload | null> {
   try {
-    const { payload } = await jwtVerify(token, secret)
-    return payload as unknown as JWTPayload
-  } catch {
-    return null
+    const { payload } = await jwtVerify(token, secret, { algorithms: ['HS256'] })
+    // Legacy tokens remain valid at version zero until the first revocation.
+    const tv = payload.tv === undefined ? 0 : payload.tv
+    if (!Number.isSafeInteger(payload.id) || (payload.id as number) <= 0
+      || typeof payload.name !== 'string' || !Number.isSafeInteger(tv) || (tv as number) < 0) {
+      return null
+    }
+    const user = await prisma.user.findUnique({
+      where: { id: payload.id as number },
+      select: { status: true, tokenVersion: true },
+    })
+    if (!user || user.status !== 'ENABLE' || tv !== user.tokenVersion) return null
+    return { ...payload, tv } as unknown as JWTPayload
+  } catch (error) {
+    if (error instanceof errors.JOSEError) return null
+    throw new AuthInfrastructureError('Authentication unavailable', { cause: error })
   }
 }
 

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { getSession } from '@/lib/auth'
+import { AuthInfrastructureError, getSession } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 
 /**
@@ -7,7 +7,16 @@ import { prisma } from '@/lib/prisma'
  */
 export async function checkAdminPermission() {
   // 获取当前会话
-  const session = await getSession()
+  let session
+  try {
+    session = await getSession()
+  } catch (error) {
+    if (!(error instanceof AuthInfrastructureError)) throw error
+    return {
+      authorized: false,
+      response: NextResponse.json({ error: '认证服务暂不可用' }, { status: 503 })
+    }
+  }
 
   if (!session) {
     return {
@@ -59,7 +68,16 @@ export async function checkIsAdmin(userId: number): Promise<boolean> {
  * Check if user is ROOT admin (initial administrator)
  */
 export async function checkRootAdminPermission() {
-  const session = await getSession()
+  let session
+  try {
+    session = await getSession()
+  } catch (error) {
+    if (!(error instanceof AuthInfrastructureError)) throw error
+    return {
+      authorized: false,
+      response: NextResponse.json({ error: '认证服务暂不可用' }, { status: 503 })
+    }
+  }
 
   if (!session) {
     return {

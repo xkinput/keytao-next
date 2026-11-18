@@ -1,6 +1,6 @@
 import type { Prisma } from '@prisma/client'
 import { NextResponse } from 'next/server'
-import { getSession } from '@/lib/auth'
+import { AuthInfrastructureError, getSession } from '@/lib/auth'
 import { checkRateLimit } from '@/lib/rateLimit'
 import { isObjectStorageConfigured, PRESIGN_EXPIRY_SECONDS } from '@/lib/objectStorage'
 import { InvalidJsonBodyError, RequestBodyTooLargeError } from '@/lib/limitedJsonBody'
@@ -40,6 +40,9 @@ export async function schemeSyncSession(packages = false) {
 }
 
 export function schemeSyncError(error: unknown, status = 500) {
+  if (error instanceof AuthInfrastructureError) {
+    return NextResponse.json({ error: '认证服务暂不可用' }, { status: 503 })
+  }
   if (error instanceof InvalidJsonBodyError || error instanceof RequestBodyTooLargeError) {
     return NextResponse.json({ error: error.message }, { status: error.status })
   }
