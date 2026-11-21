@@ -331,6 +331,19 @@ curl -X POST -H "Content-Type: application/json" -H "X-API-Key: kt_xxx" \\
               <Divider />
 
               <ApiDoc
+                method="POST"
+                path="/api/v1/batches/:id/withdraw"
+                description="撤回当前 API Key 所属用户的已提交批次。成功后批次恢复为草稿，并返回更新后的 batch。"
+                params={[
+                  { name: 'id', desc: '路径参数，批次 ID。无需请求体。' },
+                ]}
+                example={`curl -X POST -H "X-API-Key: kt_xxx" \\
+  "/api/v1/batches/<batchId>/withdraw"`}
+              />
+
+              <Divider />
+
+              <ApiDoc
                 method="GET"
                 path="/api/v1/infer"
                 description="推断词条编码、推荐可用码并返回冲突信息"
