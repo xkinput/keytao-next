@@ -34,11 +34,21 @@ export function apiKeyPrefix(plaintext: string): string {
   return plaintext.slice(0, API_KEY_PREFIX_LENGTH)
 }
 
-export async function verifyApiKey(): Promise<
+async function readApiKeyHeader(request?: Request): Promise<string | null> {
+  if (request?.headers.has('x-api-key')) {
+    return request.headers.get('x-api-key')
+  }
+  try {
+    return (await headers()).get('x-api-key')
+  } catch {
+    return null
+  }
+}
+
+export async function verifyApiKey(request?: Request): Promise<
   { success: true; ctx: ApiKeyContext } | { success: false; response: NextResponse }
 > {
-  const headersList = await headers()
-  const apiKey = headersList.get('x-api-key')
+  const apiKey = await readApiKeyHeader(request)
 
   if (!apiKey) {
     return {

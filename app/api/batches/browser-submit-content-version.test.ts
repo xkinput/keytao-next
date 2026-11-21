@@ -2,6 +2,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { NextRequest } from 'next/server'
 
 const mockGetSession = vi.fn()
+const mockApiKeyFindUnique = vi.fn()
+const mockApiKeyUpdate = vi.fn()
+const mockCheckRateLimit = vi.fn()
 const mockFindUnique = vi.fn()
 const mockUpdateMany = vi.fn()
 const mockCheckBatchConflicts = vi.fn()
@@ -15,8 +18,10 @@ const mockTransaction = vi.fn(async (callback: (tx: unknown) => unknown) => call
 }))
 
 vi.mock('@/lib/auth', () => ({ getSession: mockGetSession }))
+vi.mock('@/lib/rateLimit', () => ({ checkRateLimit: mockCheckRateLimit }))
 vi.mock('@/lib/prisma', () => ({
   prisma: {
+    apiKey: { findUnique: mockApiKeyFindUnique, update: mockApiKeyUpdate },
     batch: { findUnique: mockFindUnique, updateMany: mockUpdateMany },
     phrase: { findMany: mockPhraseFindMany },
     $transaction: mockTransaction,
@@ -30,10 +35,10 @@ vi.mock('@/lib/services/batchSkippedCodeWarnings', () => ({
 }))
 vi.mock('@/lib/services/batchPriorityOrderWarnings', () => ({ buildPriorityOrderWarnings: vi.fn(async () => []) }))
 
-function request(body?: unknown) {
+function request(body?: unknown, extraHeaders: Record<string, string> = {}) {
   return new NextRequest('http://localhost/api/batches/batch-1/submit', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...extraHeaders },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   })
 }
@@ -41,6 +46,14 @@ function request(body?: unknown) {
 beforeEach(() => {
   vi.clearAllMocks()
   mockGetSession.mockResolvedValue({ id: 42 })
+  mockCheckRateLimit.mockReturnValue({ allowed: true, retryAfterMs: 0 })
+  mockApiKeyFindUnique.mockResolvedValue({
+    id: 9,
+    userId: 42,
+    enabled: true,
+    user: { status: 'ENABLE' },
+  })
+  mockApiKeyUpdate.mockResolvedValue({})
   mockFindUnique.mockResolvedValue({
     id: 'batch-1', creatorId: 42, status: 'Draft', contentVersion: 3,
     pullRequests: [{ id: 1, action: 'Create', word: '测试', oldWord: null, code: 'ces', type: 'Phrase', weight: null }],
@@ -104,5 +117,47 @@ describe('browser batch submit content snapshot', () => {
     expect(mockUpdateMany).toHaveBeenLastCalledWith(expect.objectContaining({
       where: expect.objectContaining({ id: 'batch-1', creatorId: 42, contentVersion: 3 }),
     }))
+  })
+
+  it('accepts X-API-Key when no Bearer session is present', async () => {
+    mockGetSession.mockResolvedValue(null)
+    const { POST } = await import('./[id]/submit/route')
+
+    const res = await POST(request({ expectedContentVersion: 3 }, { 'X-API-Key': 'kt_valid_key' }), {
+      params: Promise.resolve({ id: 'batch-1' }),
+    })
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({
+      batch: { id: 'batch-1', status: 'Submitted', contentVersion: 4 },
+    })
+  })
+
+  it('rejects unauthenticated requests and invalid API keys', async () => {
+    mockGetSession.mockResolvedValue(null)
+    const { POST } = await import('./[id]/submit/route')
+
+    const unauth = await POST(request(), { params: Promise.resolve({ id: 'batch-1' }) })
+    expect(unauth.status).toBe(401)
+    expect(await unauth.json()).toEqual({ error: '未登录' })
+
+    mockApiKeyFindUnique.mockResolvedValueOnce(null)
+    const invalidKey = await POST(request({}, { 'X-API-Key': 'kt_invalid' }), {
+      params: Promise.resolve({ id: 'batch-1' }),
+    })
+    expect(invalidKey.status).toBe(401)
+    expect(await invalidKey.json()).toEqual({ error: 'API Key 无效' })
+
+    mockApiKeyFindUnique.mockResolvedValueOnce({
+      id: 9,
+      userId: 99,
+      enabled: true,
+      user: { status: 'ENABLE' },
+    })
+    const wrongOwner = await POST(request({}, { 'X-API-Key': 'kt_other_user' }), {
+      params: Promise.resolve({ id: 'batch-1' }),
+    })
+    expect(wrongOwner.status).toBe(403)
+    expect(mockUpdateMany).not.toHaveBeenCalled()
   })
 })

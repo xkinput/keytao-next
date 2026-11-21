@@ -309,6 +309,28 @@ curl -X POST -H "Content-Type: application/json" -H "X-API-Key: kt_xxx" \\
               <Divider />
 
               <ApiDoc
+                method="POST"
+                path="/api/v1/batches/:id/submit"
+                description="提交当前 API Key 所属用户的草稿或已拒绝批次进入审核（/api/batches/:id/submit 同样支持 X-API-Key）"
+                params={[
+                  { name: 'expectedContentVersion', desc: '可选（confirmed=true 时必填）：批次版本号，防止提交前发生并发修改' },
+                  { name: 'confirmed', desc: '可选：存在重码/多编码/跳过编码空位/同码链优先级警告时，确认后传 true 二次提交' },
+                  { name: 'expectedWarningDigest', desc: 'confirmed=true 时必填：首次提交返回 400 + requiresConfirmation 时的 warningDigest' },
+                ]}
+                example={`# 无警告时一次提交（建议携带 batch-draft 返回的 contentVersion）
+curl -X POST -H "Content-Type: application/json" -H "X-API-Key: kt_xxx" \\
+  -d '{"expectedContentVersion":1}' \\
+  "/api/v1/batches/<batchId>/submit"
+
+# 若返回 400 且 requiresConfirmation=true，核对 warnings 后回传快照确认提交
+curl -X POST -H "Content-Type: application/json" -H "X-API-Key: kt_xxx" \\
+  -d '{"confirmed":true,"expectedContentVersion":1,"expectedWarningDigest":"<warningDigest>"}' \\
+  "/api/v1/batches/<batchId>/submit"`}
+              />
+
+              <Divider />
+
+              <ApiDoc
                 method="GET"
                 path="/api/v1/infer"
                 description="推断词条编码、推荐可用码并返回冲突信息"
