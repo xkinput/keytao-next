@@ -479,6 +479,7 @@ model ApiKey {
   id           Int       @id @default(autoincrement())
   keyHash      String    @unique
   keyPrefix    String
+  encryptedKey Bytes?
   name         String
   enabled      Boolean   @default(true)
   createdAt    DateTime  @default(now())

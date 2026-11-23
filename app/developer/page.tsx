@@ -6,7 +6,7 @@ import {
   Card, CardBody, CardHeader, Button, Input, Chip, Divider,
   Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, useDisclosure,
 } from '@/lib/heroui-compat'
-import { Code, Plus, Trash2, Copy, Check, Key } from 'lucide-react'
+import { Code, Plus, Trash2, Eye, EyeOff, Key } from 'lucide-react'
 import { useAPI, apiRequest } from '@/lib/hooks/useSWR'
 import { useAuthStore } from '@/lib/store/auth'
 import toast from 'react-hot-toast'
@@ -14,29 +14,20 @@ import toast from 'react-hot-toast'
 interface ApiKey {
   id: number
   name: string
-  /** First 8 characters only — the full key is shown once, at creation time. */
-  keyPrefix: string
   enabled: boolean
   createdAt: string
   lastUsedAt: string | null
   requestCount: number
 }
 
-interface CreatedApiKey extends ApiKey {
-  plaintextKey: string
-}
-
 export default function DeveloperPage() {
   const router = useRouter()
   const user = useAuthStore(state => state.user)
-  const { data, mutate } = useAPI<{ keys: ApiKey[] }>('/api/developer/keys')
+  const { data, mutate } = useAPI<{ keys: ApiKey[] }>(user ? '/api/developer/keys' : null, { keepPreviousData: false })
   const { isOpen, onOpen, onClose } = useDisclosure()
   const [newKeyName, setNewKeyName] = useState('')
   const [isCreating, setIsCreating] = useState(false)
   const [deletingId, setDeletingId] = useState<number | null>(null)
-  const [copiedId, setCopiedId] = useState<number | null>(null)
-  const [createdKey, setCreatedKey] = useState<CreatedApiKey | null>(null)
-  const [copiedCreatedKey, setCopiedCreatedKey] = useState(false)
 
   if (!user) {
     return (
@@ -57,15 +48,11 @@ export default function DeveloperPage() {
     if (!newKeyName.trim()) return
     setIsCreating(true)
     try {
-      const created = await apiRequest<{ key: CreatedApiKey }>('/api/developer/keys', {
+      await apiRequest('/api/developer/keys', {
         method: 'POST',
         withAuth: true,
         body: { name: newKeyName.trim() },
       })
-      // Surface the plaintext BEFORE anything that can fail: it is never
-      // retrievable again, so a failing list refresh must not lose it.
-      setCreatedKey(created.key)
-      setCopiedCreatedKey(false)
       setNewKeyName('')
       onClose()
       await mutate()
@@ -88,19 +75,6 @@ export default function DeveloperPage() {
     } finally {
       setDeletingId(null)
     }
-  }
-
-  const handleCopy = async (key: ApiKey) => {
-    await navigator.clipboard.writeText(key.keyPrefix)
-    setCopiedId(key.id)
-    setTimeout(() => setCopiedId(null), 2000)
-  }
-
-  const handleCopyCreatedKey = async () => {
-    if (!createdKey) return
-    await navigator.clipboard.writeText(createdKey.plaintextKey)
-    setCopiedCreatedKey(true)
-    setTimeout(() => setCopiedCreatedKey(false), 2000)
   }
 
   const keys = data?.keys ?? []
@@ -140,7 +114,7 @@ export default function DeveloperPage() {
               ) : (
                 <div className="space-y-3">
                   {keys.map((k) => (
-                    <div key={k.id} className="border border-divider rounded-lg p-4">
+                    <div key={`${user.id}:${k.id}:${k.enabled}`} className="border border-divider rounded-lg p-4">
                       <div className="flex items-start justify-between gap-4">
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 mb-2">
@@ -149,22 +123,7 @@ export default function DeveloperPage() {
                               {k.enabled ? '启用' : '禁用'}
                             </Chip>
                           </div>
-                          <div className="flex items-center gap-2">
-                            <code className="text-xs bg-default-100 px-2 py-1 rounded font-mono truncate max-w-xs">
-                              {k.keyPrefix}……
-                            </code>
-                            <Button
-                              isIconOnly
-                              size="sm"
-                              variant="light"
-                              aria-label={`复制 ${k.name} 前缀`}
-                              onPress={() => handleCopy(k)}
-                            >
-                              {copiedId === k.id
-                                ? <Check className="w-3 h-3 text-success" />
-                                : <Copy className="w-3 h-3" />}
-                            </Button>
-                          </div>
+                          <ApiKeyValue apiKey={k} />
                           <p className="text-xs text-default-400 mt-2">
                             创建于 {new Date(k.createdAt).toLocaleString('zh-CN')}
                             {k.lastUsedAt && ` · 最近使用 ${new Date(k.lastUsedAt).toLocaleString('zh-CN')}`}
@@ -396,37 +355,77 @@ curl -X POST -H "Content-Type: application/json" -H "X-API-Key: kt_xxx" \\
           </ModalFooter>
         </ModalContent>
       </Modal>
+    </div>
+  )
+}
 
-      {/* One-time key reveal — the plaintext is never stored server side */}
-      <Modal isOpen={createdKey !== null} onClose={() => setCreatedKey(null)}>
-        <ModalContent>
-          <ModalHeader>请立即保存你的 API Key</ModalHeader>
-          <ModalBody>
-            <p className="text-sm text-warning-600">
-              完整 Key 仅显示这一次，关闭后无法再次查看。请立即复制并妥善保存。
-            </p>
-            <div className="flex items-center gap-2">
-              <code className="text-xs bg-default-100 px-2 py-2 rounded font-mono break-all flex-1">
-                {createdKey?.plaintextKey}
-              </code>
-              <Button
-                isIconOnly
-                size="sm"
-                variant="light"
-                aria-label="复制完整 API Key"
-                onPress={handleCopyCreatedKey}
-              >
-                {copiedCreatedKey
-                  ? <Check className="w-4 h-4 text-success" />
-                  : <Copy className="w-4 h-4" />}
-              </Button>
-            </div>
-          </ModalBody>
-          <ModalFooter>
-            <Button color="primary" onPress={() => setCreatedKey(null)}>我已保存</Button>
-          </ModalFooter>
-        </ModalContent>
-      </Modal>
+function ApiKeyValue({ apiKey }: { apiKey: ApiKey }) {
+  const [plaintext, setPlaintext] = useState<string | null>(null)
+  const [isRevealing, setIsRevealing] = useState(false)
+  const valueId = `api-key-value-${apiKey.id}`
+
+  const toggleVisibility = async () => {
+    if (plaintext) {
+      setPlaintext(null)
+      return
+    }
+    if (!apiKey.enabled || isRevealing) return
+    setIsRevealing(true)
+    try {
+      const { plaintextKey } = await apiRequest<{ plaintextKey: string }>(`/api/developer/keys/${apiKey.id}`, { method: 'POST' })
+      setPlaintext(plaintextKey)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '无法读取 API Key')
+    } finally {
+      setIsRevealing(false)
+    }
+  }
+
+  const copyKey = async () => {
+    if (!plaintext) return
+    const options = { id: `copy-api-key-${apiKey.id}` }
+    try {
+      await navigator.clipboard.writeText(plaintext)
+      toast.success('已复制 API Key', options)
+    } catch {
+      toast.error('复制失败，请选中文本后手动复制', options)
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      <div id={valueId} className="min-w-0">
+        {plaintext ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="flat"
+            className="h-auto min-h-8 min-w-0 max-w-full whitespace-normal px-2 py-1 text-left"
+            title="点击复制 API Key"
+            onPress={copyKey}
+          >
+            <code className="select-text break-all font-mono text-xs" translate="no">{plaintext}</code>
+            <span className="sr-only">复制完整 API Key</span>
+          </Button>
+        ) : (
+          <code className="rounded bg-default-100 px-2 py-1 font-mono text-xs">***</code>
+        )}
+      </div>
+      <Button
+        type="button"
+        isIconOnly
+        size="sm"
+        variant="light"
+        className="shrink-0"
+        isDisabled={!apiKey.enabled}
+        isPending={isRevealing}
+        aria-controls={valueId}
+        aria-expanded={Boolean(plaintext)}
+        aria-label={`${plaintext ? '隐藏' : '显示'} ${apiKey.name} 的 API Key`}
+        onPress={toggleVisibility}
+      >
+        {plaintext ? <EyeOff className="size-4" aria-hidden="true" /> : <Eye className="size-4" aria-hidden="true" />}
+      </Button>
     </div>
   )
 }

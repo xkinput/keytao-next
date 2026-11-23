@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getSession } from '@/lib/auth'
 import { apiKeyPrefix, generateApiKey, hashApiKey } from '@/lib/apiKeyAuth'
+import { encryptApiKey } from '@/lib/apiKeySecrets'
 
 const MAX_KEYS_PER_USER = 5
 const MAX_KEY_NAME_LENGTH = 60
@@ -10,7 +11,6 @@ export async function GET() {
   const session = await getSession()
   if (!session) return NextResponse.json({ error: '未登录' }, { status: 401 })
 
-  // Only the prefix is stored, so the list can never leak a usable key.
   const keys = await prisma.apiKey.findMany({
     where: { userId: session.id },
     select: {
@@ -46,11 +46,15 @@ export async function POST(request: NextRequest) {
   }
 
   const plaintext = generateApiKey()
+  const keyHash = hashApiKey(plaintext)
+  const encryptedKey = encryptApiKey(plaintext, session.id, keyHash)
+  if (!encryptedKey) return NextResponse.json({ error: 'API Key 加密服务未配置' }, { status: 503 })
 
   const key = await prisma.apiKey.create({
     data: {
-      keyHash: hashApiKey(plaintext),
+      keyHash,
       keyPrefix: apiKeyPrefix(plaintext),
+      encryptedKey,
       name,
       userId: session.id,
     },
@@ -65,6 +69,8 @@ export async function POST(request: NextRequest) {
     },
   })
 
-  // The plaintext is returned here and nowhere else — it is not recoverable.
-  return NextResponse.json({ key: { ...key, plaintextKey: plaintext } }, { status: 201 })
+  return NextResponse.json({ key: { ...key, plaintextKey: plaintext } }, {
+    status: 201,
+    headers: { 'Cache-Control': 'private, no-store' },
+  })
 }

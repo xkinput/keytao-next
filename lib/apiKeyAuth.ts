@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from 'crypto'
 import { headers } from 'next/headers'
 import { NextResponse } from 'next/server'
+import { encryptApiKey } from '@/lib/apiKeySecrets'
 import { prisma } from '@/lib/prisma'
 import { checkRateLimit } from '@/lib/rateLimit'
 
@@ -12,11 +13,6 @@ export interface ApiKeyContext {
 /** Number of leading characters kept in plaintext purely for display. */
 export const API_KEY_PREFIX_LENGTH = 8
 
-/**
- * Generate a fresh API key. The plaintext is returned to the caller exactly
- * once; only `hashApiKey(plaintext)` and the leading `API_KEY_PREFIX_LENGTH`
- * characters are persisted.
- */
 export function generateApiKey(): string {
   return 'kt_' + randomBytes(24).toString('base64url')
 }
@@ -60,12 +56,14 @@ export async function verifyApiKey(request?: Request): Promise<
     }
   }
 
+  const keyHash = hashApiKey(apiKey)
   const record = await prisma.apiKey.findUnique({
-    where: { keyHash: hashApiKey(apiKey) },
+    where: { keyHash },
     select: {
       id: true,
       userId: true,
       enabled: true,
+      encryptedKey: true,
       user: { select: { status: true } },
     },
   })
@@ -107,11 +105,17 @@ export async function verifyApiKey(request?: Request): Promise<
     }
   }
 
-  // Update usage stats asynchronously, don't await
-  prisma.apiKey.update({
+  // The original value of a hash-only key is available after successful authentication.
+  const encryptedKey = record.encryptedKey === null ? encryptApiKey(apiKey, record.userId, keyHash) : null
+  const usageUpdate = prisma.apiKey.update({
     where: { id: record.id },
-    data: { lastUsedAt: new Date(), requestCount: { increment: 1 } },
+    data: {
+      lastUsedAt: new Date(),
+      requestCount: { increment: 1 },
+      ...(encryptedKey ? { encryptedKey } : {}),
+    },
   }).catch(() => {})
+  if (encryptedKey) await usageUpdate
 
   return { success: true, ctx: { userId: record.userId, apiKeyId: record.id } }
 }
