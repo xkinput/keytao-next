@@ -134,6 +134,9 @@ export async function POST(
         { status: 400 }
       )
     }
+    if (batch.itemReviewStarted) {
+      return NextResponse.json({ success: false, message: '请在网页重新送审被拒绝的词条' }, { status: 409 })
+    }
 
     if (batch.contentVersion !== expectedContentVersion) {
       return NextResponse.json(
@@ -245,11 +248,12 @@ export async function POST(
         warningDigest: lockedDigest,
       })
       if (lockedSnapshotDigest !== expectedSnapshotDigest) return { count: 0 }
-      return tx.batch.updateMany({
+      const result = await tx.batch.updateMany({
         where: {
           id,
           creatorId: user.id,
           status: { in: ['Draft', 'Rejected'] },
+          itemReviewStarted: false,
           contentVersion: expectedContentVersion as number,
         },
         data: {
@@ -258,6 +262,10 @@ export async function POST(
           contentVersion: { increment: 1 },
         },
       })
+      if (result.count === 1 && batch.status === 'Rejected') {
+        await tx.pullRequest.updateMany({ where: { batchId: id, status: 'Rejected' }, data: { status: 'Pending' } })
+      }
+      return result
     })
 
     if (transitioned.count !== 1) {

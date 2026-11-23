@@ -14,6 +14,7 @@ const DATABASE_BACKED_TESTS = [
   'app/api/pull-requests/check-conflicts-batch/route.test.ts',
   'app/api/pull-requests/check-conflicts-batch/performance.test.ts',
   'lib/services/__tests__/batchApprovalTransaction.test.ts',
+  'lib/services/__tests__/batchItemReviewLifecycle.test.ts',
 ]
 
 export default defineConfig({

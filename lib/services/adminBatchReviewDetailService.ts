@@ -1,5 +1,6 @@
 import { prisma } from '@/lib/prisma'
 import { buildBatchAiReview } from '@/lib/services/batchAiReviewService'
+import { getItemReviewProgress, reviewNotesInclude } from '@/lib/services/batchItemReview'
 
 export async function getAdminBatchReviewDetail(id: string) {
   const batch = await prisma.batch.findUnique({
@@ -22,6 +23,7 @@ export async function getAdminBatchReviewDetail(id: string) {
         include: {
           phrase: true,
           conflicts: true,
+          reviewNotes: reviewNotesInclude,
           dependencies: {
             include: {
               dependsOn: {
@@ -29,6 +31,7 @@ export async function getAdminBatchReviewDetail(id: string) {
                   id: true,
                   word: true,
                   code: true,
+                  appliedAt: true,
                 },
               },
             },
@@ -46,7 +49,8 @@ export async function getAdminBatchReviewDetail(id: string) {
   const { checkBatchConflictsWithWeight } = await import('@/lib/services/batchConflictService')
   type ConflictResult = Awaited<ReturnType<typeof checkBatchConflictsWithWeight>>[number]
 
-  const prItems = batch.pullRequests.map(pr => ({
+  const currentItems = batch.pullRequests.filter(pr => !pr.appliedAt)
+  const prItems = currentItems.map(pr => ({
     id: String(pr.id),
     action: pr.action as 'Create' | 'Change' | 'Delete',
     word: pr.word || '',
@@ -76,8 +80,8 @@ export async function getAdminBatchReviewDetail(id: string) {
     )
     if (resolvedSuggestion?.resolverIndex === undefined) continue
 
-    const resolverPR = batch.pullRequests[resolvedSuggestion.resolverIndex]
-    const dependentPR = batch.pullRequests[i]
+    const resolverPR = currentItems[resolvedSuggestion.resolverIndex]
+    const dependentPR = currentItems[i]
     if (!resolverPR || !dependentPR || resolverPR.id === dependentPR.id) continue
 
     const reason = resolvedSuggestion.reason || '批次内操作解决了冲突'
@@ -111,7 +115,8 @@ export async function getAdminBatchReviewDetail(id: string) {
       ...pr,
       weight: conflictResult?.calculatedWeight ?? pr.weight,
       conflictInfo: conflictResult?.conflict,
-      dependencies: dynamicDepsOf.get(pr.id) ?? [],
+      dependencies: [...pr.dependencies, ...(dynamicDepsOf.get(pr.id) ?? [])
+        .filter(entry => !pr.dependencies.some(dependency => dependency.dependsOnId === entry.dependsOn.id))],
       dependedBy: dynamicDependedBy.get(pr.id) ?? [],
     }
   })
@@ -127,9 +132,11 @@ export async function getAdminBatchReviewDetail(id: string) {
     aiReview: aiItemsByPrId.get(pr.id),
   }))
 
+  const progress = getItemReviewProgress(batch.pullRequests, conflictResults)
   return {
     ...batch,
     pullRequests: reviewedPRs,
     aiReview,
+    reviewProgress: { ...progress, canFinalize: batch.status === 'Submitted' && progress.canFinalize },
   }
 }

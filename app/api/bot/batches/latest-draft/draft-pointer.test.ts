@@ -38,6 +38,7 @@ type StoredBatch = {
   createAt: Date
   updateAt: Date
   contentVersion: number
+  itemReviewStarted?: boolean
   items: StoredItem[]
 }
 
@@ -63,7 +64,8 @@ function matches(batch: StoredBatch, where: Where | undefined): boolean {
       if (!allowed.includes(batch.status)) return false
       continue
     }
-    if (batch[key as keyof StoredBatch] !== condition) return false
+    const value = key === 'itemReviewStarted' ? batch.itemReviewStarted ?? false : batch[key as keyof StoredBatch]
+    if (value !== condition) return false
   }
   return true
 }

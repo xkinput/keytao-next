@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { checkAdminPermission } from '@/lib/adminAuth'
 import { PhraseWeightConflictError } from '@/lib/services/phraseWeightLock'
+import { ItemReviewError } from '@/lib/services/batchItemReview'
 import {
   approveSubmittedBatch,
   BatchApprovalMissingPhraseError,
@@ -9,7 +10,7 @@ import {
   BatchUnresolvableTargetError,
 } from '@/lib/services/batchApprovalService'
 
-export const maxDuration = 30
+export const maxDuration = 60
 
 // POST /api/admin/batches/:id/approve - Approve a batch
 export async function POST(
@@ -23,18 +24,25 @@ export async function POST(
     }
 
     const { id } = await params
-    const body = await request.json()
-    const { reviewNote } = body
+    const body = await request.json().catch(() => null)
+    const version = body?.expectedContentVersion
+    if (!Number.isInteger(version) || version < 0 || version >= 2147483647) {
+      return NextResponse.json({ error: '请刷新并提交有效的批次版本' }, { status: 400 })
+    }
     const result = await approveSubmittedBatch({
       batchId: id,
-      reviewNote: reviewNote || null,
       mode: 'admin',
       allowDelete: true,
       reviewerId: authCheck.session?.id ?? null,
+      expectedContentVersion: version,
+      finalizeItemReview: true,
     })
 
     return NextResponse.json({ batch: result.batch })
   } catch (error) {
+    if (error instanceof ItemReviewError) {
+      return NextResponse.json({ error: error.message }, { status: error.status })
+    }
     console.error('Approve batch error:', error)
 
     if (error instanceof BatchConcurrentUpdateError) {

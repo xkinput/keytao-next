@@ -76,6 +76,9 @@ export async function submitBatchForUser({
   if (batch.status !== 'Draft' && batch.status !== 'Rejected') {
     return { status: 400, body: { error: '只能提交草稿或已拒绝状态的批次' } }
   }
+  if (batch.itemReviewStarted) {
+    return { status: 409, body: { error: '请重新送审被拒绝的词条' } }
+  }
 
   const expectedContentVersion = body.expectedContentVersion === undefined
     ? batch.contentVersion
@@ -148,11 +151,12 @@ export async function submitBatchForUser({
   }
 
   // Update batch status
-  const transition = () => prisma.batch.updateMany({
+  const transition = (db: Pick<typeof prisma, 'batch'>) => db.batch.updateMany({
     where: {
       id: batchId,
       creatorId: userId,
       status: { in: ['Draft', 'Rejected'] },
+      itemReviewStarted: false,
       contentVersion: expectedContentVersion,
     },
     data: {
@@ -161,26 +165,20 @@ export async function submitBatchForUser({
       contentVersion: { increment: 1 },
     },
   })
-  const transitioned = confirmed
+  const transitioned = confirmed || batch.status === 'Rejected'
     ? await prisma.$transaction(async (tx) => {
-      await lockPhraseTableForWarningSnapshot(tx)
-      const lockedDigest = await buildBotWarningDigest(tx, items, warningState)
-      if (lockedDigest !== body.expectedWarningDigest) return { count: 0 }
-      return tx.batch.updateMany({
-        where: {
-          id: batchId,
-          creatorId: userId,
-          status: { in: ['Draft', 'Rejected'] },
-          contentVersion: expectedContentVersion,
-        },
-        data: {
-          status: 'Submitted',
-          reviewNote: null,
-          contentVersion: { increment: 1 },
-        },
-      })
+      if (confirmed) {
+        await lockPhraseTableForWarningSnapshot(tx)
+        const lockedDigest = await buildBotWarningDigest(tx, items, warningState)
+        if (lockedDigest !== body.expectedWarningDigest) return { count: 0 }
+      }
+      const result = await transition(tx)
+      if (result.count === 1 && batch.status === 'Rejected') {
+        await tx.pullRequest.updateMany({ where: { batchId, status: 'Rejected' }, data: { status: 'Pending' } })
+      }
+      return result
     })
-    : await transition()
+    : await transition(prisma)
 
   if (transitioned.count !== 1) {
     return { status: 409, body: { error: '批次内容或状态已被其他操作修改，请刷新后重试' } }

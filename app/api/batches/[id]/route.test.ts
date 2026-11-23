@@ -44,6 +44,7 @@ describe('DELETE /api/batches/[id]', () => {
         creatorId: 1,
         status: { in: ['Draft', 'Rejected'] },
         contentVersion: 9,
+        itemReviewStarted: false,
       },
     })
   })

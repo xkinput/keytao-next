@@ -22,6 +22,7 @@ describe('claimBatchContentMutation', () => {
         id: 'batch-1',
         creatorId: 42,
         contentVersion: 8,
+        itemReviewStarted: false,
         status: { in: ['Draft', 'Rejected', 'Submitted'] },
       },
       data: { contentVersion: { increment: 1 } },

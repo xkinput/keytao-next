@@ -18,6 +18,7 @@ import { mutate as globalMutate } from 'swr'
 import CreatePRModal from '@/app/components/CreatePRModal'
 import BatchPreview from '@/app/components/BatchPreview'
 import BatchPRList from '@/app/components/BatchPRList'
+import BatchItemVote, { useBatchItemVotes } from '@/app/components/BatchItemVote'
 import BatchActionsDropdown from '@/app/components/BatchActionsDropdown'
 import { useUIStore } from '@/lib/store/ui'
 import { BATCH_STATUS_MAP, STATUS_COLOR_MAP } from '@/lib/constants/status'
@@ -38,6 +39,14 @@ interface PullRequest {
   action: 'Create' | 'Change' | 'Delete'
   type?: PhraseType | null
   status: string
+  appliedAt?: string | null
+  reviewNotes?: Array<{
+    id: number
+    decision: 'Approved' | 'Rejected'
+    reason: string
+    createdAt: string
+    reviewer?: { name: string; nickname?: string | null } | null
+  }>
   weight: number | null
   remark: string | null
   hasConflict: boolean
@@ -85,6 +94,8 @@ interface PullRequest {
 interface BatchDetail {
   id: string
   contentVersion: number
+  itemReviewStarted?: boolean
+  reviewProgress?: { dependencyPendingIds: number[] }
   description: string
   status: 'Draft' | 'Submitted' | 'Approved' | 'Rejected'
   createAt: string
@@ -134,6 +145,7 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
   const router = useRouter()
   const { user, isAdmin } = useAuthStore()
   const [submitting, setSubmitting] = useState(false)
+  const [resubmittingId, setResubmittingId] = useState<number | null>(null)
   const [editingName, setEditingName] = useState(false)
   const [batchName, setBatchName] = useState('')
   const [savingName, setSavingName] = useState(false)
@@ -145,6 +157,7 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
   )
 
   const batchStatus = batch?.batch.status
+  const votes = useBatchItemVotes(resolvedParams.id, Boolean(batchStatus && batchStatus !== 'Draft'))
   const aiReview = batch?.batch.aiReview
   const pullRequestById = useMemo(() => {
     return new Map((batch?.batch.pullRequests ?? []).map(pr => [pr.id, pr]))
@@ -216,6 +229,25 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
 
   const handleCloseModal = () => {
     onClose()
+  }
+
+  const handleResubmitItem = async (itemId: number) => {
+    if (!batch || resubmittingId !== null) return
+    setResubmittingId(itemId)
+    try {
+      await apiRequest(`/api/batches/${resolvedParams.id}/items/${itemId}/resubmit`, {
+        method: 'POST',
+        body: { expectedContentVersion: batch.batch.contentVersion },
+        withAuth: true,
+      })
+      await Promise.all([mutate(), votes.refresh()])
+      openAlert('词条已在原批次重新送审', '提交成功')
+    } catch (error) {
+      openAlert(error instanceof Error ? error.message : '重新送审失败', '出错了')
+      await mutate()
+    } finally {
+      setResubmittingId(null)
+    }
   }
 
   const handleSubmit = async () => {
@@ -334,7 +366,42 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
   const editableStatuses = isAdmin
     ? ['Draft', 'Rejected', 'Submitted']
     : ['Draft', 'Rejected']
-  const canEdit = (isOwner || isAdmin) && editableStatuses.includes(batchData.status)
+  const canEdit = !batchData.itemReviewStarted && (isOwner || isAdmin) && editableStatuses.includes(batchData.status)
+  const waitingOnDependencies = new Set(batchData.reviewProgress?.dependencyPendingIds)
+  const approvedItems = batchData.pullRequests.filter(pr => pr.status === 'Approved' && !waitingOnDependencies.has(pr.id))
+  const approvedIds = new Set(approvedItems.map(pr => pr.id))
+  const pendingItems = batchData.pullRequests.filter(pr => !approvedIds.has(pr.id))
+  const itemFooter = (id: number) => {
+    const pr = pullRequestById.get(id)
+    if (!pr) return null
+    const tally = votes.byItem.get(id)
+    const canResubmit = isOwner && batchData.status !== 'Draft' && pr.status === 'Rejected' && !pr.appliedAt
+    if (!tally && !pr.reviewNotes?.length && !canResubmit && !waitingOnDependencies.has(id)) return null
+    return (
+      <div className="space-y-2">
+        {waitingOnDependencies.has(id) && (
+          <p className="text-sm text-warning-700">关联词条尚未完成审核</p>
+        )}
+        {Boolean(pr.reviewNotes?.length) && (
+          <ul className="space-y-1">
+            {pr.reviewNotes?.map(note => (
+              <li key={note.id} className="rounded-medium bg-default-100 p-2 text-sm whitespace-pre-wrap break-words">
+                <strong>{note.reviewer?.nickname || note.reviewer?.name || '审核员'} · {note.decision === 'Approved' ? '同意' : '拒绝'}</strong>
+                <p>{note.reason}</p>
+              </li>
+            ))}
+          </ul>
+        )}
+        <BatchItemVote batchId={batchData.id} itemId={id} status={pr.status} vote={tally} onChange={votes.update} />
+        {canResubmit && (
+          <Button size="sm" variant="flat" isDisabled={resubmittingId !== null} isLoading={resubmittingId === id}
+            aria-label={`重新提交审核：${pr.word ?? pr.code ?? id}`} onPress={() => void handleResubmitItem(id)}>
+            重新提交审核
+          </Button>
+        )}
+      </div>
+    )
+  }
   const getReviewTargetLabel = (item: BatchAiReviewItem) => {
     const pr = pullRequestById.get(item.prId)
     const word = pr?.word || pr?.phrase?.word || '未命名词条'
@@ -446,7 +513,7 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
                       <Button color="primary" onPress={onOpen}>
                         {batchData.pullRequests.length > 0 ? '编辑修改' : '添加修改'}
                       </Button>
-                      {batchData.pullRequests.length > 0 && (
+                      {batchData.pullRequests.length > 0 && batchData.status !== 'Submitted' && (
                         <Button
                           color="success"
                           onPress={handleSubmit}
@@ -466,13 +533,13 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
                       去审核
                     </Button>
                   )}
-                  <BatchActionsDropdown
+                  {!batchData.itemReviewStarted && <BatchActionsDropdown
                     batchId={batchData.id}
                     status={batchData.status}
                     creatorId={batchData.creator.id}
                     onSuccess={mutate}
                     iconSize={18}
-                  />
+                  />}
                 </div>
               </div>
             </CardHeader>
@@ -610,11 +677,18 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
 
         <div className="space-y-6">
           <BatchPreview batchId={resolvedParams.id} />
-          <BatchPRList
-            pullRequests={batchData.pullRequests}
-            canEdit={canEdit}
-            onAddFirst={onOpen}
-          />
+          {votes.error && <p role="status" className="text-sm text-danger">社区投票暂时无法加载</p>}
+          <section>
+            <h2 className="mb-3 text-lg font-semibold">待审核（{pendingItems.length}）</h2>
+            <BatchPRList pullRequests={pendingItems} canEdit={canEdit && !approvedItems.length}
+              onAddFirst={onOpen} renderItemFooter={itemFooter} />
+          </section>
+          <section>
+            <h2 className="mb-3 text-lg font-semibold">已通过（{approvedItems.length}）</h2>
+            {approvedItems.length ? (
+              <BatchPRList pullRequests={approvedItems} canEdit={false} renderItemFooter={itemFooter} />
+            ) : <p className="text-sm text-default-500">暂无通过的词条</p>}
+          </section>
         </div>
       </main>
 

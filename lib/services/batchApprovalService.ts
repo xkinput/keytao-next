@@ -3,6 +3,7 @@ import type { Batch } from '@prisma/client'
 import type { BatchConflictResult } from '@/lib/services/batchConflictService'
 import { detectPhraseType, type PhraseType } from '@/lib/constants/phraseTypes'
 import type { BatchPRItem } from '@/lib/services/batchConflictService'
+import { getItemReviewProgress, ItemReviewError } from '@/lib/services/batchItemReview'
 import {
   assertNoDuplicateWeights,
   lockPhraseWeightSlots,
@@ -26,6 +27,7 @@ export interface ApproveSubmittedBatchOptions {
   mode?: BatchApprovalMode
   allowDelete?: boolean
   expectedContentVersion?: number
+  finalizeItemReview?: boolean
   /** User id of whoever actually performed the review (admin or bot account). */
   reviewerId?: number | null
   /**
@@ -265,6 +267,7 @@ export async function approveSubmittedBatch({
   mode = 'admin',
   allowDelete = true,
   expectedContentVersion,
+  finalizeItemReview = false,
   reviewerId = null,
   blockNeedsManualReview = mode === 'bot-auto',
 }: ApproveSubmittedBatchOptions): Promise<ApproveSubmittedBatchResult> {
@@ -274,6 +277,7 @@ export async function approveSubmittedBatch({
       pullRequests: {
         include: {
           phrase: true,
+          dependencies: { include: { dependsOn: { select: { appliedAt: true } } } },
         },
         orderBy: {
           createAt: 'asc',
@@ -290,8 +294,14 @@ export async function approveSubmittedBatch({
     throw new Error('只能审核待审核状态的批次')
   }
 
+  if (!finalizeItemReview && (batch.itemReviewStarted || batch.pullRequests.some(pr => pr.appliedAt))) {
+    throw new BatchConcurrentUpdateError('该批次需要逐词审核，请在网页完成后提交')
+  }
+
+  const currentItems = batch.pullRequests.filter(pr => !pr.appliedAt)
+  const executionItems = finalizeItemReview ? currentItems.filter(pr => pr.status === 'Approved') : currentItems
   if (!allowDelete) {
-    const deleteRisk = classifyBatchDeleteRisk(batch.pullRequests)
+    const deleteRisk = classifyBatchDeleteRisk(executionItems)
     if (deleteRisk.hasBareDelete) {
       const labels = deleteRisk.bareDeletes
         .slice(0, 5)
@@ -303,7 +313,7 @@ export async function approveSubmittedBatch({
 
   const { checkBatchConflictsWithWeight } = await import('@/lib/services/batchConflictService')
 
-  const prItems = batch.pullRequests.map((pr) => ({
+  const toConflictItem = (pr: (typeof batch.pullRequests)[number]): BatchPRItem => ({
     id: String(pr.id),
     action: pr.action as 'Create' | 'Change' | 'Delete',
     word: pr.word || '',
@@ -311,9 +321,21 @@ export async function approveSubmittedBatch({
     code: pr.code || '',
     type: pr.type || 'Phrase',
     weight: pr.weight || undefined,
-  }))
-
-  const conflictResults = await checkBatchConflictsWithWeight(prItems)
+  })
+  const prItems = executionItems.map(toConflictItem)
+  const reviewItems = finalizeItemReview && executionItems.length !== currentItems.length
+    ? currentItems.map(toConflictItem) : prItems
+  const reviewedConflicts = reviewItems.length ? await checkBatchConflictsWithWeight(reviewItems) : []
+  if (finalizeItemReview) {
+    const progress = getItemReviewProgress(batch.pullRequests, reviewedConflicts)
+    if (!progress.canFinalize) throw new ItemReviewError('请完成全部词条及依赖组的审核后再提交', 409)
+  }
+  const conflictResults = reviewItems === prItems ? reviewedConflicts
+    : prItems.length ? await checkBatchConflictsWithWeight(prItems) : []
+  if (finalizeItemReview && conflictResults.some(({ conflict }) =>
+    conflict.hasConflict && !conflict.suggestions?.some(suggestion => suggestion.action === 'Resolved'))) {
+    throw new ItemReviewError('通过的词条存在未解决的编码冲突，请重新检查', 409)
+  }
 
   const weightMap = new Map<number, number>()
   conflictResults.forEach(result => {
@@ -323,19 +345,20 @@ export async function approveSubmittedBatch({
     }
   })
 
-  const executionOrder = orderPullRequestsForApproval(batch.pullRequests, conflictResults)
+  const executionOrder = orderPullRequestsForApproval(executionItems, conflictResults)
 
   // Everything above ran outside a transaction, against snapshots that may
   // already be stale by the time we execute. This is the fingerprint the
   // transaction below uses to prove the plan still matches reality.
   const snapshotContentVersion = batch.contentVersion
+  const finalizedContentVersion = snapshotContentVersion + (finalizeItemReview ? 1 : 0)
   if (
     expectedContentVersion !== undefined
     && expectedContentVersion !== snapshotContentVersion
   ) {
     throw new BatchConcurrentUpdateError()
   }
-  const approvalDigest = await buildBotWarningDigest(prisma, prItems, conflictResults)
+  const approvalDigest = await buildBotWarningDigest(prisma, reviewItems, reviewedConflicts)
 
   const updated = await prisma.$transaction(async (tx) => {
     // Take the state transition first: `updateMany` with a status guard makes
@@ -348,7 +371,9 @@ export async function approveSubmittedBatch({
         contentVersion: snapshotContentVersion,
       },
       data: {
-        status: 'Approved',
+        status: executionOrder.length || batch.pullRequests.some(pr => pr.appliedAt) ? 'Approved' : 'Rejected',
+        ...(finalizeItemReview ? { contentVersion: { increment: 1 } } : {}),
+        ...(finalizeItemReview && executionOrder.length ? { syncTaskId: null } : {}),
         reviewNote: reviewNote || (mode === 'bot-auto' ? '本喵自动审词通过' : null),
         reviewerId: reviewerId ?? null,
         reviewedAt: new Date(),
@@ -373,12 +398,12 @@ export async function approveSubmittedBatch({
       select: { contentVersion: true },
     })
 
-    if (locked.contentVersion !== snapshotContentVersion) {
+    if (locked.contentVersion !== finalizedContentVersion) {
       throw new BatchConcurrentUpdateError('批次内容已被修改，请刷新后重试')
     }
 
     await lockPhraseTableForWarningSnapshot(tx)
-    const lockedApprovalDigest = await buildBotWarningDigest(tx, prItems, conflictResults)
+    const lockedApprovalDigest = await buildBotWarningDigest(tx, reviewItems, reviewedConflicts)
     if (lockedApprovalDigest !== approvalDigest) {
       throw new BatchConcurrentUpdateError('词库内容已变化，请重新检查批次')
     }
@@ -395,7 +420,7 @@ export async function approveSubmittedBatch({
     })
 
     const rowsById = new Map(currentRows.map(row => [row.id, row]))
-    const snapshotPrIds = new Set(executionOrder.map(pr => pr.id))
+    const snapshotPrIds = new Set(batch.pullRequests.map(pr => pr.id))
     const sameSet =
       rowsById.size === snapshotPrIds.size &&
       [...rowsById.keys()].every(id => snapshotPrIds.has(id))
@@ -543,6 +568,7 @@ export async function approveSubmittedBatch({
         where: { id: pr.id },
         data: {
           status: 'Approved',
+          appliedAt: new Date(),
         },
       })
     }
@@ -564,7 +590,7 @@ export async function approveSubmittedBatch({
     await assertNoDuplicateWeights(tx, weightSlots, touchedPhraseIds)
 
     return tx.batch.findUniqueOrThrow({ where: { id: batchId } })
-  })
+  }, finalizeItemReview ? { timeout: 45_000 } : undefined)
 
   return { batch: updated }
 }

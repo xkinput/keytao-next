@@ -124,6 +124,7 @@ describe('bot batch submit content snapshot', () => {
         creatorId: 42,
         status: { in: ['Draft', 'Rejected'] },
         contentVersion: 7,
+        itemReviewStarted: false,
       },
       data: { status: 'Submitted', reviewNote: null, contentVersion: { increment: 1 } },
     })

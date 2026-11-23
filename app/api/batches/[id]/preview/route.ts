@@ -158,7 +158,7 @@ export async function GET(
     try {
         const { id } = await params
 
-        const batch = await prisma.batch.findUnique({
+        const found = await prisma.batch.findUnique({
             where: { id },
             include: {
                 pullRequests: {
@@ -167,8 +167,17 @@ export async function GET(
             }
         })
 
-        if (!batch) {
+        if (!found) {
             return NextResponse.json({ error: '批次不存在' }, { status: 404 })
+        }
+
+        const batch = {
+            ...found,
+            pullRequests: found.itemReviewStarted
+                ? found.pullRequests.filter(pr => found.status === 'Approved'
+                    ? Boolean(pr.appliedAt)
+                    : !pr.appliedAt && pr.status !== 'Rejected')
+                : found.pullRequests,
         }
 
         const codes = new Set<string>()

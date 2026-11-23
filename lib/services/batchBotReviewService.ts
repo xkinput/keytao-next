@@ -224,6 +224,7 @@ export async function writeMiaomiaoBatchReview(input: {
   const remarkUpdates: Array<{ id: number; remark: string }> = []
 
   for (const pr of input.batch.pullRequests) {
+    if (pr.appliedAt) continue
     const item = reviewByPrId.get(pr.id)
     if (!item) continue
 
@@ -241,6 +242,7 @@ export async function writeMiaomiaoBatchReview(input: {
       await claimBatchContentMutation(tx, input.batch.id, {
         expectedContentVersion: input.expectedContentVersion,
         allowedStatuses: [...EDITABLE_BATCH_STATUSES, 'Submitted'],
+        allowReviewMetadata: true,
       })
     } catch (error) {
       if (error instanceof BatchContentLockedError) throw new StaleBatchReviewError()

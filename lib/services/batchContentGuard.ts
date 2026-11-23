@@ -67,6 +67,7 @@ export async function claimBatchContentMutation(
     creatorId?: number
     expectedContentVersion: number
     allowedStatuses?: readonly string[]
+    allowReviewMetadata?: boolean
   }
 ): Promise<void> {
   const allowedStatuses = options.allowedStatuses ?? EDITABLE_BATCH_STATUSES
@@ -76,6 +77,7 @@ export async function claimBatchContentMutation(
       ...(options.creatorId === undefined ? {} : { creatorId: options.creatorId }),
       contentVersion: options.expectedContentVersion,
       status: { in: allowedStatuses as Prisma.EnumBatchStatusFilter['in'] },
+      ...(options.allowReviewMetadata ? {} : { itemReviewStarted: false }),
     },
     data: { contentVersion: { increment: 1 } },
   })

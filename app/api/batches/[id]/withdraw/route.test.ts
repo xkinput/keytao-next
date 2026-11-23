@@ -56,7 +56,7 @@ describe('POST /api/batches/[id]/withdraw', () => {
 
     expect(response.status).toBe(200)
     expect(mocks.tx.batch.updateMany).toHaveBeenCalledWith({
-      where: { id: 'batch-1', creatorId: 1, status: 'Submitted', contentVersion: 4 },
+      where: { id: 'batch-1', creatorId: 1, status: 'Submitted', contentVersion: 4, itemReviewStarted: false },
       data: { status: 'Draft', contentVersion: { increment: 1 } },
     })
   })
@@ -80,7 +80,7 @@ it.each([
   expect(response.status).toBe(200)
   expect(await response.json()).toEqual({ batch: withdrawnBatch })
   expect(mocks.tx.batch.updateMany).toHaveBeenCalledWith({
-    where: { id: 'batch-1', creatorId: 1, status: 'Submitted', contentVersion: 4 },
+    where: { id: 'batch-1', creatorId: 1, status: 'Submitted', contentVersion: 4, itemReviewStarted: false },
     data: { status: 'Draft', contentVersion: { increment: 1 } },
   })
 })

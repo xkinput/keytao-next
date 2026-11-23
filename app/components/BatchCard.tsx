@@ -18,6 +18,7 @@ interface BatchCardProps {
     id: string
     description: string
     status: 'Draft' | 'Submitted' | 'Approved' | 'Rejected'
+    itemReviewStarted?: boolean
     createAt: string
     creator: {
       id: number
@@ -121,12 +122,12 @@ function BatchCard({ batch, refresh }: BatchCardProps) {
             </div>
           </div>
 
-          <BatchActionsDropdown
+          {!batch.itemReviewStarted && <BatchActionsDropdown
             batchId={batch.id}
             status={batch.status}
             creatorId={batch.creator.id}
             onSuccess={refresh}
-          />
+          />}
         </div>
       </CardHeader>
 

@@ -59,7 +59,7 @@ describe('bot batch recall snapshot', () => {
 
     expect(res.status).toBe(409)
     expect(mockUpdateMany).toHaveBeenCalledWith({
-      where: { id: 'submitted-1', creatorId: 42, status: 'Submitted', contentVersion: 6 },
+      where: { id: 'submitted-1', creatorId: 42, status: 'Submitted', contentVersion: 6, itemReviewStarted: false },
       data: { status: 'Draft', contentVersion: { increment: 1 } },
     })
   })

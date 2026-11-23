@@ -13,6 +13,9 @@ export async function withdrawBatchForUser(batchId: string, userId: number) {
   if (batch.status !== 'Submitted') {
     return { status: 400, body: { error: '只能撤销已提交状态的批次' } }
   }
+  if (batch.itemReviewStarted) {
+    return { status: 409, body: { error: '批次已开始逐词审核，不能整批撤销' } }
+  }
 
   const updated = await prisma.$transaction(async (tx) => {
     const transitioned = await tx.batch.updateMany({
@@ -20,6 +23,7 @@ export async function withdrawBatchForUser(batchId: string, userId: number) {
         id: batchId,
         creatorId: userId,
         status: 'Submitted',
+        itemReviewStarted: false,
         contentVersion: batch.contentVersion,
       },
       data: { status: 'Draft', contentVersion: { increment: 1 } },

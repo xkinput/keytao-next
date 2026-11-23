@@ -132,6 +132,7 @@ model User {
   dislikedPullRequests PullRequest[] @relation("PullRequestDislikes")
   batches              Batch[]       @relation("UserBatches")
   reviewedBatches      Batch[]       @relation("BatchReviewer")
+  itemReviewNotes      PullRequestReviewNote[]
   linkKeys             LinkKey[]     @relation("UserLinkKeys")
   apiKeys              ApiKey[]      @relation("UserApiKeys")
   userDictionaryEntries UserDictionaryEntry[] @relation("UserDictionaryEntries")
@@ -352,6 +353,7 @@ model PullRequest {
   type    PhraseType?
   /// 状态
   status  PullRequestStatus @default(Pending)
+  appliedAt DateTime?
   /// 操作类型
   action  PullRequestType   @default(Create)
   /// 备注
@@ -379,6 +381,7 @@ model PullRequest {
   dependedBy   PullRequestDependency[] @relation("DependsOnPR")
   /// 冲突记录
   conflicts    CodeConflict[]
+  reviewNotes  PullRequestReviewNote[]
 
   @@index([batchId])
   @@map("pull_requests")
@@ -394,6 +397,7 @@ model Batch {
   reviewNote  String?     @db.Text
   reviewedAt  DateTime?
   contentVersion Int      @default(0)
+  itemReviewStarted Boolean @default(false)
 
   // Relations
   creator      User          @relation("UserBatches", fields: [creatorId], references: [id], onDelete: Cascade)
@@ -408,6 +412,21 @@ model Batch {
 
   @@index([reviewerId])
   @@map("batches")
+}
+
+model PullRequestReviewNote {
+  id            Int               @id @default(autoincrement())
+  createdAt     DateTime          @default(now())
+  decision      PullRequestStatus
+  reason        String            @db.Text
+  pullRequestId Int
+  reviewerId    Int?
+  pullRequest   PullRequest       @relation(fields: [pullRequestId], references: [id], onDelete: Cascade)
+  reviewer      User?             @relation(fields: [reviewerId], references: [id], onDelete: SetNull)
+
+  @@index([pullRequestId, id])
+  @@index([reviewerId])
+  @@map("pull_request_review_notes")
 }
 
 /// PR 依赖关系

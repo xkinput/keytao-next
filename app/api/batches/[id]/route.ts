@@ -3,6 +3,7 @@ import { getSession } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { checkIsAdmin } from '@/lib/adminAuth'
 import { buildBatchAiReview } from '@/lib/services/batchAiReviewService'
+import { getItemReviewProgress, reviewNotesInclude } from '@/lib/services/batchItemReview'
 
 // GET /api/batches/:id - Get batch details
 export async function GET(
@@ -31,13 +32,15 @@ export async function GET(
         pullRequests: {
           include: {
             phrase: true,
+            reviewNotes: reviewNotesInclude,
             dependencies: {
               include: {
                 dependsOn: {
                   select: {
                     id: true,
                     word: true,
-                    code: true
+                    code: true,
+                    appliedAt: true,
                   }
                 }
               }
@@ -70,7 +73,8 @@ export async function GET(
     const { checkBatchConflictsWithWeight } = await import('@/lib/services/batchConflictService')
     type ConflictResult = Awaited<ReturnType<typeof checkBatchConflictsWithWeight>>[number]
 
-    const prItems = batch.pullRequests.map(pr => ({
+    const currentItems = batch.pullRequests.filter(pr => !pr.appliedAt)
+    const prItems = currentItems.map(pr => ({
       id: String(pr.id),
       action: pr.action as 'Create' | 'Change' | 'Delete',
       word: pr.word || '',
@@ -95,8 +99,8 @@ export async function GET(
       )
       if (resolvedSuggestion?.resolverIndex === undefined) continue
 
-      const resolverPR = batch.pullRequests[resolvedSuggestion.resolverIndex]
-      const dependentPR = batch.pullRequests[i]
+      const resolverPR = currentItems[resolvedSuggestion.resolverIndex]
+      const dependentPR = currentItems[i]
       if (!resolverPR || !dependentPR || resolverPR.id === dependentPR.id) continue
 
       const depEntry = { dependsOn: { id: resolverPR.id, word: resolverPR.word || '', code: resolverPR.code || '' } }
@@ -117,8 +121,10 @@ export async function GET(
         // Use calculated weight for display (for Create operations, this is the real weight)
         weight: conflictResult?.calculatedWeight ?? pr.weight,
         conflictInfo: conflictResult?.conflict,
-        dependencies: dynamicDepsOf.get(pr.id) ?? [],
-        dependedBy: dynamicDependedBy.get(pr.id) ?? [],
+        dependencies: [...pr.dependencies, ...(dynamicDepsOf.get(pr.id) ?? [])
+          .filter(entry => !pr.dependencies.some(dependency => dependency.dependsOnId === entry.dependsOn.id))],
+        dependedBy: [...pr.dependedBy, ...(dynamicDependedBy.get(pr.id) ?? [])
+          .filter(entry => !pr.dependedBy.some(dependency => dependency.dependentId === entry.dependent.id))],
       }
     })
 
@@ -143,6 +149,7 @@ export async function GET(
         ...batch,
         pullRequests: reviewedPRs,
         aiReview,
+        reviewProgress: getItemReviewProgress(batch.pullRequests, conflictResults),
       }
     })
   } catch (error) {
@@ -220,7 +227,7 @@ export async function DELETE(
       return NextResponse.json({ error: '无权限' }, { status: 403 })
     }
 
-    if (batch.status !== 'Draft' && batch.status !== 'Rejected') {
+    if (batch.itemReviewStarted || (batch.status !== 'Draft' && batch.status !== 'Rejected')) {
       return NextResponse.json(
         { error: '不能删除审核中或已通过的批次' },
         { status: 400 }
@@ -232,6 +239,7 @@ export async function DELETE(
         id,
         ...(isAdmin ? {} : { creatorId: session.id }),
         status: { in: ['Draft', 'Rejected'] },
+        itemReviewStarted: false,
         contentVersion: batch.contentVersion,
       },
     })

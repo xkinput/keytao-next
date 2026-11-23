@@ -156,6 +156,7 @@ describe('POST /api/v1/batches/[id]/submit', () => {
         creatorId: 42,
         status: { in: ['Draft', 'Rejected'] },
         contentVersion: 3,
+        itemReviewStarted: false,
       },
       data: {
         status: 'Submitted',

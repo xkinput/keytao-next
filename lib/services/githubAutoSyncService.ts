@@ -7,6 +7,7 @@ import {
 } from '@/lib/services/rimeConverter'
 import type { SyncSummaryData } from '@/lib/services/rimeConverter'
 import { createGithubSyncService } from '@/lib/services/githubSync'
+import { BatchContentLockedError } from '@/lib/services/batchContentGuard'
 import { PhraseStatus, SyncTaskStatus } from '@prisma/client'
 
 export const DEFAULT_GITHUB_AUTO_SYNC_THRESHOLD = 10
@@ -73,6 +74,34 @@ export async function countPendingGithubSyncBatches(): Promise<number> {
       status: 'Approved',
       syncTaskId: null,
     },
+  })
+}
+
+export async function createGithubSyncTask(
+  batches: ReadonlyArray<{ id: string; contentVersion: number }>,
+  pendingFiles: string[],
+  totalItems: number,
+): Promise<{ id: string }> {
+  return prisma.$transaction(async tx => {
+    const task = await tx.syncTask.create({
+      data: { status: SyncTaskStatus.Pending, totalItems, pendingFiles, processedFiles: [] },
+      select: { id: true },
+    })
+    if (batches.length > 0) {
+      // The files were generated before this transaction; reject any stale batch snapshot.
+      const claimed = await tx.batch.updateMany({
+        where: {
+          status: 'Approved',
+          syncTaskId: null,
+          OR: batches.map(({ id, contentVersion }) => ({ id, contentVersion })),
+        },
+        data: { syncTaskId: task.id, contentVersion: { increment: 1 } },
+      })
+      if (claimed.count !== batches.length) {
+        throw new BatchContentLockedError('待同步批次已变化，请重新准备词库同步')
+      }
+    }
+    return task
   })
 }
 
@@ -225,20 +254,20 @@ export async function runGithubAutoSync(options: GithubAutoSyncOptions = {}): Pr
   const summary = generateSyncSummary(allPullRequests, batches)
   const syncSummary = generateSyncSummaryData(allPullRequests, batches)
 
-  const task = await prisma.syncTask.create({
-    data: {
-      status: SyncTaskStatus.Pending,
-      totalItems: allPullRequests.length,
-      pendingFiles: fileNames,
-      processedFiles: [],
-      batches: {
-        connect: batches.map((batch) => ({ id: batch.id })),
-      },
-    },
-    select: {
-      id: true,
-    },
+  const task = await createGithubSyncTask(batches, fileNames, allPullRequests.length).catch(error => {
+    if (error instanceof BatchContentLockedError) return null
+    throw error
   })
+  if (!task) {
+    return {
+      success: true,
+      triggered: false,
+      pendingSyncBatches,
+      releasedFailedBatches,
+      skippedReason: 'batches_changed',
+      message: '待同步批次已变化，下次同步会重新准备',
+    }
+  }
 
   let prUrl: string | null = null
   try {

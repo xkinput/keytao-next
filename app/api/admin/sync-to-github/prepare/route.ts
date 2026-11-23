@@ -11,7 +11,9 @@ import {
   generateSyncSummary,
 } from '@/lib/services/rimeConverter';
 import { createGithubSyncService } from '@/lib/services/githubSync';
-import { SyncTaskStatus, PhraseStatus } from '@prisma/client';
+import { BatchContentLockedError } from '@/lib/services/batchContentGuard';
+import { createGithubSyncTask } from '@/lib/services/githubAutoSyncService';
+import { PhraseStatus } from '@prisma/client';
 import { NextResponse } from 'next/server';
 
 export const runtime = 'nodejs';
@@ -141,18 +143,7 @@ export async function POST() {
       : generateSyncSummary(allPullRequests, batches);
     console.log(`[Prepare] Generated summary length: ${summary.length}`);
 
-    // Create task
-    const task = await prisma.syncTask.create({
-      data: {
-        status: SyncTaskStatus.Pending,
-        totalItems: allPullRequests.length || phrases.length,
-        pendingFiles: fileNames,
-        processedFiles: [],
-        batches: batches.length > 0 ? {
-          connect: batches.map((batch) => ({ id: batch.id })),
-        } : undefined,
-      },
-    });
+    const task = await createGithubSyncTask(batches, fileNames, allPullRequests.length || phrases.length);
 
     console.log(`[Prepare] Task ${task.id} created with ${fileNames.length} files${isManualSync ? ' (manual sync)' : ''}`);
 
@@ -178,7 +169,7 @@ export async function POST() {
         success: false,
         error: error instanceof Error ? error.message : '准备同步任务失败',
       },
-      { status: 500 }
+      { status: error instanceof BatchContentLockedError ? error.status : 500 }
     );
   }
 }

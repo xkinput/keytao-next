@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import type { ReactNode } from 'react'
 import {
     Card,
     CardBody,
@@ -68,12 +69,14 @@ interface BatchPRListProps {
     pullRequests: PullRequest[]
     canEdit?: boolean
     onAddFirst?: () => void
+    renderItemFooter?: (id: number) => ReactNode
 }
 
 export default function BatchPRList({
     pullRequests,
     canEdit,
-    onAddFirst
+    onAddFirst,
+    renderItemFooter
 }: BatchPRListProps) {
     const getActionText = (action: string) => {
         const map: Record<string, string> = {
@@ -297,6 +300,7 @@ export default function BatchPRList({
                                 ))}
                             </div>
                         )}
+                        {renderItemFooter?.(pr.id)}
                     </CardBody>
                 </Card>
             ))}

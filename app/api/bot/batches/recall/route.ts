@@ -99,6 +99,7 @@ export async function POST(request: NextRequest) {
           id: batchId,
           creatorId: user.id,
           status: 'Submitted',
+          itemReviewStarted: false,
           contentVersion: expectedContentVersion as number,
         },
         select: {
@@ -128,6 +129,7 @@ export async function POST(request: NextRequest) {
           id: batch.id,
           creatorId: user.id,
           status: 'Submitted',
+          itemReviewStarted: false,
           contentVersion: expectedContentVersion as number,
         },
         data: { status: 'Draft', contentVersion: { increment: 1 } },
