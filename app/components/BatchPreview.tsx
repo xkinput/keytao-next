@@ -57,6 +57,7 @@ interface BatchPreviewProps {
     reviewing?: boolean
     expectedContentVersion?: number
     reviewedFromContentVersion?: number
+    reviewCounts?: { pending: number; reviewed: number }
     onNewerReviewPreview?: () => Promise<void>
     renderLineActions?: (itemId: number, stale?: boolean) => ReactNode
     lineActionItems?: readonly { id: number; label: string; code?: string | null }[]
@@ -432,7 +433,7 @@ function DiffView({ group, layout, renderLineActions }: {
 
 export default function BatchPreview({
     batchId, reviewing = false, expectedContentVersion, reviewedFromContentVersion, onNewerReviewPreview,
-    renderLineActions, lineActionItems,
+    renderLineActions, lineActionItems, reviewCounts,
 }: BatchPreviewProps) {
     const { data, error, isLoading, isValidating, mutate } = useAPI<{ contentVersion: number; preview: PreviewResult }>(
         `/api/batches/${batchId}/preview${reviewing ? '?review=1' : ''}`,
@@ -519,7 +520,7 @@ export default function BatchPreview({
         </div>
     )
 
-    if (total === 0 && rejected.length === 0) {
+    if (total === 0 && rejected.length === 0 && !reviewCounts) {
         return (
             <div className="text-center py-8">
                 <p className="text-default-500">暂无修改预览</p>
@@ -549,6 +550,12 @@ export default function BatchPreview({
                     <div className="flex items-center gap-2">
                         <Chip color="default" variant="flat" size="sm">✖{summary.rejected}</Chip>
                         <span className="text-small text-default-500">被拒绝</span>
+                    </div>
+                )}
+                {reviewCounts && (
+                    <div className="ms-auto flex items-center gap-4 whitespace-nowrap text-small tabular-nums text-default-500">
+                        <span>待审核 <strong className="inline-block min-w-[3ch] text-end text-default-700">{reviewCounts.pending}</strong></span>
+                        <span>已审核 <strong className="inline-block min-w-[3ch] text-end text-default-700">{reviewCounts.reviewed}</strong></span>
                     </div>
                 )}
             </div>

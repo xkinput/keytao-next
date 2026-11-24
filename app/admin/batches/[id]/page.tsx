@@ -409,25 +409,27 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
   const selectReviewDecision = (itemId: number, decision: ReviewDecision) => {
     const item = pullRequestById.get(itemId)
     if (batchDataForReview?.status !== 'Submitted' || !item || item.status === decision || item.appliedAt ||
-      error || reviewSyncError || activeReview || reviewInFlight.current || pendingDecisions[itemId]) return
+      error || reviewSyncError || activeReview || reviewInFlight.current || pendingDecisions[itemId]) return false
     setSelectedItemId(itemId)
     const target = {
       batchId: batchDataForReview.id, itemId, decision, expectedContentVersion: batchDataForReview.contentVersion,
     }
     if (decision === 'Rejected') {
       setReviewTarget(target)
-    } else {
-      const failure = handleItemReview(target)
-      if (failure) toast.error(failure)
+      return true
     }
+    const failure = handleItemReview(target)
+    if (failure) toast.error(failure)
+    return !failure
   }
 
   const jumpToReviewItem = (direction: 1 | -1) => {
     const rows = Array.from(reviewPage.current?.querySelectorAll<HTMLElement>('[data-review-item]') ?? [])
     if (direction === -1) rows.reverse()
     const currentIndex = rows.findIndex(row => Number(row.dataset.reviewItem) === selectedItemId)
+    const queuedItems = reviewQueue.current?.entries
     const next = [...rows.slice(currentIndex + 1), ...rows.slice(0, currentIndex + 1)]
-      .find(row => row.dataset.reviewPending === 'true')
+      .find(row => row.dataset.reviewPending === 'true' && !queuedItems?.has(Number(row.dataset.reviewItem)))
     if (!next) return
     next.focus({ preventScroll: true })
     next.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' })
@@ -448,7 +450,8 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
       const row = reviewPage.current?.querySelector(`[data-review-item="${selectedItemId}"]:not([data-review-stale])`)
       if (!row) return
       event.preventDefault()
-      selectReviewDecision(selectedItemId, event.code === 'KeyA' ? 'Approved' : 'Rejected')
+      const decision = event.code === 'KeyA' ? 'Approved' : 'Rejected'
+      if (selectReviewDecision(selectedItemId, decision) && decision === 'Approved') jumpToReviewItem(1)
     }
   })
 
@@ -591,6 +594,7 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
 
   const batchData = batch.batch
   const canReview = batchData.status === 'Submitted'
+  const pendingReviewCount = batchData.reviewProgress.pendingCount
   const canAskMiao = batchData.status !== 'Approved' && batchData.pullRequests.some(item => !item.appliedAt)
   const hasConflicts = batchData.pullRequests.some(pr => pr.conflictInfo?.hasConflict ?? pr.hasConflict)
   const dependencyPendingIds = new Set(batchData.reviewProgress?.dependencyPendingIds)
@@ -827,7 +831,7 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
             </Button>
             <p className="text-small text-default-600">
               <kbd>Alt+J</kbd> 下一个 <span aria-hidden="true">·</span> <kbd>Alt+K</kbd> 上一个
-              {' '}<span aria-hidden="true">·</span> <kbd>Alt+A</kbd> 同意当前词条
+              {' '}<span aria-hidden="true">·</span> <kbd>Alt+A</kbd> 同意并跳到下一条
               {' '}<span aria-hidden="true">·</span> <kbd>Alt+R</kbd> 拒绝当前词条
               {' '}<span>（Mac 用 Option ⌥）</span>
             </p>
@@ -836,6 +840,10 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
         <div className="space-y-6 mb-6">
           <BatchPreview batchId={resolvedParams.id} reviewing expectedContentVersion={batchData.contentVersion}
             reviewedFromContentVersion={canReview ? batch.reviewedFromContentVersion : undefined}
+            reviewCounts={canReview ? {
+              pending: pendingReviewCount,
+              reviewed: batchData.pullRequests.length - pendingReviewCount,
+            } : undefined}
             onNewerReviewPreview={refreshReviewDetails}
             lineActionItems={lineActionItems} renderLineActions={renderReviewActions} />
           <section aria-labelledby="pending-item-reviews">
