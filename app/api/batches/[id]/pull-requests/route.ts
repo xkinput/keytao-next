@@ -9,6 +9,7 @@ import { checkIsAdmin } from '@/lib/adminAuth'
 import { resolvePhraseTargetBinding } from '@/lib/services/phraseTargetBinding'
 import { BatchContentLockedError, claimBatchContentMutation } from '@/lib/services/batchContentGuard'
 import { changesPersistedMiaomiaoReviewBlocks } from '@/lib/validation/phraseInput'
+import { resetVotesForProposalEdit } from '@/lib/services/pullRequestVotes'
 
 const allowedActions = ['Create', 'Change', 'Delete'] as const
 
@@ -321,26 +322,31 @@ export async function PUT(
                 })
 
                 if (item.id) {
+                    const data = {
+                        word: item.word,
+                        oldWord: item.action === 'Change' ? item.oldWord : null,
+                        code: item.code,
+                        action: item.action,
+                        type: item.type ? (item.type as PrismaPhraseType) : undefined,
+                        weight: finalWeight ?? undefined,
+                        remark: item.remark !== undefined ? (item.remark || null) : undefined,
+                        phraseId: finalPhraseId,
+                        targetPhraseId: binding.targetPhraseId,
+                        targetFingerprint: binding.targetFingerprint,
+                        hasConflict: conflict.hasConflict,
+                        conflictReason: conflict.hasConflict ? conflict.impact : null
+                    }
                     const result = await tx.pullRequest.updateMany({
                         where: { id: item.id, batchId: id },
-                        data: {
-                            word: item.word,
-                            oldWord: item.action === 'Change' ? item.oldWord : null,
-                            code: item.code,
-                            action: item.action,
-                            type: item.type ? (item.type as PrismaPhraseType) : undefined,
-                            weight: finalWeight ?? undefined,
-                            remark: item.remark !== undefined ? (item.remark || null) : undefined,
-                            phraseId: finalPhraseId,
-                            targetPhraseId: binding.targetPhraseId,
-                            targetFingerprint: binding.targetFingerprint,
-                            hasConflict: conflict.hasConflict,
-                            conflictReason: conflict.hasConflict ? conflict.impact : null
-                        }
+                        data
                     })
 
                     if (result.count !== 1) {
                         throw new BatchSyncInputError('修改项不存在或不属于此批次')
+                    }
+                    const resetVotes = resetVotesForProposalEdit(persistedPullRequestsById.get(item.id)!, data)
+                    if (resetVotes) {
+                        await tx.pullRequest.update({ where: { id: item.id, batchId: id }, data: resetVotes })
                     }
                 } else {
                     // Create

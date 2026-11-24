@@ -11,6 +11,7 @@ import path from 'path'
  */
 const DATABASE_BACKED_TESTS = [
   'app/api/batches/submit-and-approve.test.ts',
+  'app/api/batches/draft-todos/route.test.ts',
   'app/api/pull-requests/check-conflicts-batch/route.test.ts',
   'app/api/pull-requests/check-conflicts-batch/performance.test.ts',
   'lib/services/__tests__/batchApprovalTransaction.test.ts',

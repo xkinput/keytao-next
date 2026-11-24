@@ -31,24 +31,25 @@ function item(vote: 'like' | 'dislike' | null) {
     id: itemId,
     status: 'Pending',
     userId: author,
+    appliedAt: null,
     _count: { likedBy: vote === 'like' ? 3 : 2, dislikedBy: vote === 'dislike' ? 2 : 1 },
     likedBy: vote === 'like' ? [{ id: voter }] : [],
     dislikedBy: vote === 'dislike' ? [{ id: voter }] : [],
   }
 }
 
-function post(vote: unknown, target = itemId) {
+function post(vote: unknown, target = itemId, expectedContentVersion?: unknown) {
   return POST(new NextRequest(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ itemId: target, vote }),
+    body: JSON.stringify({ itemId: target, vote, expectedContentVersion }),
   }), params)
 }
 
 beforeEach(() => {
   vi.resetAllMocks()
   mocks.session.mockResolvedValue({ id: voter })
-  mocks.batch.mockResolvedValue({ status: 'Submitted', creatorId: author, pullRequests: [item('like')] })
+  mocks.batch.mockResolvedValue({ status: 'Submitted', contentVersion: 4, pullRequests: [item('like')] })
   mocks.item.mockResolvedValue(item('like'))
   mocks.transaction.mockImplementation(async callback => callback({
     $queryRaw: mocks.lock,
@@ -63,6 +64,7 @@ describe('web votes by batch item', () => {
     expect(response.status).toBe(200)
     expect(response.headers.get('Cache-Control')).toBe('private, no-store')
     expect(await response.json()).toEqual({
+      contentVersion: 4,
       votes: [{ itemId, likes: 3, dislikes: 1, vote: 'like', canVote: true }],
     })
     expect(mocks.batch.mock.calls[0][0].select.pullRequests.select.likedBy.where).toEqual({ id: voter })
@@ -73,20 +75,61 @@ describe('web votes by batch item', () => {
     expect((await post('like')).status).toBe(401)
     expect((await post('wrong')).status).toBe(400)
     expect((await post('like', 2147483648)).status).toBe(400)
+    expect((await post('like', itemId, '4')).status).toBe(400)
     expect(mocks.transaction).not.toHaveBeenCalled()
   })
 
-  it('rejects other-batch items, votes by the author and closed items', async () => {
+  it('checks the displayed batch version under the voting lock', async () => {
+    expect((await post('like', itemId, 3)).status).toBe(409)
+    expect(mocks.item).not.toHaveBeenCalled()
+    expect(mocks.update).not.toHaveBeenCalled()
+    expect(mocks.lock.mock.invocationCallOrder[0]).toBeLessThan(mocks.batch.mock.invocationCallOrder[0])
+
+    mocks.update.mockResolvedValueOnce(item('like'))
+    expect((await post('like', itemId, 4)).status).toBe(200)
+  })
+
+  it.each([
+    ['Draft', author],
+    ['Draft', voter],
+    ['Submitted', author],
+  ] as const)('lets a signed-in user vote on a pending item in %s for user %s', async (status, userId) => {
+    mocks.session.mockResolvedValue({ id: userId })
+    mocks.batch.mockResolvedValue({ status, creatorId: author, pullRequests: [item(null)] })
+    mocks.update.mockResolvedValueOnce({ ...item('like'), likedBy: [{ id: userId }] })
+
+    expect(await (await GET(new NextRequest(url), params)).json()).toMatchObject({
+      votes: [{ itemId, canVote: true }],
+    })
+    expect((await post('like')).status).toBe(200)
+    expect(mocks.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: { likedBy: { connect: { id: userId } }, dislikedBy: { disconnect: { id: userId } } },
+    }))
+  })
+
+  it('serves read-only counts to guests without another account choice', async () => {
+    mocks.session.mockResolvedValue(null)
+    mocks.batch.mockResolvedValue({ status: 'Draft', contentVersion: 7, creatorId: author, pullRequests: [item(null)] })
+
+    const response = await GET(new NextRequest(url), params)
+    expect(await response.json()).toEqual({
+      contentVersion: 7,
+      votes: [{ itemId, likes: 2, dislikes: 1, vote: null, canVote: false }],
+    })
+    expect(mocks.batch.mock.calls[0][0].select.pullRequests.select.likedBy.where).toEqual({ id: -1 })
+  })
+
+  it('rejects other-batch items and closed reviews', async () => {
     mocks.item.mockResolvedValueOnce(null)
     expect((await post('like')).status).toBe(404)
     expect(mocks.item).toHaveBeenCalledWith(expect.objectContaining({
       where: { id: itemId, batchId: 'batch-1' },
     }))
-    mocks.session.mockResolvedValueOnce({ id: author })
-    expect((await post('like')).status).toBe(403)
     mocks.item.mockResolvedValueOnce({ ...item('like'), status: 'Rejected' })
     expect((await post('like')).status).toBe(409)
-    mocks.batch.mockResolvedValueOnce({ status: 'Draft', creatorId: author })
+    mocks.item.mockResolvedValueOnce({ ...item('like'), appliedAt: new Date('2026-11-24') })
+    expect((await post('like')).status).toBe(409)
+    mocks.batch.mockResolvedValueOnce({ status: 'Approved', creatorId: author })
     expect((await post('like')).status).toBe(409)
     expect(mocks.update).not.toHaveBeenCalled()
   })

@@ -157,11 +157,18 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
   )
 
   const batchStatus = batch?.batch.status
-  const votes = useBatchItemVotes(resolvedParams.id, Boolean(batchStatus && batchStatus !== 'Draft'))
+  const votes = useBatchItemVotes(resolvedParams.id, batch?.batch.pullRequests.length ? batch.batch.contentVersion : undefined)
   const aiReview = batch?.batch.aiReview
   const pullRequestById = useMemo(() => {
     return new Map((batch?.batch.pullRequests ?? []).map(pr => [pr.id, pr]))
   }, [batch?.batch.pullRequests])
+  const voteLineItems = useMemo(() => (batch?.batch.pullRequests ?? [])
+    .filter(pr => votes.byItem.has(pr.id))
+    .map(pr => ({
+      id: pr.id,
+      label: pr.word || pr.phrase?.word || `词条 ${pr.id}`,
+      code: pr.code || pr.phrase?.code,
+    })), [batch?.batch.pullRequests, votes.byItem])
   const humanReviewItems = useMemo(() => {
     return (aiReview?.items ?? []).filter(item => item.status !== 'pass')
   }, [aiReview?.items])
@@ -230,6 +237,12 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
   const handleCloseModal = () => {
     onClose()
   }
+
+  const refreshVoteContext = () => Promise.allSettled([
+    mutate(),
+    votes.refresh(),
+    globalMutate((key: unknown) => Array.isArray(key) && key[0] === `/api/batches/${resolvedParams.id}/preview`),
+  ])
 
   const handleResubmitItem = async (itemId: number) => {
     if (!batch || resubmittingId !== null) return
@@ -371,12 +384,31 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
   const approvedItems = batchData.pullRequests.filter(pr => pr.status === 'Approved' && !waitingOnDependencies.has(pr.id))
   const approvedIds = new Set(approvedItems.map(pr => pr.id))
   const pendingItems = batchData.pullRequests.filter(pr => !approvedIds.has(pr.id))
+  const votingOpen = batchData.status === 'Draft' || batchData.status === 'Submitted'
+  const renderVote = (id: number) => {
+    const pr = pullRequestById.get(id)
+    const tally = votes.byItem.get(id)
+    if (!pr || !tally) return null
+    return (
+      <BatchItemVote
+        key={`${user?.id ?? 'guest'}:${id}`}
+        batchId={batchData.id}
+        itemId={id}
+        viewerId={user?.id}
+        label={pr.word || pr.phrase?.word || `词条 ${id}`}
+        isOpen={votingOpen && pr.status === 'Pending' && !pr.appliedAt}
+        contentVersion={batchData.contentVersion}
+        vote={tally}
+        onChange={votes.update}
+        onStale={refreshVoteContext}
+      />
+    )
+  }
   const itemFooter = (id: number) => {
     const pr = pullRequestById.get(id)
     if (!pr) return null
-    const tally = votes.byItem.get(id)
     const canResubmit = isOwner && batchData.status !== 'Draft' && pr.status === 'Rejected' && !pr.appliedAt
-    if (!tally && !pr.reviewNotes?.length && !canResubmit && !waitingOnDependencies.has(id)) return null
+    if (!pr.reviewNotes?.length && !canResubmit && !waitingOnDependencies.has(id)) return null
     return (
       <div className="space-y-2">
         {waitingOnDependencies.has(id) && (
@@ -387,12 +419,11 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
             {pr.reviewNotes?.map(note => (
               <li key={note.id} className="rounded-medium bg-default-100 p-2 text-sm whitespace-pre-wrap break-words">
                 <strong>{note.reviewer?.nickname || note.reviewer?.name || '审核员'} · {note.decision === 'Approved' ? '同意' : '拒绝'}</strong>
-                <p>{note.reason}</p>
+                {note.reason && <p>{note.reason}</p>}
               </li>
             ))}
           </ul>
         )}
-        <BatchItemVote batchId={batchData.id} itemId={id} status={pr.status} vote={tally} onChange={votes.update} />
         {canResubmit && (
           <Button size="sm" variant="flat" isDisabled={resubmittingId !== null} isLoading={resubmittingId === id}
             aria-label={`重新提交审核：${pr.word ?? pr.code ?? id}`} onPress={() => void handleResubmitItem(id)}>
@@ -676,7 +707,8 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
         </div>
 
         <div className="space-y-6">
-          <BatchPreview batchId={resolvedParams.id} />
+          <BatchPreview batchId={resolvedParams.id} expectedContentVersion={batchData.contentVersion}
+            lineActionItems={voteLineItems} renderLineActions={renderVote} />
           {votes.error && <p role="status" className="text-sm text-danger">社区投票暂时无法加载</p>}
           <section>
             <h2 className="mb-3 text-lg font-semibold">待审核（{pendingItems.length}）</h2>
@@ -707,10 +739,7 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
           weight: pr.weight || undefined,
           remark: pr.remark || undefined
         })) : undefined}
-        onSuccess={() => {
-          void mutate()
-          void globalMutate((key: unknown) => Array.isArray(key) && key[0] === `/api/batches/${resolvedParams.id}/preview`)
-        }}
+        onSuccess={() => void refreshVoteContext()}
       />
     </div>
   )

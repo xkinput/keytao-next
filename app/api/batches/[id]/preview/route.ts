@@ -11,6 +11,7 @@ interface PreviewPhrase {
 }
 
 interface DiffItem {
+    itemId: number
     type: 'add' | 'remove' | 'modify'
     phrase?: PreviewPhrase
     before?: PreviewPhrase
@@ -187,6 +188,7 @@ export async function GET(
 
         if (codes.size === 0) {
             return NextResponse.json({
+                contentVersion: batch.contentVersion,
                 preview: {
                     changes: [],
                     rejected: [],
@@ -317,20 +319,20 @@ export async function GET(
                             case 'Create':
                                 if (pr.word) {
                                     const finalWeight = weightMap.get(pr.id) ?? pr.weight ?? 0
-                                    diffs.push({ type: 'add', phrase: { word: pr.word, code, type: pr.type || 'Phrase', weight: finalWeight, remark: pr.remark || undefined } })
+                                    diffs.push({ itemId: pr.id, type: 'add', phrase: { word: pr.word, code, type: pr.type || 'Phrase', weight: finalWeight, remark: pr.remark || undefined } })
                                     addedCount++
                                 }
                                 break
                             case 'Change':
                                 if (pr.word && pr.oldWord) {
                                     const finalWeight = weightMap.get(pr.id) ?? pr.weight ?? 0
-                                    diffs.push({ type: 'modify', before: { word: pr.oldWord, code, type: pr.type || 'Phrase', weight: 0 }, after: { word: pr.word, code, type: pr.type || 'Phrase', weight: finalWeight, remark: pr.remark || undefined } })
+                                    diffs.push({ itemId: pr.id, type: 'modify', before: { word: pr.oldWord, code, type: pr.type || 'Phrase', weight: 0 }, after: { word: pr.word, code, type: pr.type || 'Phrase', weight: finalWeight, remark: pr.remark || undefined } })
                                     modifiedCount++
                                 }
                                 break
                             case 'Delete':
                                 if (pr.word) {
-                                    diffs.push({ type: 'remove', phrase: { word: pr.word, code, type: pr.type || 'Phrase', weight: 0, remark: pr.remark || undefined } })
+                                    diffs.push({ itemId: pr.id, type: 'remove', phrase: { word: pr.word, code, type: pr.type || 'Phrase', weight: 0, remark: pr.remark || undefined } })
                                     removedCount++
                                 }
                                 break
@@ -531,7 +533,7 @@ export async function GET(
                                         weight: weightMap.get(pr.id) ?? pr.weight ?? 0,
                                         remark: pr.remark || undefined
                                     }
-                                    diffs.push({ type: 'add', phrase })
+                                    diffs.push({ itemId: pr.id, type: 'add', phrase })
                                     addedCount++
                                 }
                                 break
@@ -551,7 +553,7 @@ export async function GET(
                                         weight: before.weight,
                                         remark: pr.remark || before.remark
                                     }
-                                    diffs.push({ type: 'modify', before, after })
+                                    diffs.push({ itemId: pr.id, type: 'modify', before, after })
                                     modifiedCount++
                                 }
                                 break
@@ -564,7 +566,7 @@ export async function GET(
                                         weight: pr.weight ?? 0,
                                         remark: pr.remark || undefined
                                     }
-                                    diffs.push({ type: 'remove', phrase })
+                                    diffs.push({ itemId: pr.id, type: 'remove', phrase })
                                     removedCount++
                                 }
                                 break
@@ -607,6 +609,7 @@ export async function GET(
         }
 
         return NextResponse.json({
+            contentVersion: batch.contentVersion,
             preview: {
                 changes,
                 rejected,

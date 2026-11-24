@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireVerifiedBotUser } from '@/lib/botUserAuth'
 import { BatchContentLockedError, claimBatchContentMutation } from '@/lib/services/batchContentGuard'
+import { resetVotesForProposalEdit } from '@/lib/services/pullRequestVotes'
 import {
   assertExpectedBatchTargets,
   BatchTargetChangedError,
@@ -97,7 +98,10 @@ export async function PATCH(
       })
       const current = await tx.pullRequest.findFirst({
         where: { id: prId, batchId, userId: user.id },
-        select: { id: true, word: true, code: true, action: true, type: true, weight: true },
+        select: {
+          id: true, word: true, oldWord: true, code: true, action: true, type: true, weight: true,
+          phraseId: true, targetPhraseId: true, targetFingerprint: true,
+        },
       })
       if (
         !current
@@ -115,6 +119,10 @@ export async function PATCH(
         data: { weight: weight as number },
       })
       if (updated.count !== 1) throw new BatchTargetChangedError()
+      const resetVotes = resetVotesForProposalEdit(current, { weight: weight as number })
+      if (resetVotes) {
+        await tx.pullRequest.update({ where: { id: prId, batchId, userId: user.id }, data: resetVotes })
+      }
     })
 
     return NextResponse.json({

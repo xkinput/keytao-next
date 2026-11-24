@@ -1,4 +1,5 @@
 'use client'
+import { useEffect, useMemo, type ReactNode } from 'react'
 import { Chip, Spinner } from '@/lib/heroui-compat'
 import { AlertTriangle, Bot, CheckCircle2, X } from 'lucide-react'
 import { useAPI } from '@/lib/hooks/useSWR'
@@ -13,6 +14,7 @@ interface PreviewPhrase {
 }
 
 interface DiffItem {
+    itemId?: number
     type: 'add' | 'remove' | 'modify'
     phrase?: PreviewPhrase
     before?: PreviewPhrase
@@ -52,6 +54,9 @@ interface PreviewResult {
 
 interface BatchPreviewProps {
     batchId: string
+    expectedContentVersion?: number
+    renderLineActions?: (itemId: number) => ReactNode
+    lineActionItems?: readonly { id: number; label: string; code?: string | null }[]
 }
 
 type UnifiedLine =
@@ -225,6 +230,36 @@ function formatPhraseLine(p: PreviewPhrase): string {
     return [p.word.padEnd(12), p.code.padEnd(8), String(p.weight).padEnd(6)].join('  ')
 }
 
+function prepareDiff(group: TypeChangeGroup) {
+    const hunks = computeUnifiedDiff(group.before, group.after, 3, group.beforeStartLine)
+    const actionRows = new Map<UnifiedLine, number>()
+    if (!hunks.length) {
+        return { hunks, actionRows, shownIds: group.diffs.flatMap(diff => diff.itemId === undefined ? [] : [diff.itemId]) }
+    }
+
+    const actionKey = (kind: 'add' | 'remove', phrase: PreviewPhrase) => JSON.stringify([kind, phrase.type, phrase.word, phrase.code])
+    const candidates = new Map<string, number | null>()
+    for (const diff of group.diffs) {
+        const phrase = diff.type === 'modify' ? diff.after : diff.phrase
+        if (!phrase || diff.itemId === undefined) continue
+        const key = actionKey(diff.type === 'remove' ? 'remove' : 'add', phrase)
+        // A net line cannot distinguish two operations with an identical target.
+        candidates.set(key, candidates.has(key) ? null : diff.itemId)
+    }
+    for (const { lines } of hunks) {
+        for (const line of lines) {
+            if (line.kind === 'context') continue
+            const key = actionKey(line.kind, line.phrase)
+            const itemId = candidates.get(key)
+            if (typeof itemId === 'number') {
+                actionRows.set(line, itemId)
+                candidates.delete(key)
+            }
+        }
+    }
+    return { hunks, actionRows, shownIds: [...actionRows.values()] }
+}
+
 function formatReviewTime(value: string): string {
     return value
         .replace('T', ' ')
@@ -273,12 +308,19 @@ function MiaomiaoDiffReview({ review }: { review: MiaomiaoReviewRemarkBlock }) {
     )
 }
 
-function PhraseLineContent({ phrase, colorClass }: { phrase: PreviewPhrase; colorClass: string }) {
+function PhraseLineContent({ phrase, colorClass, actions }: {
+    phrase: PreviewPhrase
+    colorClass: string
+    actions?: ReactNode
+}) {
     const parsedRemark = parseMiaomiaoReviewRemark(phrase.remark)
 
     return (
         <div className="min-w-0 flex-1 px-3 py-1.5">
-            <div className={`whitespace-pre ${colorClass}`}>{formatPhraseLine(phrase)}</div>
+            <div className="flex flex-wrap items-center gap-x-3">
+                <div className={`whitespace-pre ${colorClass}`}>{formatPhraseLine(phrase)}</div>
+                {actions && <div className="ml-auto shrink-0 font-sans text-[#c0caf5]">{actions}</div>}
+            </div>
             {parsedRemark.baseRemark && (
                 <div className="mt-1 whitespace-pre-wrap break-words font-sans text-xs text-[#737aa2]">
                     {parsedRemark.baseRemark}
@@ -289,12 +331,14 @@ function PhraseLineContent({ phrase, colorClass }: { phrase: PreviewPhrase; colo
     )
 }
 
-function DiffView({ group }: { group: TypeChangeGroup }) {
-    const hunks = group.before.length > 0 || group.after.length > 0
-        ? computeUnifiedDiff(group.before, group.after, 3, group.beforeStartLine)
-        : []
-
+function DiffView({ group, layout, renderLineActions }: {
+    group: TypeChangeGroup
+    layout: ReturnType<typeof prepareDiff>
+    renderLineActions?: BatchPreviewProps['renderLineActions']
+}) {
+    const { hunks, actionRows } = layout
     const hasFull = hunks.length > 0
+    const actionsFor = (itemId?: number) => itemId === undefined ? undefined : renderLineActions?.(itemId)
 
     return (
         <div className="font-mono text-sm overflow-x-auto">
@@ -322,7 +366,7 @@ function DiffView({ group }: { group: TypeChangeGroup }) {
                                         <span className="w-12 text-right pr-3 py-1.5 select-none border-r border-[#5a2020] shrink-0 text-[#f7768e] font-semibold">{line.oldLine}</span>
                                         <span className="w-12 text-right pr-3 py-1.5 select-none border-r border-[#5a2020] shrink-0 text-[#3b4261]"> </span>
                                         <span className="px-3 py-1.5 text-[#f7768e] select-none w-6 shrink-0">-</span>
-                                        <PhraseLineContent phrase={line.phrase} colorClass="text-[#f7768e]" />
+                                        <PhraseLineContent phrase={line.phrase} colorClass="text-[#f7768e]" actions={actionsFor(actionRows.get(line))} />
                                     </div>
                                 )
                             }
@@ -332,7 +376,7 @@ function DiffView({ group }: { group: TypeChangeGroup }) {
                                     <span className="w-12 text-right pr-3 py-1.5 select-none border-r border-[#2a5a2a] shrink-0 text-[#3b4261]"> </span>
                                     <span className="w-12 text-right pr-3 py-1.5 select-none border-r border-[#2a5a2a] shrink-0 text-[#9ece6a] font-semibold">{line.newLine}</span>
                                     <span className="px-3 py-1.5 text-[#9ece6a] select-none w-6 shrink-0">+</span>
-                                    <PhraseLineContent phrase={line.phrase} colorClass="text-[#9ece6a]" />
+                                    <PhraseLineContent phrase={line.phrase} colorClass="text-[#9ece6a]" actions={actionsFor(actionRows.get(line))} />
                                 </div>
                             )
                         })}
@@ -349,7 +393,7 @@ function DiffView({ group }: { group: TypeChangeGroup }) {
                             return (
                                 <div key={i} className="flex gap-0 bg-[#3d1515]/40">
                                     <span className="px-3 py-1.5 text-[#f7768e] select-none w-6 shrink-0">-</span>
-                                    <PhraseLineContent phrase={diff.phrase} colorClass="text-[#f7768e]" />
+                                    <PhraseLineContent phrase={diff.phrase} colorClass="text-[#f7768e]" actions={actionsFor(diff.itemId)} />
                                 </div>
                             )
                         }
@@ -357,7 +401,7 @@ function DiffView({ group }: { group: TypeChangeGroup }) {
                             return (
                                 <div key={i} className="flex gap-0 bg-[#1a3a1a]/40">
                                     <span className="px-3 py-1.5 text-[#9ece6a] select-none w-6 shrink-0">+</span>
-                                    <PhraseLineContent phrase={diff.phrase} colorClass="text-[#9ece6a]" />
+                                    <PhraseLineContent phrase={diff.phrase} colorClass="text-[#9ece6a]" actions={actionsFor(diff.itemId)} />
                                 </div>
                             )
                         }
@@ -370,7 +414,7 @@ function DiffView({ group }: { group: TypeChangeGroup }) {
                                     </div>
                                     <div className="flex gap-0 bg-[#1a3a1a]/40">
                                         <span className="px-3 py-1.5 text-[#9ece6a] select-none w-6 shrink-0">+</span>
-                                        <PhraseLineContent phrase={diff.after} colorClass="text-[#9ece6a]" />
+                                        <PhraseLineContent phrase={diff.after} colorClass="text-[#9ece6a]" actions={actionsFor(diff.itemId)} />
                                     </div>
                                 </div>
                             )
@@ -383,10 +427,41 @@ function DiffView({ group }: { group: TypeChangeGroup }) {
     )
 }
 
-export default function BatchPreview({ batchId }: BatchPreviewProps) {
-    const { data, error, isLoading } = useAPI<{ preview: PreviewResult }>(
-        `/api/batches/${batchId}/preview`
+export default function BatchPreview({ batchId, expectedContentVersion, renderLineActions, lineActionItems }: BatchPreviewProps) {
+    const { data, error, isLoading, mutate } = useAPI<{ contentVersion: number; preview: PreviewResult }>(
+        `/api/batches/${batchId}/preview`,
+        { keepPreviousData: false },
     )
+    const previewVersion = data?.contentVersion
+    const outdated = Boolean(data && expectedContentVersion !== undefined && previewVersion !== expectedContentVersion)
+    useEffect(() => {
+        if (outdated) void mutate().catch(() => undefined)
+    }, [outdated, expectedContentVersion, previewVersion, mutate])
+
+    const changes = outdated ? undefined : data?.preview.changes
+    const layouts = useMemo(() => new Map(changes?.map(group => [group, prepareDiff(group)])), [changes])
+
+    const shownIds = new Set(error ? [] : [...layouts.values()].flatMap(layout => layout.shownIds))
+    if (!error && !outdated) {
+        for (const operation of data?.preview.rejected ?? []) shownIds.add(operation.prId)
+    }
+    const fallbackRows = renderLineActions && lineActionItems?.flatMap(item => {
+        if (shownIds.has(item.id)) return []
+        const actions = renderLineActions(item.id)
+        if (!actions) return []
+        return [(
+            <li key={item.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-1.5">
+                <span>{item.label} {item.code && <code className="text-default-500">{item.code}</code>}</span>
+                <div className="ml-auto shrink-0">{actions}</div>
+            </li>
+        )]
+    })
+    const fallback = fallbackRows?.length ? (
+        <div className="mt-4 rounded-lg border border-default-200">
+            <h3 className="border-b border-default-200 px-3 py-2 text-sm font-medium">未出现在差异中的词条</h3>
+            <ul className="divide-y divide-default-100">{fallbackRows}</ul>
+        </div>
+    ) : null
 
     if (isLoading) {
         return (
@@ -401,18 +476,29 @@ export default function BatchPreview({ batchId }: BatchPreviewProps) {
             <div className="text-center py-8">
                 <p className="text-danger">加载预览失败</p>
                 <p className="text-default-500 text-small">{error?.message || '未知错误'}</p>
+                {fallback}
+            </div>
+        )
+    }
+
+    if (outdated) {
+        return (
+            <div className="py-4">
+                <p role="status" className="text-center text-small text-default-500">批次有更新，正在重新加载差异</p>
+                {fallback}
             </div>
         )
     }
 
     const { preview } = data
-    const { changes, rejected = [], summary } = preview
+    const { changes: previewChanges, rejected = [], summary } = preview
     const total = summary.added + summary.modified + summary.deleted
 
     if (total === 0 && rejected.length === 0) {
         return (
             <div className="text-center py-8">
                 <p className="text-default-500">暂无修改预览</p>
+                {fallback}
             </div>
         )
     }
@@ -442,8 +528,8 @@ export default function BatchPreview({ batchId }: BatchPreviewProps) {
             </div>
 
             {/* Git diff view */}
-            {changes.length > 0 && (() => {
-                const grouped = changes.reduce<{ type: string; groups: TypeChangeGroup[] }[]>((acc, group) => {
+            {previewChanges.length > 0 && (() => {
+                const grouped = previewChanges.reduce<{ type: string; groups: TypeChangeGroup[] }[]>((acc, group) => {
                     const last = acc[acc.length - 1]
                     if (last && last.type === group.phraseType) {
                         last.groups.push(group)
@@ -461,7 +547,8 @@ export default function BatchPreview({ batchId }: BatchPreviewProps) {
                                     <span className="font-bold">{type}</span>
                                 </div>
                                 {groups.map((group, i) => (
-                                    <DiffView key={group.codes.join(',') || i} group={group} />
+                                    <DiffView key={group.codes.join(',') || i} group={group} layout={layouts.get(group)!}
+                                        renderLineActions={renderLineActions} />
                                 ))}
                             </div>
                         ))}
@@ -497,6 +584,7 @@ export default function BatchPreview({ batchId }: BatchPreviewProps) {
                                             </>
                                         )}
                                         <code className="bg-default-200 text-default-700 px-2 py-0.5 rounded text-small font-mono">{op.code}</code>
+                                        {renderLineActions && <div className="ml-auto">{renderLineActions(op.prId)}</div>}
                                     </div>
                                     <div className="p-2 bg-warning-50 dark:bg-warning-100/10 rounded border-l-2 border-warning">
                                         <p className="text-small text-warning-700 dark:text-warning-600">
@@ -509,6 +597,7 @@ export default function BatchPreview({ batchId }: BatchPreviewProps) {
                     </div>
                 </div>
             )}
+            {fallback}
         </div>
     )
 }

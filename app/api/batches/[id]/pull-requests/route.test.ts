@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => {
     },
     pullRequest: {
       deleteMany: vi.fn(),
+      update: vi.fn(),
       updateMany: vi.fn(),
       create: vi.fn(),
     },
@@ -82,6 +83,7 @@ beforeEach(() => {
   mocks.tx.batch.updateMany.mockResolvedValue({ count: 1 })
   mocks.tx.pullRequest.deleteMany.mockResolvedValue({ count: 0 })
   mocks.tx.pullRequest.updateMany.mockResolvedValue({ count: 1 })
+  mocks.tx.pullRequest.update.mockResolvedValue({ id: 10 })
   mocks.tx.pullRequest.create.mockResolvedValue({ id: 11 })
   mocks.tx.phrase.findFirst.mockResolvedValue(null)
 })
@@ -116,6 +118,10 @@ describe('PUT /api/batches/[id]/pull-requests', () => {
 
     expect(res.status).toBe(200)
     await expect(res.json()).resolves.toMatchObject({ success: true, contentVersion: 8 })
+    expect(mocks.tx.pullRequest.update).toHaveBeenCalledExactlyOnceWith({
+      where: { id: 10, batchId: 'batch-1' },
+      data: { likedBy: { set: [] }, dislikedBy: { set: [] } },
+    })
     expect(mocks.tx.pullRequest.updateMany).toHaveBeenCalledWith(expect.objectContaining({
       where: { id: 10, batchId: 'batch-1' },
       data: expect.objectContaining({ remark: null }),
@@ -200,7 +206,11 @@ describe('PUT /api/batches/[id]/pull-requests', () => {
       creatorId: 2,
       status: 'Submitted',
       contentVersion: 7,
-      pullRequests: [{ id: 10, remark: `旧备注\n\n${reviewBlock}` }],
+      pullRequests: [{
+        id: 10, action: 'Create', word: '测试词', code: 'ces', type: 'Phrase', weight: 100,
+        oldWord: null, phraseId: null, targetPhraseId: null, targetFingerprint: null,
+        remark: `旧备注\n\n${reviewBlock}`,
+      }],
     })
     const { PUT } = await import('./route')
 
@@ -225,6 +235,7 @@ describe('PUT /api/batches/[id]/pull-requests', () => {
       where: { id: 10, batchId: 'batch-1' },
       data: expect.objectContaining({ remark }),
     }))
+    expect(mocks.tx.pullRequest.update).not.toHaveBeenCalled()
   })
 
   it.each([

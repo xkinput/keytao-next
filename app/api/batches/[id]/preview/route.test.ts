@@ -42,6 +42,7 @@ function draftChangeBatch() {
     return {
         id: 'batch-1',
         creatorId: 1,
+        contentVersion: 7,
         status: 'Draft',
         pullRequests: [
             {
@@ -94,10 +95,12 @@ describe('GET /api/batches/[id]/preview', () => {
         const body = await res.json()
 
         expect(res.status).toBe(200)
+        expect(body.contentVersion).toBe(7)
         expect(body.preview.summary).toEqual({ added: 0, modified: 1, deleted: 0, rejected: 0 })
         expect(body.preview.changes).toHaveLength(1)
         expect(body.preview.changes[0].diffs).toEqual([
             {
+                itemId: 1550,
                 type: 'modify',
                 before: { word: '温暖', code: 'woi', type: 'Phrase', weight: 100 },
                 after: { word: '为啥', code: 'woi', type: 'Phrase', weight: 100 },

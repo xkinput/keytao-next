@@ -5,19 +5,25 @@ import { ItemReviewError, recordItemReview } from '@/lib/services/batchItemRevie
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string; itemId: string }> }) {
   const auth = await checkAdminPermission()
-  if (!auth.authorized) return auth.response
+  if (!auth.authorized) return auth.response ?? NextResponse.json({ error: '权限不足' }, { status: 403 })
   if (!auth.session) return NextResponse.json({ error: '未登录' }, { status: 401 })
 
   const { id, itemId } = await params
   const body = await request.json().catch(() => null)
   const decision = body?.decision
-  const reason = typeof body?.reason === 'string' ? body.reason.trim() : ''
+  const rawReason = body?.reason
+  const reason = typeof rawReason === 'string' ? rawReason.trim() : ''
   const version = body?.expectedContentVersion
   if (!/^[1-9]\d*$/.test(itemId) || Number(itemId) > 2147483647 ||
       (decision !== 'Approved' && decision !== 'Rejected') ||
-      !reason || reason.length > 2000 ||
       !Number.isInteger(version) || version < 0 || version >= 2147483647) {
-    return NextResponse.json({ error: '请填写审核结果、审核原因（最多 2000 字）和有效的批次版本' }, { status: 400 })
+    return NextResponse.json({ error: '请提供有效的审核结果和批次版本' }, { status: 400 })
+  }
+  if ((rawReason !== undefined && typeof rawReason !== 'string') || reason.length > 2000) {
+    return NextResponse.json({ error: '审核理由须为文字，最多 2000 字' }, { status: 400 })
+  }
+  if (decision === 'Rejected' && !reason) {
+    return NextResponse.json({ error: '请填写拒绝理由' }, { status: 400 })
   }
 
   try {

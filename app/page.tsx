@@ -11,8 +11,10 @@ import {
   Input,
   Pagination
 } from '@/lib/heroui-compat'
-import { FilePlus2, RefreshCw, Search } from 'lucide-react'
+import { FilePlus2, RefreshCw, Search, Trash2 } from 'lucide-react'
+import toast from 'react-hot-toast'
 import { useAuthStore } from '@/lib/store/auth'
+import { useUIStore } from '@/lib/store/ui'
 import { useAPI, apiRequest } from '@/lib/hooks/useSWR'
 import { useClientReady } from '@/lib/hooks/useClientReady'
 import { usePageFilterStore } from '@/lib/store/pageFilter'
@@ -67,6 +69,27 @@ interface BatchesResponse {
   }
 }
 
+interface DraftTodosResponse {
+  unsubmitted: number
+  rejected: number
+  emptyDrafts: number
+}
+
+const DRAFT_TODOS_URL = '/api/batches/draft-todos'
+
+function TodoTabTitle({ label, count }: { label: string; count: number }) {
+  return (
+    <span className="inline-flex items-start gap-1">
+      {label}
+      {count > 0 && (
+        <span className="-mt-1 inline-flex min-w-4 items-center justify-center rounded-full bg-danger px-1 text-[10px] leading-4 text-white tabular-nums">
+          <span className="sr-only">待办 </span>{count}
+        </span>
+      )}
+    </span>
+  )
+}
+
 function formatSyncTime(value: string) {
   const date = new Date(value)
   const pad = (part: number) => String(part).padStart(2, '0')
@@ -76,6 +99,8 @@ function formatSyncTime(value: string) {
 export default function BatchesPage() {
   const router = useRouter()
   const isAuthenticated = useAuthStore(state => state.isAuthenticated)
+  const userId = useAuthStore(state => state.user?.id)
+  const openConfirm = useUIStore(state => state.openConfirm)
   const isClientReady = useClientReady()
   const isAuthenticatedValue = isClientReady && isAuthenticated()
   const { getFilter, setFilter, getPage, setPage: setStorePage } = usePageFilterStore()
@@ -85,6 +110,9 @@ export default function BatchesPage() {
   const [search, setSearch] = useState('')
   const [searchInput, setSearchInput] = useState('')
   const [isCreating, setIsCreating] = useState(false)
+  const myBatches = onlyMine && isAuthenticatedValue
+  const myDrafts = myBatches && status === 'Draft'
+  const batchStatus = myDrafts ? 'DraftTodos' : status
 
   // Handle status change
   const handleStatusChange = useCallback((newStatus: string) => {
@@ -108,9 +136,30 @@ export default function BatchesPage() {
   }, [setStorePage])
 
   const { data, isLoading, mutate } = useAPI<BatchesResponse>(
-    `/api/batches?page=${page}&pageSize=10${status === 'all' ? '' : `&status=${status}`}${onlyMine ? '&onlyMine=true' : ''}${search ? `&search=${encodeURIComponent(search)}` : ''}`,
-    { withAuth: onlyMine, keepPreviousData: true }
+    `/api/batches?page=${page}&pageSize=10${batchStatus === 'all' ? '' : `&status=${batchStatus}`}${myBatches ? '&onlyMine=true' : ''}${search ? `&search=${encodeURIComponent(search)}` : ''}`,
+    { withAuth: myBatches, keepPreviousData: false }
   )
+  const { data: draftTodos, mutate: refreshDraftTodos } = useAPI<DraftTodosResponse>(
+    isAuthenticatedValue ? DRAFT_TODOS_URL : null,
+    { keepPreviousData: false },
+  )
+  const todoCount = (draftTodos?.unsubmitted ?? 0) + (draftTodos?.rejected ?? 0)
+
+  const refreshBatches = useCallback(async () => {
+    await Promise.allSettled([mutate(), refreshDraftTodos()])
+  }, [mutate, refreshDraftTodos])
+
+  const handleCleanEmptyDrafts = () => {
+    if (!myDrafts || userId === undefined || !draftTodos?.emptyDrafts) return
+
+    openConfirm('确定删除本人所有没有词条的草稿吗？', async () => {
+      if (useAuthStore.getState().user?.id !== userId) throw new Error('登录账号已变化，请重新打开草稿列表')
+      const { deleted } = await apiRequest<{ deleted: number }>(DRAFT_TODOS_URL, { method: 'DELETE' })
+      handlePageChange(1)
+      await refreshBatches()
+      toast.success(deleted > 0 ? `已清理 ${deleted} 个空草稿` : '当前没有空草稿')
+    }, '清理空草稿', '清理')
+  }
 
   const handleSearch = useCallback(() => {
     setSearch(searchInput)
@@ -170,7 +219,7 @@ export default function BatchesPage() {
             <p className="mt-3 text-base text-default-500">
               {search ? (
                 <>搜索 &ldquo;{search}&rdquo; 的结果：{data?.pagination?.total || 0} 个</>
-              ) : onlyMine ? (
+              ) : myBatches ? (
                 <>我的批次：{data?.pagination?.total || 0} 个</>
               ) : (
                 <>共 {data?.pagination?.total || 0} 个</>
@@ -183,7 +232,7 @@ export default function BatchesPage() {
               isIconOnly
               variant="flat"
               size="sm"
-              onPress={() => mutate()}
+              onPress={refreshBatches}
               aria-label="刷新批次"
               className="h-10 w-10"
             >
@@ -217,7 +266,7 @@ export default function BatchesPage() {
             }}
           >
             <Tab key="all" title="全部" />
-            <Tab key="Draft" title="草稿" />
+            <Tab key="Draft" title={<TodoTabTitle label="草稿" count={myBatches ? todoCount : 0} />} />
             <Tab key="Submitted" title="待审核" />
             <Tab key="Approved" title="已通过" />
             <Tab key="Published" title="已发布" />
@@ -241,19 +290,37 @@ export default function BatchesPage() {
             {isAuthenticatedValue && (
               <div className="flex items-center sm:pl-2 sm:border-l sm:border-default-200">
                 <Tabs
-                  selectedKey={onlyMine ? 'mine' : 'all'}
+                  selectedKey={myBatches ? 'mine' : 'all'}
                   onSelectionChange={(key) => handleOnlyMineChange(key === 'mine')}
                   size="sm"
                   radius="full"
                   color="primary"
                 >
                   <Tab key="all" title="全部" />
-                  <Tab key="mine" title="我的" />
+                  <Tab key="mine" title={<TodoTabTitle label="我的" count={todoCount} />} />
                 </Tabs>
               </div>
             )}
           </div>
         </div>
+
+        {myDrafts && (
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2 px-1">
+            <p className="text-sm text-default-600">
+              <span className="font-medium text-foreground">待办</span>
+              {draftTodos ? ` · 待提交 ${draftTodos.unsubmitted} · 已拒绝 ${draftTodos.rejected}` : ' · 包括待提交和已拒绝的草稿'}
+            </p>
+            <Button
+              size="sm"
+              variant="light"
+              isDisabled={!draftTodos?.emptyDrafts}
+              startContent={<Trash2 aria-hidden="true" className="size-4" />}
+              onPress={handleCleanEmptyDrafts}
+            >
+              一键清理空草稿
+            </Button>
+          </div>
+        )}
 
         <div className="grid gap-3 transition-opacity duration-300" style={{ opacity: showSkeleton ? 0.6 : 1 }}>
           {showSkeleton ? (
@@ -264,7 +331,7 @@ export default function BatchesPage() {
           ) : (
             <>
               {filteredBatches.map((batch) => (
-                <BatchCard key={batch.id} batch={batch} refresh={mutate} />
+                <BatchCard key={batch.id} batch={batch} refresh={refreshBatches} />
               ))}
 
               {filteredBatches.length === 0 && (
@@ -275,7 +342,7 @@ export default function BatchesPage() {
                     </div>
                     <div>
                       <p className="font-medium text-foreground">
-                        {search ? '没有匹配的批次' : onlyMine ? '你还没有创建批次' : '暂无批次'}
+                        {search ? '没有匹配的批次' : myDrafts ? '暂无草稿待办' : myBatches ? '你还没有创建批次' : '暂无批次'}
                       </p>
                       <p className="mt-1 text-sm text-default-500">
                         {search ? '换一个词或编码再试试。' : '登录后可以创建批次并提交词条修改。'}

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { PUBLISHED_BATCH_WHERE } from '@/lib/batchPublished'
+import { DRAFT_TODO_STATUSES } from '@/lib/myDraftTodos'
 import { BatchStatus, Prisma } from '@prisma/client'
 
 // GET /api/batches - List batches
@@ -13,13 +14,16 @@ export async function GET(request: NextRequest) {
     const rawPageSize = parseInt(searchParams.get('pageSize') || '10', 10)
     const page = Number.isFinite(rawPage) ? Math.min(100, Math.max(1, rawPage)) : 1
     const pageSize = Number.isFinite(rawPageSize) ? Math.min(100, Math.max(1, rawPageSize)) : 10
-    const onlyMine = searchParams.get('onlyMine') === 'true'
+    const draftTodos = status === 'DraftTodos'
+    const onlyMine = draftTodos || searchParams.get('onlyMine') === 'true'
     const search = searchParams.get('search')?.trim() || ''
 
     const session = await getSession()
 
     const where: Prisma.BatchWhereInput = {}
-    if (status === 'Published') {
+    if (draftTodos) {
+      where.status = { in: DRAFT_TODO_STATUSES }
+    } else if (status === 'Published') {
       Object.assign(where, PUBLISHED_BATCH_WHERE)
     } else if (status && Object.values(BatchStatus).includes(status as BatchStatus)) {
       where.status = status as BatchStatus
@@ -105,7 +109,7 @@ export async function GET(request: NextRequest) {
         total,
         totalPages: Math.ceil(total / pageSize)
       }
-    })
+    }, onlyMine ? { headers: { 'Cache-Control': 'private, no-store' } } : undefined)
   } catch (error) {
     console.error('Get batches error:', error)
     return NextResponse.json({ error: '获取批次失败' }, { status: 500 })

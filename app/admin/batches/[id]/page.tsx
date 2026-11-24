@@ -16,7 +16,8 @@ import {
   ModalBody,
   ModalFooter,
 } from '@/lib/heroui-compat'
-import { AlertTriangle, Bot, CheckCircle2, RefreshCw, Search } from 'lucide-react'
+import { AlertTriangle, Bot, Check, CheckCircle2, RefreshCw, Search, X } from 'lucide-react'
+import { mutate as globalMutate } from 'swr'
 import BatchPreview from '@/app/components/BatchPreview'
 import { useAPI, apiRequest } from '@/lib/hooks/useSWR'
 import BatchPRList from '@/app/components/BatchPRList'
@@ -136,14 +137,13 @@ function ItemReviewDialog({
   const [reason, setReason] = useState('')
   const [error, setError] = useState('')
   const reasonInputRef = useRef<HTMLTextAreaElement>(null)
-  const label = decisionLabels[target.decision]
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     if (processing || outdated) return
     const trimmed = reason.trim()
     if (!trimmed) {
-      setError('请填写审核原因')
+      setError('请填写拒绝理由')
       reasonInputRef.current?.focus()
       return
     }
@@ -161,11 +161,11 @@ function ItemReviewDialog({
           onSubmit={submit}
           aria-labelledby="item-review-dialog-title"
         >
-          <ModalHeader id="item-review-dialog-title">{label}「{word}」</ModalHeader>
+          <ModalHeader id="item-review-dialog-title">拒绝「{word}」</ModalHeader>
           <ModalBody>
             <Textarea
               ref={reasonInputRef}
-              label="审核原因"
+              label="拒绝理由"
               name="reason"
               value={reason}
               onValueChange={(value: string) => {
@@ -174,6 +174,7 @@ function ItemReviewDialog({
               }}
               isRequired
               required
+              autoFocus
               maxLength={2000}
               minRows={3}
               isDisabled={processing}
@@ -188,11 +189,11 @@ function ItemReviewDialog({
             <Button type="button" variant="light" isDisabled={processing} onPress={onClose}>取消</Button>
             <Button
               type="submit"
-              color={target.decision === 'Approved' ? 'success' : 'danger'}
+              color="danger"
               isLoading={processing}
               isDisabled={processing || outdated}
             >
-              确认{label}
+              确认拒绝
             </Button>
           </ModalFooter>
         </form>
@@ -206,7 +207,7 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
   const router = useRouter()
   const [reviewTarget, setReviewTarget] = useState<ItemReviewTarget | null>(null)
   const reviewInFlight = useRef(false)
-  const [processing, setProcessing] = useState(false)
+  const [processingTarget, setProcessingTarget] = useState<number | 'batch' | null>(null)
   const [checkingTarget, setCheckingTarget] = useState<number | 'all' | null>(null)
   const [expandedReviewIds, setExpandedReviewIds] = useState<number[]>([])
   const [manualReviewResult, setManualReviewResult] = useState<{
@@ -269,40 +270,40 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
   const prevId = currentIndex > 0 ? navList[currentIndex - 1].id : null
   const nextId = currentIndex >= 0 && currentIndex < navList.length - 1 ? navList[currentIndex + 1].id : null
 
-  const openItemReview = (itemId: number, decision: ReviewDecision) => {
-    if (reviewInFlight.current || batchDataForReview?.status !== 'Submitted') return
-    setReviewTarget({
-      batchId: batchDataForReview.id,
-      itemId,
-      decision,
-      expectedContentVersion: batchDataForReview.contentVersion,
-    })
+  const refreshPreview = () => {
+    void globalMutate((key: unknown) => Array.isArray(key) && key[0] === `/api/batches/${resolvedParams.id}/preview`)
+      .catch(() => undefined)
   }
 
-  const handleItemReview = async (reason: string) => {
+  const handleItemReview = async (target: ItemReviewTarget, reason?: string) => {
+    const item = pullRequestById.get(target.itemId)
     if (
-      !reviewTarget || reviewInFlight.current ||
-      reviewTarget.batchId !== resolvedParams.id ||
+      !item || item.appliedAt || item.status === target.decision || reviewInFlight.current ||
+      target.batchId !== resolvedParams.id ||
       batchDataForReview?.status !== 'Submitted' ||
-      reviewTarget.expectedContentVersion !== batchDataForReview?.contentVersion
+      target.expectedContentVersion !== batchDataForReview.contentVersion
     ) return
     reviewInFlight.current = true
-    setProcessing(true)
+    setProcessingTarget(target.itemId)
     try {
-      const { batchId, itemId, decision, expectedContentVersion } = reviewTarget
+      const { batchId, itemId, decision, expectedContentVersion } = target
       await apiRequest(`/api/admin/batches/${batchId}/items/${itemId}/review`, {
         method: 'POST',
         body: { decision, reason, expectedContentVersion },
         withAuth: true,
       })
       setReviewTarget(null)
+      if (decision === 'Rejected' || item.status === 'Rejected') refreshPreview()
       await mutate().catch(() => undefined)
     } catch (err) {
-      if ((err as { status?: number }).status === 409) await mutate().catch(() => undefined)
+      if ((err as { status?: number }).status === 409) {
+        refreshPreview()
+        await mutate().catch(() => undefined)
+      }
       return getReviewErrorMessage(err, '词条审核失败')
     } finally {
       reviewInFlight.current = false
-      setProcessing(false)
+      setProcessingTarget(null)
     }
   }
 
@@ -312,13 +313,14 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
     openConfirm('确定提交逐条审核结果吗？已通过的词条将应用到词库。', async () => {
       if (reviewInFlight.current) return
       reviewInFlight.current = true
-      setProcessing(true)
+      setProcessingTarget('batch')
       try {
         await apiRequest(`/api/admin/batches/${id}/approve`, {
           method: 'POST',
           body: { expectedContentVersion: contentVersion },
           withAuth: true,
         })
+        refreshPreview()
         await mutate().catch(() => undefined)
         openAlert('逐条审核结果已提交', '审核完成')
       } catch (err) {
@@ -326,7 +328,7 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
         openAlert(getReviewErrorMessage(err, '提交审核失败'), '操作失败')
       } finally {
         reviewInFlight.current = false
-        setProcessing(false)
+        setProcessingTarget(null)
       }
     }, '提交审核', '提交')
   }
@@ -441,7 +443,7 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
 
   const batchData = batch.batch
   const canReview = batchData.status === 'Submitted'
-  const reviewBusy = processing || checkingTarget !== null
+  const reviewBusy = processingTarget !== null || checkingTarget !== null
   const hasConflicts = batchData.pullRequests.some(pr => pr.conflictInfo?.hasConflict ?? pr.hasConflict)
   const aiItemsByPrId = new Map((aiReview?.items ?? []).map(item => [item.prId, item]))
   const displayedPullRequests = aiReview
@@ -465,19 +467,71 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
   const reviewOutdated = !!activeReview && (
     activeReview.expectedContentVersion !== batchData.contentVersion || !canReview || !!activeItem?.appliedAt
   )
+  const lineActionItems = canReview ? displayedPullRequests.filter(pr => !pr.appliedAt).map(pr => ({
+    id: pr.id,
+    label: pr.word ?? pr.phrase?.word ?? '词条',
+    code: pr.code ?? pr.phrase?.code,
+  })) : undefined
+
+  const renderReviewActions = (itemId: number) => {
+    const item = pullRequestById.get(itemId)
+    if (!item || item.appliedAt || !canReview) return null
+    const word = item.word ?? item.phrase?.word ?? '词条'
+    const busy = reviewBusy || !!activeReview
+
+    return (
+      <div role="group" aria-label={`审核词条「${word}」`} aria-busy={processingTarget === itemId}
+        className="flex shrink-0 items-center gap-0.5">
+        {(['Approved', 'Rejected'] as const).map(decision => {
+          const selected = item.status === decision
+          const label = decisionLabels[decision]
+          const Icon = decision === 'Approved' ? Check : X
+          return (
+            <Button
+              key={decision}
+              type="button"
+              size="sm"
+              isIconOnly
+              className={`h-8 w-8 min-w-0 ${decision === 'Approved' ? 'text-success' : 'text-danger'}`}
+              color={decision === 'Rejected' && selected ? 'danger' : undefined}
+              variant={selected ? 'flat' : 'light'}
+              aria-label={`${label}词条「${word}」`}
+              aria-pressed={selected}
+              aria-disabled={busy || selected || undefined}
+              title={label}
+              onPress={() => {
+                if (busy || selected || reviewInFlight.current) return
+                const target = {
+                  batchId: batchData.id, itemId, decision, expectedContentVersion: batchData.contentVersion,
+                }
+                if (decision === 'Rejected') {
+                  setReviewTarget(target)
+                } else {
+                  void handleItemReview(target).then(failure => {
+                    if (failure) openAlert(failure, '操作失败')
+                  })
+                }
+              }}
+            >
+              <Icon className="size-4" aria-hidden="true" />
+            </Button>
+          )
+        })}
+      </div>
+    )
+  }
 
   const renderReviewFooter = (itemId: number) => {
     const item = pullRequestById.get(itemId)
     if (!item) return null
-    const canDecide = canReview && !item.appliedAt
+    const waitingOnDependencies = item.status === 'Approved' && !item.appliedAt && dependencyPendingIds.has(item.id)
     const notes = item.reviewNotes ?? []
-    if (!canDecide && !notes.length && item.status !== 'Rejected') return null
-    const word = item.word ?? item.phrase?.word ?? '词条'
+    if (!waitingOnDependencies && !notes.length && item.status !== 'Rejected') return null
 
     return (
       <div className="mt-3 space-y-3 border-t border-default-200 pt-3">
         {item.status === 'Rejected' && <Chip size="sm" color="danger" variant="flat">已拒绝</Chip>}
-        {item.status === 'Approved' && !item.appliedAt && dependencyPendingIds.has(item.id) && (
+        {waitingOnDependencies && (
           <Chip size="sm" color="warning" variant="flat">已同意，等待依赖处理</Chip>
         )}
         {notes.length > 0 && (
@@ -490,38 +544,10 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
                     {new Date(note.createdAt).toLocaleString('zh-CN')}
                   </time>
                 </div>
-                <p className="whitespace-pre-wrap break-words text-default-600">{note.reason}</p>
+                {note.reason && <p className="whitespace-pre-wrap break-words text-default-600">{note.reason}</p>}
               </li>
             ))}
           </ol>
-        )}
-        {canDecide && (
-          <div className="flex flex-wrap gap-2">
-            {item.status !== 'Approved' && (
-              <Button
-                size="sm"
-                color="success"
-                variant="flat"
-                aria-label={`同意词条「${word}」`}
-                isDisabled={reviewBusy}
-                onPress={() => openItemReview(itemId, 'Approved')}
-              >
-                同意
-              </Button>
-            )}
-            {item.status !== 'Rejected' && (
-              <Button
-                size="sm"
-                color="danger"
-                variant="flat"
-                aria-label={`拒绝词条「${word}」`}
-                isDisabled={reviewBusy}
-                onPress={() => openItemReview(itemId, 'Rejected')}
-              >
-                拒绝
-              </Button>
-            )}
-          </div>
         )}
       </div>
     )
@@ -747,7 +773,8 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
               </CardBody>
             </Card>
           )}
-          <BatchPreview batchId={resolvedParams.id} />
+          <BatchPreview batchId={resolvedParams.id} expectedContentVersion={batchData.contentVersion}
+            lineActionItems={lineActionItems} renderLineActions={renderReviewActions} />
           <section aria-labelledby="pending-item-reviews">
             <h3 id="pending-item-reviews" className="text-xl font-semibold">
               待审核 <span className="text-default-500">{pendingPullRequests.length}</span>
@@ -786,7 +813,7 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
                 color="primary"
                 className="self-start"
                 onPress={handleFinalize}
-                isLoading={processing && !activeReview}
+                isLoading={processingTarget === 'batch'}
                 isDisabled={reviewBusy || !batchData.reviewProgress?.canFinalize}
               >
                 提交审核
@@ -800,9 +827,9 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
             key={`${activeReview.batchId}:${activeReview.itemId}:${activeReview.decision}`}
             target={activeReview}
             word={activeItem.word ?? activeItem.phrase?.word ?? '词条'}
-            processing={processing}
+            processing={processingTarget === activeReview.itemId}
             outdated={reviewOutdated}
-            onSubmit={handleItemReview}
+            onSubmit={reason => handleItemReview(activeReview, reason)}
             onClose={() => {
               if (!reviewInFlight.current) setReviewTarget(null)
             }}

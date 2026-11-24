@@ -3,12 +3,13 @@ import { getSession } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { conflictDetector } from '@/lib/services/conflictDetector'
 import { rebuildBatchDependencies } from '@/lib/services/batchDependencyService'
-import { Prisma, PullRequestType } from '@prisma/client'
+import { PullRequestType } from '@prisma/client'
 import { checkIsAdmin } from '@/lib/adminAuth'
 import { getPhraseWeightValidationError, isValidPhraseType, type PhraseType } from '@/lib/constants/phraseTypes'
 import { resolvePhraseTargetBinding } from '@/lib/services/phraseTargetBinding'
 import { BatchContentLockedError, claimBatchContentMutation } from '@/lib/services/batchContentGuard'
 import { containsMiaomiaoReviewBlockDelimiter } from '@/lib/validation/phraseInput'
+import { resetVotesForProposalEdit } from '@/lib/services/pullRequestVotes'
 
 const ALLOWED_ACTIONS = ['Create', 'Change', 'Delete'] as const
 const MAX_WORD_LENGTH = 100
@@ -238,7 +239,7 @@ export async function PATCH(
     })
 
     // Update PR
-    const updateData: Prisma.PullRequestUpdateInput = {
+    const updateData = {
       word: normalizedWord,
       oldWord: action === 'Change' ? normalizedOldWord : null,
       code: normalizedCode,
@@ -260,7 +261,7 @@ export async function PATCH(
       })
       const result = await tx.pullRequest.update({
         where: { id: prId, batchId: batchIdOfPr },
-        data: updateData,
+        data: { ...updateData, ...resetVotesForProposalEdit(pr, updateData) },
         include: {
           phrase: true,
           batch: true,
