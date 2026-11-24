@@ -19,6 +19,8 @@ interface BatchCardProps {
     description: string
     status: 'Draft' | 'Submitted' | 'Approved' | 'Rejected'
     itemReviewStarted?: boolean
+    contentVersion?: number
+    rejectionRead?: boolean
     createAt: string
     creator: {
       id: number
@@ -76,6 +78,9 @@ function BatchCard({ batch, refresh }: BatchCardProps) {
 
   const hasConflicts = batch.pullRequests.some(pr => pr.hasConflict) ||
     (batch._count.pullRequests > 0 && batch.pullRequests.some(pr => pr.conflictInfo?.hasConflict))
+  const markRejectedReadVersion = batch.status === 'Rejected' && batch.rejectionRead === false
+    ? batch.contentVersion
+    : undefined
 
   return (
     <Card className="group interactive-lift overflow-hidden border-default-200/80 bg-content1/90 shadow-none hover:border-default-300 hover:bg-content1 hover:shadow-[0_18px_42px_hsl(var(--shadow-color)/0.06)]">
@@ -122,12 +127,16 @@ function BatchCard({ batch, refresh }: BatchCardProps) {
             </div>
           </div>
 
-          {!batch.itemReviewStarted && <BatchActionsDropdown
-            batchId={batch.id}
-            status={batch.status}
-            creatorId={batch.creator.id}
-            onSuccess={refresh}
-          />}
+          {!batch.itemReviewStarted || markRejectedReadVersion !== undefined ? (
+            <BatchActionsDropdown
+              batchId={batch.id}
+              status={batch.status}
+              creatorId={batch.creator.id}
+              itemReviewStarted={batch.itemReviewStarted}
+              markRejectedReadVersion={markRejectedReadVersion}
+              onSuccess={refresh}
+            />
+          ) : null}
         </div>
       </CardHeader>
 

@@ -396,6 +396,7 @@ model Batch {
   status      BatchStatus @default(Draft)
   reviewNote  String?     @db.Text
   reviewedAt  DateTime?
+  rejectionRead Boolean   @default(false)
   contentVersion Int      @default(0)
   itemReviewStarted Boolean @default(false)
 

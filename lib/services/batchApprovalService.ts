@@ -377,6 +377,7 @@ export async function approveSubmittedBatch({
         reviewNote: reviewNote || (mode === 'bot-auto' ? '本喵自动审词通过' : null),
         reviewerId: reviewerId ?? null,
         reviewedAt: new Date(),
+        rejectionRead: false,
       },
     })
 

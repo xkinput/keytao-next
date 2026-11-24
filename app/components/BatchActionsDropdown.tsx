@@ -19,6 +19,8 @@ interface BatchActionsDropdownProps {
   batchId: string
   status: 'Draft' | 'Submitted' | 'Approved' | 'Rejected'
   creatorId: number
+  itemReviewStarted?: boolean
+  markRejectedReadVersion?: number
   onSuccess?: () => void | Promise<unknown>
   size?: 'sm' | 'md' | 'lg'
   iconSize?: number
@@ -28,6 +30,8 @@ export default function BatchActionsDropdown({
   batchId,
   status,
   creatorId,
+  itemReviewStarted,
+  markRejectedReadVersion,
   onSuccess,
   size = 'sm',
   iconSize = 16
@@ -37,13 +41,32 @@ export default function BatchActionsDropdown({
   const { openConfirm } = useUIStore()
   const [isDeleting, setIsDeleting] = useState(false)
   const [isWithdrawing, setIsWithdrawing] = useState(false)
+  const [isMarkingRead, setIsMarkingRead] = useState(false)
 
   const isOwner = user?.id === creatorId
-  const canDelete = isOwner && (status === 'Draft' || status === 'Rejected')
-  const canWithdraw = isOwner && status === 'Submitted'
+  const canDelete = isOwner && !itemReviewStarted && (status === 'Draft' || status === 'Rejected')
+  const canWithdraw = isOwner && !itemReviewStarted && status === 'Submitted'
+  const canMarkRead = isOwner && status === 'Rejected' && markRejectedReadVersion !== undefined
 
-  if (!canDelete && !canWithdraw) {
+  if (!canDelete && !canWithdraw && !canMarkRead) {
     return null
+  }
+
+  const handleMarkRead = async () => {
+    setIsMarkingRead(true)
+    try {
+      await apiRequest(`/api/batches/${batchId}/rejection-read`, {
+        method: 'POST',
+        body: { expectedContentVersion: markRejectedReadVersion }
+      })
+      await onSuccess?.()
+      toast.success('已标记为已读')
+    } catch (error) {
+      if (error instanceof Error && 'status' in error && error.status === 409) await onSuccess?.()
+      toast.error(error instanceof Error ? error.message : '标记已读失败')
+    } finally {
+      setIsMarkingRead(false)
+    }
   }
 
   const handleDelete = async () => {
@@ -98,6 +121,7 @@ export default function BatchActionsDropdown({
     <Dropdown>
       <DropdownTrigger>
         <Button
+          aria-label="批次操作"
           isIconOnly
           size={size}
           variant="light"
@@ -112,13 +136,20 @@ export default function BatchActionsDropdown({
       <DropdownMenu
         aria-label="批次操作"
         onAction={(key) => {
-          if (key === 'withdraw') {
+          if (key === 'mark-read') {
+            handleMarkRead()
+          } else if (key === 'withdraw') {
             handleWithdraw()
           } else if (key === 'delete') {
             handleDelete()
           }
         }}
       >
+        {canMarkRead ? (
+          <DropdownItem key="mark-read" isDisabled={isMarkingRead}>
+            标记为已读
+          </DropdownItem>
+        ) : null}
         {canWithdraw ? (
           <DropdownItem
             key="withdraw"

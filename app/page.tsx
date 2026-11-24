@@ -25,6 +25,8 @@ interface Batch {
   id: string
   description: string
   status: 'Draft' | 'Submitted' | 'Approved' | 'Rejected'
+  contentVersion: number
+  rejectionRead?: boolean
   createAt: string
   creator: {
     id: number
@@ -308,7 +310,7 @@ export default function BatchesPage() {
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2 px-1">
             <p className="text-sm text-default-600">
               <span className="font-medium text-foreground">待办</span>
-              {draftTodos ? ` · 待提交 ${draftTodos.unsubmitted} · 已拒绝 ${draftTodos.rejected}` : ' · 包括待提交和已拒绝的草稿'}
+              {draftTodos ? ` · 待提交 ${draftTodos.unsubmitted} · 拒绝未读 ${draftTodos.rejected}` : ' · 包括待提交草稿和未读的拒绝结果'}
             </p>
             <Button
               size="sm"

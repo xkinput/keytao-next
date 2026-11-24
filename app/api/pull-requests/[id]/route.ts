@@ -38,6 +38,7 @@ export async function GET(
       include: {
         phrase: true,
         batch: {
+          omit: { rejectionRead: true },
           include: {
             sourceIssue: {
               select: {

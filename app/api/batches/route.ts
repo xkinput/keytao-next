@@ -54,6 +54,7 @@ export async function GET(request: NextRequest) {
     const [batches, total, latestSyncTask] = await Promise.all([
       prisma.batch.findMany({
         where,
+        omit: { rejectionRead: !onlyMine },
         include: {
           creator: {
             select: {

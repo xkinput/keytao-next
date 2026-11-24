@@ -3,7 +3,10 @@ import { NextRequest } from 'next/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { getSession } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
+import { approveSubmittedBatch } from '@/lib/services/batchApprovalService'
+import { recordItemReview, resubmitRejectedItem } from '@/lib/services/batchItemReview'
 import { createTestBatch, createTestUser } from '@/lib/test/helpers'
+import { POST as markRejectionRead } from '../[id]/rejection-read/route'
 import { GET as listBatches } from '../route'
 import { DELETE, GET } from './route'
 
@@ -52,6 +55,59 @@ describe('draft todos and empty draft cleanup', () => {
       otherDraft.id, nonempty.id, rejected.id, submitted.id, approved.id,
     ].sort())
     expect(await prisma.batch.findUnique({ where: { id: ownDraft.id } })).toBeNull()
+  })
+
+  it('marks a rejection read only for its owner and restores the todo on a new rejection', async () => {
+    const owner = await createTestUser()
+    const reviewer = await createTestUser()
+    const { batch, prs: [item] } = await createTestBatch(owner.id, [
+      { action: 'Create', word: '复审词', code: 'fuci' },
+    ])
+    const markRead = (expectedContentVersion: number) => markRejectionRead(
+      new NextRequest(`http://localhost/api/batches/${batch.id}/rejection-read`, {
+        method: 'POST',
+        body: JSON.stringify({ expectedContentVersion }),
+      }),
+      { params: Promise.resolve({ id: batch.id }) },
+    )
+    const reject = async (version: number) => {
+      await recordItemReview({
+        batchId: batch.id, itemId: item.id, reviewerId: reviewer.id,
+        decision: 'Rejected', reason: '依据不足', expectedContentVersion: version,
+      })
+      return (await approveSubmittedBatch({
+        batchId: batch.id, reviewerId: reviewer.id,
+        finalizeItemReview: true, expectedContentVersion: version + 1,
+      })).batch
+    }
+
+    vi.mocked(getSession).mockResolvedValue(null)
+    expect((await markRead(0)).status).toBe(401)
+    vi.mocked(getSession).mockResolvedValue({ id: owner.id, name: 'owner' })
+    expect((await markRead(0)).status).toBe(409)
+    await prisma.batch.update({ where: { id: batch.id }, data: { status: 'Submitted' } })
+    const firstRejection = await reject(0)
+    expect((await (await GET()).json()).rejected).toBe(1)
+
+    vi.mocked(getSession).mockResolvedValue({ id: reviewer.id, name: 'reviewer' })
+    expect((await markRead(firstRejection.contentVersion)).status).toBe(409)
+    vi.mocked(getSession).mockResolvedValue({ id: owner.id, name: 'owner' })
+    expect((await (await GET()).json()).rejected).toBe(1)
+    expect((await markRead(firstRejection.contentVersion)).status).toBe(200)
+    expect((await markRead(firstRejection.contentVersion)).status).toBe(200)
+    expect((await (await GET()).json()).rejected).toBe(0)
+    const ownList = await listBatches(new NextRequest('http://localhost/api/batches?status=DraftTodos'))
+    expect((await ownList.json()).batches).toMatchObject([{
+      id: batch.id, status: 'Rejected', rejectionRead: true,
+      contentVersion: firstRejection.contentVersion, updateAt: firstRejection.updateAt.toISOString(),
+    }])
+    const publicList = await listBatches(new NextRequest('http://localhost/api/batches?status=Rejected'))
+    expect((await publicList.json()).batches[0]).not.toHaveProperty('rejectionRead')
+
+    await resubmitRejectedItem(batch.id, item.id, owner.id, firstRejection.contentVersion)
+    await reject(firstRejection.contentVersion + 1)
+    expect((await markRead(firstRejection.contentVersion)).status).toBe(409)
+    expect((await (await GET()).json()).rejected).toBe(1)
   })
 
   it('keeps a draft when an in-flight writer adds its first entry while cleanup waits', async () => {

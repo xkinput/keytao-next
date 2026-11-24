@@ -1,0 +1,1 @@
+ALTER TABLE "batches" ADD COLUMN "rejectionRead" BOOLEAN NOT NULL DEFAULT false;

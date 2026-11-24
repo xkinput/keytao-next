@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server'
 import { getSession } from '@/lib/auth'
-import { DRAFT_TODO_STATUSES } from '@/lib/myDraftTodos'
 import { prisma } from '@/lib/prisma'
 
 export async function GET() {
@@ -11,7 +10,10 @@ export async function GET() {
     const [totals, emptyDrafts] = await Promise.all([
       prisma.batch.groupBy({
         by: ['status'],
-        where: { creatorId: session.id, status: { in: DRAFT_TODO_STATUSES } },
+        where: {
+          creatorId: session.id,
+          OR: [{ status: 'Draft' }, { status: 'Rejected', rejectionRead: false }],
+        },
         _count: { _all: true },
       }),
       prisma.batch.count({

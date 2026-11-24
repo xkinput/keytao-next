@@ -14,6 +14,7 @@ export async function GET(
     const { id } = await params
     const batch = await prisma.batch.findUnique({
       where: { id },
+      omit: { rejectionRead: true },
       include: {
         creator: {
           select: {
