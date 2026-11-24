@@ -46,18 +46,24 @@ export default function AdminBatchesPage() {
   }, [setFilter])
 
   const { data, error, isLoading, mutate } = useAPI<{ batches: Batch[] }>(
-    `/api/admin/batches?status=${statusFilter}`
+    `/api/admin/batches?status=${statusFilter}`,
+    { keepPreviousData: false }
   )
 
   const showSkeleton = isLoading && !data
-  const batches = data?.batches || []
+  const batches = data?.batches ?? []
 
   return (
     <div className="min-h-screen">
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="mb-6">
           <div className="flex justify-between items-center mb-4">
-            <h1 className="text-3xl font-bold">批次审核</h1>
+            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+              <h1 className="text-3xl font-bold">批次审核</h1>
+              <p role="status" className="text-small text-default-500">
+                {data && !error ? `共 ${batches.length} 条` : null}
+              </p>
+            </div>
             <Button
               isIconOnly
               variant="flat"
@@ -82,9 +88,9 @@ export default function AdminBatchesPage() {
           </RadioGroup>
         </div>
 
-        <div className="space-y-4 transition-opacity duration-300" style={{ opacity: showSkeleton ? 0.6 : 1 }}>
+        <div className="grid grid-cols-1 gap-4 transition-opacity duration-300 md:grid-cols-2" style={{ opacity: showSkeleton ? 0.6 : 1 }}>
           {error ? (
-            <Card>
+            <Card className="col-span-full">
               <CardBody className="text-center py-12">
                 <p className="text-danger mb-4">加载失败</p>
                 <p className="text-default-500">{error.message}</p>
@@ -95,7 +101,7 @@ export default function AdminBatchesPage() {
               <AdminBatchCardSkeleton key={i} />
             ))
           ) : batches.length === 0 ? (
-            <Card>
+            <Card className="col-span-full">
               <CardBody className="text-center py-12">
                 <p className="text-default-500">暂无{BATCH_STATUS_MAP[statusFilter] || statusFilter}的批次</p>
               </CardBody>
@@ -104,9 +110,9 @@ export default function AdminBatchesPage() {
             batches.map((batch) => (
               <Card key={batch.id} isPressable onPress={() => router.push(`/admin/batches/${batch.id}`)}>
                 <CardHeader className="flex justify-between items-start">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-2">
-                      <h3 className="text-lg font-semibold">
+                  <div className="min-w-0 flex-1">
+                    <div className="mb-2 flex flex-wrap items-center gap-2">
+                      <h3 className="min-w-0 wrap-anywhere text-lg font-semibold">
                         {batch.description || '未命名批次'}
                       </h3>
                       <Chip
@@ -117,8 +123,8 @@ export default function AdminBatchesPage() {
                         {BATCH_STATUS_MAP[batch.status] || batch.status}
                       </Chip>
                     </div>
-                    <div className="flex items-center gap-4 text-small text-default-500">
-                      <span>
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-small text-default-500">
+                      <span className="min-w-0 wrap-anywhere">
                         创建者: {batch.creator.nickname || batch.creator.name}
                       </span>
                       <span>

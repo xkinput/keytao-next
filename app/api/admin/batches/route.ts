@@ -32,9 +32,7 @@ export async function GET(request: NextRequest) {
           }
         }
       },
-      orderBy: {
-        createAt: 'desc'
-      }
+      orderBy: [{ createAt: 'asc' }, { id: 'asc' }]
     })
 
     return NextResponse.json({ batches })

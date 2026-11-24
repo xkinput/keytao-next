@@ -1,6 +1,6 @@
 'use client'
 
-import { type FormEvent, use, useMemo, useRef, useState } from 'react'
+import { type FormEvent, use, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   Card,
@@ -17,6 +17,7 @@ import {
   ModalFooter,
 } from '@/lib/heroui-compat'
 import { AlertTriangle, Check, RefreshCw, X } from 'lucide-react'
+import toast from 'react-hot-toast'
 import { mutate as globalMutate } from 'swr'
 import BatchPreview from '@/app/components/BatchPreview'
 import { useAPI, apiRequest } from '@/lib/hooks/useSWR'
@@ -202,16 +203,25 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
   const router = useRouter()
   const [reviewTarget, setReviewTarget] = useState<ItemReviewTarget | null>(null)
   const reviewInFlight = useRef(false)
+  const attemptedFinalization = useRef<string | null>(null)
+  const [finalizationError, setFinalizationError] = useState<{ key: string; message: string } | null>(null)
   const [processingTarget, setProcessingTarget] = useState<number | 'batch' | null>(null)
   const [checkingTarget, setCheckingTarget] = useState<number | 'all' | null>(null)
-  const { openAlert, openConfirm } = useUIStore()
+  const { openAlert } = useUIStore()
 
-  const { data: batch, error, isLoading, mutate } = useAPI<{ batch: BatchDetail }>(
+  const { data: batch, error, isLoading, isValidating, mutate } = useAPI<{ batch: BatchDetail }>(
     `/api/admin/batches/${resolvedParams.id}`,
     { withAuth: true, keepPreviousData: false }
   )
 
   const batchDataForReview = batch?.batch
+  const reviewBusy = processingTarget !== null || checkingTarget !== null
+  const activeReview = reviewTarget && reviewTarget.batchId === resolvedParams.id ? reviewTarget : null
+  const contentVersion = batchDataForReview?.contentVersion
+  const canFinalize = !error && batchDataForReview?.id === resolvedParams.id &&
+    batchDataForReview.status === 'Submitted' && batchDataForReview.reviewProgress?.canFinalize
+  const finalizationKey = `${resolvedParams.id}:${contentVersion}`
+  const displayedFinalizationError = finalizationError?.key === finalizationKey ? finalizationError.message : null
   const pullRequestById = useMemo(() => {
     return new Map((batchDataForReview?.pullRequests ?? []).map(pr => [pr.id, pr]))
   }, [batchDataForReview?.pullRequests])
@@ -226,9 +236,9 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
   const prevId = currentIndex > 0 ? navList[currentIndex - 1].id : null
   const nextId = currentIndex >= 0 && currentIndex < navList.length - 1 ? navList[currentIndex + 1].id : null
 
-  const refreshPreview = () =>
+  const refreshPreview = useCallback(() =>
     globalMutate((key: unknown) => Array.isArray(key) && key[0] === `/api/batches/${resolvedParams.id}/preview`)
-      .catch(() => undefined)
+      .catch(() => undefined), [resolvedParams.id])
 
   const handleItemReview = async (target: ItemReviewTarget, reason?: string) => {
     const item = pullRequestById.get(target.itemId)
@@ -262,31 +272,43 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
     }
   }
 
-  const handleFinalize = () => {
-    if (!batchDataForReview?.reviewProgress?.canFinalize || reviewInFlight.current) return
-    const { id, contentVersion } = batchDataForReview
-    openConfirm('确定提交逐条审核结果吗？已通过的词条将应用到词库。', async () => {
-      if (reviewInFlight.current) return
-      reviewInFlight.current = true
-      setProcessingTarget('batch')
-      try {
-        await apiRequest(`/api/admin/batches/${id}/approve`, {
-          method: 'POST',
-          body: { expectedContentVersion: contentVersion },
-          withAuth: true,
-        })
-        refreshPreview()
-        await mutate().catch(() => undefined)
-        openAlert('逐条审核结果已提交', '审核完成')
-      } catch (err) {
-        if ((err as { status?: number }).status === 409) await mutate().catch(() => undefined)
-        openAlert(getReviewErrorMessage(err, '提交审核失败'), '操作失败')
-      } finally {
-        reviewInFlight.current = false
-        setProcessingTarget(null)
+  const finalizeReview = useCallback(async () => {
+    if (!canFinalize || contentVersion === undefined || isValidating || activeReview || reviewInFlight.current) return
+
+    attemptedFinalization.current = finalizationKey
+    reviewInFlight.current = true
+    setProcessingTarget('batch')
+    setFinalizationError(null)
+    try {
+      await apiRequest(`/api/admin/batches/${resolvedParams.id}/approve`, {
+        method: 'POST',
+        body: { expectedContentVersion: contentVersion },
+        withAuth: true,
+      })
+      await Promise.allSettled([
+        mutate(),
+        refreshPreview(),
+        globalMutate((key: unknown) => Array.isArray(key) && key[0] === '/api/admin/batches?status=Submitted'),
+      ])
+      toast.success('逐条审核结果已提交')
+    } catch (err) {
+      const latest = await mutate().catch(() => undefined)
+      if (!latest || latest.batch.status === 'Submitted') {
+        const message = getReviewErrorMessage(err, '提交审核失败')
+        setFinalizationError({ key: finalizationKey, message })
+        toast.error(message)
       }
-    }, '提交审核', '提交')
-  }
+    } finally {
+      reviewInFlight.current = false
+      setProcessingTarget(null)
+    }
+  }, [activeReview, canFinalize, contentVersion, finalizationKey, isValidating, mutate, refreshPreview, resolvedParams.id])
+
+  useEffect(() => {
+    if (canFinalize && !isValidating && !reviewBusy && !activeReview && attemptedFinalization.current !== finalizationKey) {
+      void finalizeReview()
+    }
+  }, [activeReview, canFinalize, finalizationKey, finalizeReview, isValidating, reviewBusy])
 
   const handleAskMiaoAgain = async (prId?: number) => {
     if (
@@ -356,12 +378,14 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
           <CardBody className="text-center">
             <p className="text-danger mb-4">加载失败</p>
             <p className="text-default-500">{error?.message || '批次不存在'}</p>
-            <Button
-              className="mt-4"
-              onPress={() => router.push('/admin/batches')}
-            >
-              返回列表
-            </Button>
+            <div className="mt-4 flex flex-wrap justify-center gap-2">
+              <Button isLoading={isValidating} onPress={() => void mutate().catch(() => undefined)}>
+                重试加载
+              </Button>
+              <Button variant="light" onPress={() => router.push('/admin/batches')}>
+                返回列表
+              </Button>
+            </div>
           </CardBody>
         </Card>
       </div>
@@ -371,7 +395,6 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
   const batchData = batch.batch
   const canReview = batchData.status === 'Submitted'
   const canAskMiao = batchData.status !== 'Approved' && batchData.pullRequests.some(item => !item.appliedAt)
-  const reviewBusy = processingTarget !== null || checkingTarget !== null
   const hasConflicts = batchData.pullRequests.some(pr => pr.conflictInfo?.hasConflict ?? pr.hasConflict)
   const dependencyPendingIds = new Set(batchData.reviewProgress?.dependencyPendingIds)
   const pendingPullRequests: PullRequest[] = []
@@ -383,7 +406,6 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
       pendingPullRequests.push(pr)
     }
   }
-  const activeReview = reviewTarget?.batchId === batchData.id ? reviewTarget : null
   const activeItem = activeReview ? pullRequestById.get(activeReview.itemId) : undefined
   const reviewOutdated = !!activeReview && (
     activeReview.expectedContentVersion !== batchData.contentVersion || !canReview || !!activeItem?.appliedAt
@@ -497,6 +519,7 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
           <div className="flex items-center gap-2 mb-4">
             <Button
               variant="light"
+              isDisabled={processingTarget !== null}
               onPress={() => router.push('/admin/batches')}
             >
               ← 返回列表
@@ -504,7 +527,7 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
             <Button
               variant="flat"
               size="sm"
-              isDisabled={!prevId}
+              isDisabled={!prevId || processingTarget !== null}
               onPress={() => prevId && router.push(`/admin/batches/${prevId}`)}
             >
               ← 上一个
@@ -512,7 +535,7 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
             <Button
               variant="flat"
               size="sm"
-              isDisabled={!nextId}
+              isDisabled={!nextId || processingTarget !== null}
               onPress={() => nextId && router.push(`/admin/batches/${nextId}`)}
             >
               下一个 →
@@ -577,6 +600,7 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
                   <Button
                     variant="flat"
                     size="sm"
+                    isDisabled={processingTarget !== null}
                     onPress={() => router.push(`/batch/${resolvedParams.id}`)}
                   >
                     编辑批次
@@ -612,10 +636,14 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
           <Card>
             <CardBody className="gap-3">
               <div className="text-small text-default-600" aria-live="polite">
-                {batchData.reviewProgress?.canFinalize ? (
-                  <p>本批次的词条审核已完成。</p>
+                {processingTarget === 'batch' ? (
+                  <p>正在提交审核结果…</p>
+                ) : displayedFinalizationError ? (
+                  <p className="text-danger">自动提交失败。{displayedFinalizationError}</p>
+                ) : canFinalize ? (
+                  <p>词条审核已完成，即将自动提交。</p>
                 ) : (
-                  <p>全部词条都有审核结果，且相关依赖的决定一致后，即可提交。</p>
+                  <p>全部词条都有审核结果，且相关依赖的决定一致后，系统会自动提交。</p>
                 )}
                 {!!batchData.reviewProgress?.pendingCount && (
                   <p>待决定 {batchData.reviewProgress.pendingCount} 条。</p>
@@ -624,15 +652,16 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
                   <p className="text-warning">有 {batchData.reviewProgress.dependencyConflictCount} 组依赖的审核决定不一致。</p>
                 )}
               </div>
-              <Button
-                color="primary"
-                className="self-start"
-                onPress={handleFinalize}
-                isLoading={processingTarget === 'batch'}
-                isDisabled={reviewBusy || !batchData.reviewProgress?.canFinalize}
-              >
-                提交审核
-              </Button>
+              {displayedFinalizationError && canFinalize && (
+                <Button
+                  color="primary"
+                  className="self-start"
+                  onPress={() => void finalizeReview()}
+                  isDisabled={reviewBusy || isValidating || !!activeReview}
+                >
+                  重试提交
+                </Button>
+              )}
             </CardBody>
           </Card>
         )}
