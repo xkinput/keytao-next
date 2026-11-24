@@ -228,6 +228,7 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
   const [rejectionDrafts, setRejectionDrafts] = useState<Record<number, string>>({})
   const [savingReviews, setSavingReviews] = useState(false)
   const [reviewSyncError, setReviewSyncError] = useState(false)
+  const [unconfirmedReviews, setUnconfirmedReviews] = useState<{ batchId: string; itemIds: number[] } | null>(null)
   const attemptedFinalization = useRef<string | null>(null)
   const [finalizationError, setFinalizationError] = useState<{ key: string; message: string } | null>(null)
   const [finalizing, setFinalizing] = useState(false)
@@ -247,7 +248,10 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
   const canFinalize = !error && !reviewSyncError && batchDataForReview?.id === resolvedParams.id &&
     batchDataForReview.status === 'Submitted' && batchDataForReview.reviewProgress?.canFinalize
   const finalizationKey = `${resolvedParams.id}:${contentVersion}`
-  const displayedFinalizationError = finalizationError?.key === finalizationKey ? finalizationError.message : null
+  const needsReviewConfirmation = unconfirmedReviews?.batchId === resolvedParams.id
+  const displayedFinalizationError = finalizationError?.key === finalizationKey
+    ? finalizationError.message
+    : needsReviewConfirmation ? '有词条的审核决定未保存，请先核对现有结果。' : null
   const pullRequestById = useMemo(() => {
     return new Map((batchDataForReview?.pullRequests ?? []).map(pr => [pr.id, pr]))
   }, [batchDataForReview?.pullRequests])
@@ -282,7 +286,6 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
       }
     }, { revalidate: false })
     setReviewSyncError(false)
-    return latest.batch
   }
 
   const drainReviewQueue = async (queue: ItemReviewQueue) => {
@@ -317,6 +320,11 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
             }
           }, { revalidate: false })
           queue.entries.delete(itemId)
+          setUnconfirmedReviews(current => {
+            if (current?.batchId !== queue.batchId || !current.itemIds.includes(itemId)) return current
+            const itemIds = current.itemIds.filter(id => id !== itemId)
+            return itemIds.length ? { batchId: current.batchId, itemIds } : null
+          })
           setPendingDecisions(current => {
             const next = { ...current }
             delete next[itemId]
@@ -335,17 +343,16 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
       const failed = queue.entries.values().next().value
       if (failed) {
         const remaining = queue.entries.size - 1
+        const unsavedItemIds = [...queue.entries.keys()]
+        setUnconfirmedReviews(current => ({
+          batchId: queue.batchId,
+          itemIds: current?.batchId === queue.batchId
+            ? [...new Set([...current.itemIds, ...unsavedItemIds])]
+            : unsavedItemIds,
+        }))
         const message = getReviewErrorMessage(err, '审核结果保存失败')
         toast.error(`「${failed.word}」${message}${remaining ? `，另有 ${remaining} 条未保存` : ''}`)
-        const latest = await syncReviewDetails(queue.reviewerId).catch(() => {
-          setReviewSyncError(true)
-          return undefined
-        })
-        if (latest?.status === 'Submitted' && latest.reviewProgress.canFinalize) {
-          const key = `${latest.id}:${latest.contentVersion}`
-          attemptedFinalization.current = key
-          setFinalizationError({ key, message: '有词条的审核决定未保存，请先核对现有结果。' })
-        }
+        await syncReviewDetails(queue.reviewerId).catch(() => setReviewSyncError(true))
       } else {
         setReviewSyncError(true)
       }
@@ -404,6 +411,7 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
         refreshPreview(),
         globalMutate((key: unknown) => Array.isArray(key) && key[0] === '/api/admin/batches?status=Submitted'),
       ])
+      setUnconfirmedReviews(current => current?.batchId === resolvedParams.id ? null : current)
       toast.success('逐条审核结果已提交')
     } catch (err) {
       const latest = await mutate().catch(() => undefined)
@@ -419,10 +427,10 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
   }, [activeReview, canFinalize, contentVersion, finalizationKey, isValidating, mutate, refreshPreview, resolvedParams.id])
 
   useEffect(() => {
-    if (canFinalize && !isValidating && !reviewBusy && !activeReview && attemptedFinalization.current !== finalizationKey) {
+    if (canFinalize && !needsReviewConfirmation && !isValidating && !reviewBusy && !activeReview && attemptedFinalization.current !== finalizationKey) {
       void finalizeReview()
     }
-  }, [activeReview, canFinalize, finalizationKey, finalizeReview, isValidating, reviewBusy])
+  }, [activeReview, canFinalize, finalizationKey, finalizeReview, isValidating, needsReviewConfirmation, reviewBusy])
 
   const handleAskMiaoAgain = async (prId?: number) => {
     if (
@@ -799,7 +807,7 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
                   onPress={() => void finalizeReview()}
                   isDisabled={reviewBusy || isValidating || !!activeReview}
                 >
-                  重试提交
+                  {needsReviewConfirmation ? '提交当前结果' : '重试提交'}
                 </Button>
               )}
             </CardBody>
