@@ -25,6 +25,7 @@ import { useAPI, apiRequest } from '@/lib/hooks/useSWR'
 import BatchPRList from '@/app/components/BatchPRList'
 import { useUIStore } from '@/lib/store/ui'
 import { useAuthStore } from '@/lib/store/auth'
+import { usePageFilterStore } from '@/lib/store/pageFilter'
 import type { PhraseType } from '@/lib/constants/phraseTypes'
 import type { BatchAiReviewItem } from '@/lib/types/batchAiReview'
 
@@ -118,6 +119,8 @@ interface BatchReviewData {
   // Confirmed local decisions advance the version without changing the displayed diff lines.
   reviewedFromContentVersion?: number
 }
+
+type ReviewBatchList = { batches: Array<Pick<BatchDetail, 'id' | 'createAt'>> }
 
 interface QueuedItemReview extends ItemReviewTarget {
   word: string
@@ -245,6 +248,7 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
   const reviewBusy = savingReviews || finalizing || checkingTarget !== null
   const activeReview = reviewTarget && reviewTarget.batchId === resolvedParams.id ? reviewTarget : null
   const contentVersion = batchDataForReview?.contentVersion
+  const batchCreatedAt = batchDataForReview?.createAt
   const canFinalize = !error && !reviewSyncError && batchDataForReview?.id === resolvedParams.id &&
     batchDataForReview.status === 'Submitted' && batchDataForReview.reviewProgress?.canFinalize
   const finalizationKey = `${resolvedParams.id}:${contentVersion}`
@@ -257,7 +261,7 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
   }, [batchDataForReview?.pullRequests])
 
   const batchStatus = batch?.batch.status
-  const { data: batchList } = useAPI<{ batches: Array<{ id: string }> }>(
+  const { data: batchList, mutate: mutateBatchList } = useAPI<ReviewBatchList>(
     batchStatus ? `/api/admin/batches?status=${batchStatus}` : null,
     { withAuth: true }
   )
@@ -394,7 +398,9 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
   }
 
   const finalizeReview = useCallback(async () => {
-    if (!canFinalize || contentVersion === undefined || isValidating || activeReview || reviewInFlight.current || reviewQueue.current) return
+    const reviewerId = useAuthStore.getState().user?.id
+    if (!canFinalize || !batchCreatedAt || contentVersion === undefined || !reviewerId ||
+      isValidating || activeReview || reviewInFlight.current || reviewQueue.current) return
 
     attemptedFinalization.current = finalizationKey
     reviewInFlight.current = true
@@ -406,13 +412,21 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
         body: { expectedContentVersion: contentVersion },
         withAuth: true,
       })
-      await Promise.allSettled([
-        mutate(),
-        refreshPreview(),
-        globalMutate((key: unknown) => Array.isArray(key) && key[0] === '/api/admin/batches?status=Submitted'),
-      ])
+      const pending = await apiRequest<ReviewBatchList>('/api/admin/batches?status=Submitted').catch(() => undefined)
+      if (window.location.pathname !== `/admin/batches/${resolvedParams.id}` ||
+        useAuthStore.getState().user?.id !== reviewerId) return
+
+      if (pending) void mutateBatchList(pending, { revalidate: false }).catch(() => undefined)
+      const nextBatch = pending?.batches.find(candidate => candidate.createAt > batchCreatedAt ||
+        (candidate.createAt === batchCreatedAt && candidate.id > resolvedParams.id))
       setUnconfirmedReviews(current => current?.batchId === resolvedParams.id ? null : current)
       toast.success('逐条审核结果已提交')
+      if (nextBatch) {
+        router.replace(`/admin/batches/${nextBatch.id}`)
+      } else {
+        usePageFilterStore.getState().setFilter('/admin/batches', 'Submitted')
+        router.replace('/admin/batches')
+      }
     } catch (err) {
       const latest = await mutate().catch(() => undefined)
       if (!latest || latest.batch.status === 'Submitted') {
@@ -424,7 +438,7 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
       reviewInFlight.current = false
       setFinalizing(false)
     }
-  }, [activeReview, canFinalize, contentVersion, finalizationKey, isValidating, mutate, refreshPreview, resolvedParams.id])
+  }, [activeReview, batchCreatedAt, canFinalize, contentVersion, finalizationKey, isValidating, mutate, mutateBatchList, resolvedParams.id, router])
 
   useEffect(() => {
     if (canFinalize && !needsReviewConfirmation && !isValidating && !reviewBusy && !activeReview && attemptedFinalization.current !== finalizationKey) {
