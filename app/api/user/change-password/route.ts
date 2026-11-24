@@ -61,7 +61,7 @@ export async function POST(request: NextRequest) {
       id: updatedUser.id,
       name: updatedUser.name ?? session.name,
       tv: updatedUser.tokenVersion,
-    })
+    }, session.jti)
 
     return NextResponse.json({ message: '密码修改成功', token })
   } catch (error) {

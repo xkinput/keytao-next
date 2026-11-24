@@ -45,7 +45,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '账号不可用' }, { status: 401 })
     }
 
-    const newToken = await signToken({ id: user.id, name: user.name ?? payload.name, tv: user.tokenVersion })
+    const newToken = await signToken({ id: user.id, name: user.name ?? payload.name, tv: user.tokenVersion }, payload.jti)
     return NextResponse.json({ token: newToken })
   } catch (err) {
     console.error('Refresh token error:', err)

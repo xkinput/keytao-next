@@ -31,7 +31,7 @@ vi.mock('bcrypt', () => ({ default: { compare: mocks.compare, hash: mocks.hash }
 
 const TEST_SECRET = 'token-revocation-test-secret'
 vi.stubEnv('JWT_SECRET', TEST_SECRET)
-const { signToken, verifyToken, getSession } = await import('@/lib/auth')
+const { APP_WEBVIEW_SESSION_PREFIX, signToken, verifyToken, getSession } = await import('@/lib/auth')
 const { POST: logoutAll } = await import('./logout-all/route')
 const { POST: refresh } = await import('./refresh/route')
 const { POST: changePassword } = await import('../user/change-password/route')
@@ -221,6 +221,20 @@ describe('JWT session revocation', () => {
     }))
     expect(await verifyToken(oldToken)).toBeNull()
     expect(await verifyToken(body.token)).toMatchObject({ id: 1, tv: 1 })
+  })
+
+  it('preserves the App WebView session when rotating the password token', async () => {
+    const jti = `${APP_WEBVIEW_SESSION_PREFIX}4ba65e52-6063-42dd-bfab-99d0ce2db410`
+    const oldToken = await rawToken({ tv: 0, jti })
+    mocks.authorization = `Bearer ${oldToken}`
+
+    const response = await changePassword(request('user/change-password', {
+      currentPassword: 'old-password', newPassword: 'new-password',
+    }))
+
+    expect(response.status).toBe(200)
+    expect(await verifyToken(oldToken)).toBeNull()
+    expect(await verifyToken((await response.json()).token)).toMatchObject({ id: 1, tv: 1, jti })
   })
 
   it('does not revoke sessions when the current password is wrong', async () => {

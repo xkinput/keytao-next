@@ -13,6 +13,7 @@ export interface JWTPayload {
   id: number
   name: string
   tv?: number
+  jti?: string
   iat?: number
   exp?: number
 }
@@ -21,12 +22,53 @@ export class AuthInfrastructureError extends Error {
   readonly name = 'AuthInfrastructureError'
 }
 
-export async function signToken(payload: Omit<JWTPayload, 'iat' | 'exp'> & { tv: number }): Promise<string> {
-  return await new SignJWT(payload as Record<string, unknown>)
+const APP_WEBVIEW_GRANT_TYPE = 'keytao-app-webview+jwt'
+export const APP_WEBVIEW_SESSION_PREFIX = 'keytao-app-webview:'
+
+export async function signToken(
+  payload: Omit<JWTPayload, 'iat' | 'exp' | 'jti'> & { tv: number },
+  webviewSessionId?: string,
+): Promise<string> {
+  const token = new SignJWT(payload as Record<string, unknown>)
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
     .setExpirationTime('7d')
+  if (typeof webviewSessionId === 'string' && webviewSessionId.startsWith(APP_WEBVIEW_SESSION_PREFIX)) {
+    token.setJti(webviewSessionId)
+  }
+  return await token.sign(secret)
+}
+
+export async function signAppWebviewGrant(session: JWTPayload, origin: string): Promise<string> {
+  const expiresAt = Math.floor(Date.now() / 1000) + 60
+  return await new SignJWT({ tv: session.tv ?? 0 })
+    .setProtectedHeader({ alg: 'HS256', typ: APP_WEBVIEW_GRANT_TYPE })
+    .setSubject(String(session.id))
+    .setAudience(origin)
+    .setIssuedAt()
+    .setExpirationTime(Math.min(expiresAt, session.exp ?? expiresAt))
     .sign(secret)
+}
+
+export async function verifyAppWebviewGrant(grant: string, origin: string) {
+  try {
+    const { payload } = await jwtVerify(grant, secret, {
+      algorithms: ['HS256'],
+      audience: origin,
+      typ: APP_WEBVIEW_GRANT_TYPE,
+      requiredClaims: ['sub', 'iat', 'exp', 'tv'],
+    })
+    const id = Number(payload.sub)
+    const tv = payload.tv
+    if (!Number.isSafeInteger(id) || id <= 0
+      || typeof tv !== 'number' || !Number.isSafeInteger(tv) || tv < 0) {
+      return null
+    }
+    return { id, tv }
+  } catch (error) {
+    if (error instanceof errors.JOSEError) return null
+    throw error
+  }
 }
 
 export async function verifyToken(token: string): Promise<JWTPayload | null> {
