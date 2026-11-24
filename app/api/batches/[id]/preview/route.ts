@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { checkAdminPermission } from '@/lib/adminAuth'
 import { prisma } from '@/lib/prisma'
 import type { PhraseType } from '@/lib/constants/phraseTypes'
 
@@ -153,11 +154,18 @@ async function fetchTypeContext(
 
 // GET /api/batches/:id/preview - Preview batch execution result
 export async function GET(
-    _request: NextRequest,
+    request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) {
     try {
         const { id } = await params
+        const reviewing = request.nextUrl.searchParams.get('review') === '1'
+        if (reviewing) {
+            const auth = await checkAdminPermission()
+            if (!auth.authorized) {
+                return auth.response ?? NextResponse.json({ error: '权限不足' }, { status: 403 })
+            }
+        }
 
         const found = await prisma.batch.findUnique({
             where: { id },
@@ -177,7 +185,7 @@ export async function GET(
             pullRequests: found.itemReviewStarted
                 ? found.pullRequests.filter(pr => found.status === 'Approved'
                     ? Boolean(pr.appliedAt)
-                    : !pr.appliedAt && pr.status !== 'Rejected')
+                    : !pr.appliedAt && ((reviewing && found.status === 'Submitted') || pr.status !== 'Rejected'))
                 : found.pullRequests,
         }
 

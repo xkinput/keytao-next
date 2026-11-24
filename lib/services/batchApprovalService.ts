@@ -27,7 +27,6 @@ export interface ApproveSubmittedBatchOptions {
   mode?: BatchApprovalMode
   allowDelete?: boolean
   expectedContentVersion?: number
-  finalizeItemReview?: boolean
   /** User id of whoever actually performed the review (admin or bot account). */
   reviewerId?: number | null
   /**
@@ -211,17 +210,19 @@ export function orderPullRequestsForApproval<T extends { id: number }>(
 }
 
 export function classifyBatchDeleteRisk(
-  pullRequests: Array<{ action: string; word: string | null; code: string | null }>
+  pullRequests: Array<{ action: string; word: string | null; code: string | null; type?: string | null }>
 ): { hasBareDelete: boolean; bareDeletes: Array<{ word: string; code: string }> } {
   const createsByWord = new Map<string, Set<string>>()
+  const wordKey = (pr: (typeof pullRequests)[number]) => JSON.stringify([pr.word, pr.type ?? 'Phrase'])
   for (const pr of pullRequests) {
     if (pr.action !== 'Create' || !pr.word || !pr.code) {
       continue
     }
-    if (!createsByWord.has(pr.word)) {
-      createsByWord.set(pr.word, new Set())
+    const key = wordKey(pr)
+    if (!createsByWord.has(key)) {
+      createsByWord.set(key, new Set())
     }
-    createsByWord.get(pr.word)!.add(pr.code)
+    createsByWord.get(key)!.add(pr.code)
   }
 
   const bareDeletes: Array<{ word: string; code: string }> = []
@@ -229,7 +230,7 @@ export function classifyBatchDeleteRisk(
     if (pr.action !== 'Delete' || !pr.word || !pr.code) {
       continue
     }
-    const replacementCodes = createsByWord.get(pr.word)
+    const replacementCodes = createsByWord.get(wordKey(pr))
     const isCodeMove = replacementCodes && Array.from(replacementCodes).some(code => code !== pr.code)
     if (!isCodeMove) {
       bareDeletes.push({ word: pr.word, code: pr.code })
@@ -267,7 +268,6 @@ export async function approveSubmittedBatch({
   mode = 'admin',
   allowDelete = true,
   expectedContentVersion,
-  finalizeItemReview = false,
   reviewerId = null,
   blockNeedsManualReview = mode === 'bot-auto',
 }: ApproveSubmittedBatchOptions): Promise<ApproveSubmittedBatchResult> {
@@ -294,12 +294,15 @@ export async function approveSubmittedBatch({
     throw new Error('只能审核待审核状态的批次')
   }
 
-  if (!finalizeItemReview && (batch.itemReviewStarted || batch.pullRequests.some(pr => pr.appliedAt))) {
-    throw new BatchConcurrentUpdateError('该批次需要逐词审核，请在网页完成后提交')
+  const snapshotContentVersion = batch.contentVersion
+  if (expectedContentVersion !== undefined && expectedContentVersion !== snapshotContentVersion) {
+    throw new BatchConcurrentUpdateError()
   }
-
   const currentItems = batch.pullRequests.filter(pr => !pr.appliedAt)
-  const executionItems = finalizeItemReview ? currentItems.filter(pr => pr.status === 'Approved') : currentItems
+  if (currentItems.some(pr => pr.status === 'Pending')) {
+    throw new ItemReviewError('尚有未完成审核的词条，不可提交审核结果', 409)
+  }
+  const executionItems = currentItems.filter(pr => pr.status === 'Approved')
   if (!allowDelete) {
     const deleteRisk = classifyBatchDeleteRisk(executionItems)
     if (deleteRisk.hasBareDelete) {
@@ -323,19 +326,13 @@ export async function approveSubmittedBatch({
     weight: pr.weight || undefined,
   })
   const prItems = executionItems.map(toConflictItem)
-  const reviewItems = finalizeItemReview && executionItems.length !== currentItems.length
+  const reviewItems = executionItems.length !== currentItems.length
     ? currentItems.map(toConflictItem) : prItems
   const reviewedConflicts = reviewItems.length ? await checkBatchConflictsWithWeight(reviewItems) : []
-  if (finalizeItemReview) {
-    const progress = getItemReviewProgress(batch.pullRequests, reviewedConflicts)
-    if (!progress.canFinalize) throw new ItemReviewError('请完成全部词条及依赖组的审核后再提交', 409)
-  }
+  const progress = getItemReviewProgress(batch.pullRequests, reviewedConflicts)
+  if (!progress.canFinalize) throw new ItemReviewError('请完成全部词条及依赖组的审核后再提交', 409)
   const conflictResults = reviewItems === prItems ? reviewedConflicts
     : prItems.length ? await checkBatchConflictsWithWeight(prItems) : []
-  if (finalizeItemReview && conflictResults.some(({ conflict }) =>
-    conflict.hasConflict && !conflict.suggestions?.some(suggestion => suggestion.action === 'Resolved'))) {
-    throw new ItemReviewError('通过的词条存在未解决的编码冲突，请重新检查', 409)
-  }
 
   const weightMap = new Map<number, number>()
   conflictResults.forEach(result => {
@@ -350,14 +347,7 @@ export async function approveSubmittedBatch({
   // Everything above ran outside a transaction, against snapshots that may
   // already be stale by the time we execute. This is the fingerprint the
   // transaction below uses to prove the plan still matches reality.
-  const snapshotContentVersion = batch.contentVersion
-  const finalizedContentVersion = snapshotContentVersion + (finalizeItemReview ? 1 : 0)
-  if (
-    expectedContentVersion !== undefined
-    && expectedContentVersion !== snapshotContentVersion
-  ) {
-    throw new BatchConcurrentUpdateError()
-  }
+  const finalizedContentVersion = snapshotContentVersion + 1
   const approvalDigest = await buildBotWarningDigest(prisma, reviewItems, reviewedConflicts)
 
   const updated = await prisma.$transaction(async (tx) => {
@@ -372,8 +362,9 @@ export async function approveSubmittedBatch({
       },
       data: {
         status: executionOrder.length || batch.pullRequests.some(pr => pr.appliedAt) ? 'Approved' : 'Rejected',
-        ...(finalizeItemReview ? { contentVersion: { increment: 1 } } : {}),
-        ...(finalizeItemReview && executionOrder.length ? { syncTaskId: null } : {}),
+        itemReviewStarted: true,
+        contentVersion: { increment: 1 },
+        ...(executionOrder.length ? { syncTaskId: null } : {}),
         reviewNote: reviewNote || (mode === 'bot-auto' ? '本喵自动审词通过' : null),
         reviewerId: reviewerId ?? null,
         reviewedAt: new Date(),
@@ -461,6 +452,10 @@ export async function approveSubmittedBatch({
         throw new BatchApprovalTargetChangedError()
       }
       verifiedTargets.set(pr.id, target)
+    }
+    if (conflictResults.some(({ conflict }) =>
+      conflict.hasConflict && !conflict.suggestions?.some(suggestion => suggestion.action === 'Resolved'))) {
+      throw new ItemReviewError('通过的词条存在未解决的编码冲突，请重新检查', 409)
     }
 
     // ── Weight assignment ────────────────────────────────────────────────
@@ -591,7 +586,7 @@ export async function approveSubmittedBatch({
     await assertNoDuplicateWeights(tx, weightSlots, touchedPhraseIds)
 
     return tx.batch.findUniqueOrThrow({ where: { id: batchId } })
-  }, finalizeItemReview ? { timeout: 45_000 } : undefined)
+  }, { timeout: 45_000 })
 
   return { batch: updated }
 }

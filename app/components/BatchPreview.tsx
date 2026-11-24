@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useMemo, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, type ReactNode } from 'react'
 import { Chip, Spinner } from '@/lib/heroui-compat'
 import { AlertTriangle, Bot, CheckCircle2, X } from 'lucide-react'
 import { useAPI } from '@/lib/hooks/useSWR'
@@ -54,9 +54,11 @@ interface PreviewResult {
 
 interface BatchPreviewProps {
     batchId: string
+    reviewing?: boolean
     expectedContentVersion?: number
     reviewedFromContentVersion?: number
-    renderLineActions?: (itemId: number) => ReactNode
+    onNewerReviewPreview?: () => Promise<void>
+    renderLineActions?: (itemId: number, stale?: boolean) => ReactNode
     lineActionItems?: readonly { id: number; label: string; code?: string | null }[]
 }
 
@@ -429,11 +431,12 @@ function DiffView({ group, layout, renderLineActions }: {
 }
 
 export default function BatchPreview({
-    batchId, expectedContentVersion, reviewedFromContentVersion, renderLineActions, lineActionItems,
+    batchId, reviewing = false, expectedContentVersion, reviewedFromContentVersion, onNewerReviewPreview,
+    renderLineActions, lineActionItems,
 }: BatchPreviewProps) {
-    const { data, error, isLoading, mutate } = useAPI<{ contentVersion: number; preview: PreviewResult }>(
-        `/api/batches/${batchId}/preview`,
-        { keepPreviousData: false },
+    const { data, error, isLoading, isValidating, mutate } = useAPI<{ contentVersion: number; preview: PreviewResult }>(
+        `/api/batches/${batchId}/preview${reviewing ? '?review=1' : ''}`,
+        { keepPreviousData: false, revalidateOnFocus: !reviewing, revalidateOnReconnect: !reviewing },
     )
     const previewVersion = data?.contentVersion
     const compatibleReviewedVersion = previewVersion !== undefined && expectedContentVersion !== undefined &&
@@ -441,20 +444,28 @@ export default function BatchPreview({
         previewVersion >= reviewedFromContentVersion && previewVersion <= expectedContentVersion
     const outdated = Boolean(data && expectedContentVersion !== undefined &&
         previewVersion !== expectedContentVersion && !compatibleReviewedVersion)
+    const newerReviewPreview = reviewing && previewVersion !== undefined && expectedContentVersion !== undefined &&
+        previewVersion > expectedContentVersion
+
+    const refresh = useCallback(() => newerReviewPreview && onNewerReviewPreview
+        ? onNewerReviewPreview()
+        : mutate().catch(() => undefined), [newerReviewPreview, onNewerReviewPreview, mutate])
     useEffect(() => {
-        if (outdated) void mutate().catch(() => undefined)
-    }, [outdated, expectedContentVersion, previewVersion, mutate])
+        if (outdated) void refresh()
+    }, [outdated, expectedContentVersion, previewVersion, refresh])
 
-    const changes = outdated ? undefined : data?.preview.changes
+    const showPreview = Boolean(data && (reviewing || (!error && !outdated)))
+    const changes = showPreview ? data?.preview.changes : undefined
     const layouts = useMemo(() => new Map(changes?.map(group => [group, prepareDiff(group)])), [changes])
+    const lineActions = renderLineActions && ((id: number) => renderLineActions(id, reviewing && outdated))
 
-    const shownIds = new Set(error ? [] : [...layouts.values()].flatMap(layout => layout.shownIds))
-    if (!error && !outdated) {
+    const shownIds = new Set([...layouts.values()].flatMap(layout => layout.shownIds))
+    if (showPreview) {
         for (const operation of data?.preview.rejected ?? []) shownIds.add(operation.prId)
     }
-    const fallbackRows = renderLineActions && lineActionItems?.flatMap(item => {
+    const fallbackRows = lineActions && lineActionItems?.flatMap(item => {
         if (shownIds.has(item.id)) return []
-        const actions = renderLineActions(item.id)
+        const actions = lineActions(item.id)
         if (!actions) return []
         return [(
             <li key={item.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-1.5">
@@ -470,7 +481,7 @@ export default function BatchPreview({
         </div>
     ) : null
 
-    if (isLoading) {
+    if (isLoading && !data) {
         return (
             <div className="flex justify-center items-center py-12">
                 <Spinner size="lg" label="加载预览..." />
@@ -478,17 +489,18 @@ export default function BatchPreview({
         )
     }
 
-    if (error || !data) {
+    if (!data || (error && !reviewing)) {
         return (
             <div className="text-center py-8">
                 <p className="text-danger">加载预览失败</p>
                 <p className="text-default-500 text-small">{error?.message || '未知错误'}</p>
+                {reviewing && <button type="button" className="mt-2 underline" onClick={() => void refresh()}>重试加载差异</button>}
                 {fallback}
             </div>
         )
     }
 
-    if (outdated) {
+    if (outdated && !reviewing) {
         return (
             <div className="py-4">
                 <p role="status" className="text-center text-small text-default-500">批次有更新，正在重新加载差异</p>
@@ -500,12 +512,19 @@ export default function BatchPreview({
     const { preview } = data
     const { changes: previewChanges, rejected = [], summary } = preview
     const total = summary.added + summary.modified + summary.deleted
+    const reviewPreviewStatus = reviewing && outdated && !isValidating && (
+        <div className="fixed bottom-4 right-4 z-30 flex items-center gap-2 rounded-lg border border-default-200 bg-content1 px-3 py-2 text-small shadow-sm">
+            <span role="status">{error ? '差异更新失败' : '待同步最新批次'}</span>
+            <button type="button" className="underline" onClick={() => void refresh()}>重试加载差异</button>
+        </div>
+    )
 
     if (total === 0 && rejected.length === 0) {
         return (
             <div className="text-center py-8">
                 <p className="text-default-500">暂无修改预览</p>
                 {fallback}
+                {reviewPreviewStatus}
             </div>
         )
     }
@@ -555,7 +574,7 @@ export default function BatchPreview({
                                 </div>
                                 {groups.map((group, i) => (
                                     <DiffView key={group.codes.join(',') || i} group={group} layout={layouts.get(group)!}
-                                        renderLineActions={renderLineActions} />
+                                        renderLineActions={lineActions} />
                                 ))}
                             </div>
                         ))}
@@ -591,7 +610,7 @@ export default function BatchPreview({
                                             </>
                                         )}
                                         <code className="bg-default-200 text-default-700 px-2 py-0.5 rounded text-small font-mono">{op.code}</code>
-                                        {renderLineActions && <div className="ml-auto">{renderLineActions(op.prId)}</div>}
+                                        {lineActions && <div className="ml-auto">{lineActions(op.prId)}</div>}
                                     </div>
                                     <div className="p-2 bg-warning-50 dark:bg-warning-100/10 rounded border-l-2 border-warning">
                                         <p className="text-small text-warning-700 dark:text-warning-600">
@@ -605,6 +624,7 @@ export default function BatchPreview({
                 </div>
             )}
             {fallback}
+            {reviewPreviewStatus}
         </div>
     )
 }

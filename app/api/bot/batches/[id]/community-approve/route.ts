@@ -10,6 +10,7 @@ import {
   type BotUserBasic,
 } from '@/lib/botUserResolver'
 import { PhraseWeightConflictError } from '@/lib/services/phraseWeightLock'
+import { ItemReviewError } from '@/lib/services/batchItemReview'
 import {
   approveSubmittedBatch,
   BatchApprovalTargetChangedError,
@@ -94,7 +95,7 @@ export async function POST(
       include: {
         pullRequests: {
           orderBy: { createAt: 'asc' },
-          select: { action: true, word: true, code: true, needsManualReview: true },
+          select: { action: true, word: true, code: true, type: true, needsManualReview: true },
         },
       },
     })
@@ -165,7 +166,7 @@ export async function POST(
       voters: voterNames,
     })
   } catch (error) {
-    if (error instanceof BatchConcurrentUpdateError) {
+    if (error instanceof BatchConcurrentUpdateError || error instanceof ItemReviewError) {
       return NextResponse.json({ success: false, message: error.message }, { status: error.status })
     }
     if (error instanceof BatchApprovalTargetChangedError) {

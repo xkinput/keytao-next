@@ -35,7 +35,6 @@ export async function POST(
       allowDelete: true,
       reviewerId: authCheck.session?.id ?? null,
       expectedContentVersion: version,
-      finalizeItemReview: true,
     })
 
     return NextResponse.json({ batch: result.batch })

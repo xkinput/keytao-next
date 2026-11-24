@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireVerifiedBotUser } from '@/lib/botUserAuth'
 import { checkBatchConflictsWithWeight } from '@/lib/services/batchConflictService'
+import { classifyBatchDeleteRisk } from '@/lib/services/batchApprovalService'
+import { ItemReviewError } from '@/lib/services/batchItemReview'
 import { buildBatchSubmitWarnings } from '@/lib/services/batchSubmitWarnings'
 import { buildSkippedCandidateSlotWarnings } from '@/lib/services/batchSkippedCodeWarnings'
 import { buildPriorityOrderWarnings } from '@/lib/services/batchPriorityOrderWarnings'
@@ -45,6 +47,7 @@ export async function POST(
       'platform', 'platformId', 'confirmed', 'expectedContentVersion', 'previewOnly',
       'expectedWarningDigest',
       'expectedSnapshotDigest',
+      'approvedItemIds',
     ])
     if (Object.keys(body).some(key => !allowedKeys.has(key))) {
       return NextResponse.json({ success: false, message: '请求包含不支持的字段' }, { status: 400 })
@@ -57,6 +60,7 @@ export async function POST(
     const expectedContentVersion = payload.expectedContentVersion
     const expectedWarningDigest = payload.expectedWarningDigest
     const expectedSnapshotDigest = payload.expectedSnapshotDigest
+    const proposedApprovals = payload.approvedItemIds === undefined ? [] : payload.approvedItemIds
     if (
       typeof platform !== 'string'
       || typeof platformId !== 'string'
@@ -70,6 +74,15 @@ export async function POST(
         { status: 400 }
       )
     }
+    if (
+      !Array.isArray(proposedApprovals)
+      || !proposedApprovals.every(id => Number.isInteger(id) && id > 0 && id <= 2147483647)
+      || new Set(proposedApprovals).size !== proposedApprovals.length
+    ) {
+      return NextResponse.json({ success: false, message: 'approvedItemIds 必须是无重复的词条 ID 列表' }, { status: 400 })
+    }
+    const approvedItemIds: number[] = [...proposedApprovals].sort((a, b) => a - b)
+    const approvalIds = new Set(approvedItemIds)
     if (confirmed && previewOnly) {
       return NextResponse.json(
         { success: false, message: 'confirmed 与 previewOnly 不能同时为 true' },
@@ -152,6 +165,15 @@ export async function POST(
         { status: 400 }
       )
     }
+    const approvedItems = batch.pullRequests.filter(pr => approvalIds.has(pr.id))
+    if (
+      approvedItems.length !== approvedItemIds.length
+      || approvedItems.some(pr => !pr.word || !pr.code || pr.needsManualReview || pr.appliedAt
+        || (pr.status !== 'Pending' && !(batch.status === 'Rejected' && pr.status === 'Rejected')))
+      || classifyBatchDeleteRisk(approvedItems).hasBareDelete
+    ) {
+      return NextResponse.json({ success: false, message: '指定自动通过的词条不属于此批次或需要人工审核' }, { status: 409 })
+    }
 
     // Validate batch for conflicts
     const items = batch.pullRequests.map((pr) => ({
@@ -198,6 +220,7 @@ export async function POST(
       pullRequests: batch.pullRequests,
       warnings,
       warningDigest,
+      ...(approvedItemIds.length ? { approvedItemIds } : {}),
     })
 
     if (previewOnly || !confirmed) {
@@ -210,6 +233,7 @@ export async function POST(
           contentVersion: batch.contentVersion,
           warningDigest,
           snapshotDigest,
+          approvedItemIds,
           message: warnings.length > 0
             ? `批次中存在 ${warnings.length} 个警告，确认后可继续提交`
             : '批次检查完成，请确认后提交',
@@ -246,6 +270,7 @@ export async function POST(
         pullRequests: lockedPullRequests,
         warnings,
         warningDigest: lockedDigest,
+        ...(approvedItemIds.length ? { approvedItemIds } : {}),
       })
       if (lockedSnapshotDigest !== expectedSnapshotDigest) return { count: 0 }
       const result = await tx.batch.updateMany({
@@ -260,10 +285,33 @@ export async function POST(
           status: 'Submitted',
           reviewNote: null,
           contentVersion: { increment: 1 },
+          ...(approvedItemIds.length ? { itemReviewStarted: true } : {}),
         },
       })
       if (result.count === 1 && batch.status === 'Rejected') {
         await tx.pullRequest.updateMany({ where: { batchId: id, status: 'Rejected' }, data: { status: 'Pending' } })
+      }
+      if (result.count === 1 && approvedItemIds.length) {
+        const approved = await tx.pullRequest.updateMany({
+          where: {
+            batchId: id,
+            id: { in: approvedItemIds },
+            status: 'Pending',
+            appliedAt: null,
+            needsManualReview: false,
+          },
+          data: { status: 'Approved' },
+        })
+        if (approved.count !== approvedItemIds.length) {
+          throw new ItemReviewError('自动审核的词条已变化，请重新确认', 409)
+        }
+        await tx.pullRequestReviewNote.createMany({
+          data: approvedItemIds.map(pullRequestId => ({
+            pullRequestId,
+            decision: 'Approved',
+            reason: '本喵根据逐条审核记录标记通过',
+          })),
+        })
       }
       return result
     })
@@ -278,6 +326,7 @@ export async function POST(
     return NextResponse.json({
       success: true,
       message: '批次已提交审核',
+      approvedItemIds,
       batch: {
         id,
         status: 'Submitted',
@@ -285,6 +334,9 @@ export async function POST(
       }
     })
   } catch (error: unknown) {
+    if (error instanceof ItemReviewError) {
+      return NextResponse.json({ success: false, message: error.message }, { status: error.status })
+    }
     console.error('[Bot API] Submit error:', error)
 
     // Handle specific error types

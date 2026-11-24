@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { NextRequest } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 
 vi.mock('@/lib/prisma', () => ({
     prisma: {
@@ -23,20 +23,23 @@ vi.mock('@/lib/auth', () => ({
 
 vi.mock('@/lib/adminAuth', () => ({
     checkIsAdmin: vi.fn(),
+    checkAdminPermission: vi.fn(),
 }))
 
 const { prisma } = await import('@/lib/prisma')
 const { checkBatchConflictsWithWeight } = await import('@/lib/services/batchConflictService')
 const { getSession } = await import('@/lib/auth')
-const { checkIsAdmin } = await import('@/lib/adminAuth')
+const { checkAdminPermission, checkIsAdmin } = await import('@/lib/adminAuth')
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const mockPrisma = prisma as any
 const mockCheckBatchConflictsWithWeight = vi.mocked(checkBatchConflictsWithWeight)
 const mockGetSession = vi.mocked(getSession)
 const mockCheckIsAdmin = vi.mocked(checkIsAdmin)
+const mockCheckAdminPermission = vi.mocked(checkAdminPermission)
 
 const request = new NextRequest('http://localhost/api/batches/batch-1/preview')
+const adminRequest = new NextRequest(`${request.url}?review=1`)
 
 function draftChangeBatch() {
     return {
@@ -124,5 +127,43 @@ describe('GET /api/batches/[id]/preview', () => {
             before: { word: '温暖', code: 'woi', type: 'Phrase' },
             after: { word: '为啥', code: 'woi', type: 'Phrase' },
         })
+    })
+
+    it('keeps rejected proposal lines in the administrator review preview only', async () => {
+        const batch = draftChangeBatch()
+        mockPrisma.batch.findUnique.mockResolvedValue({
+            ...batch,
+            status: 'Submitted',
+            itemReviewStarted: true,
+            pullRequests: batch.pullRequests.map(pr => ({ ...pr, status: 'Rejected', appliedAt: null })),
+        })
+        mockCheckAdminPermission.mockResolvedValue({
+            authorized: true,
+            user: {
+                id: 1, name: 'rea', roles: [], status: 'ENABLE', signUpType: 'USERNAME', tokenVersion: 0,
+                createAt: new Date(0), updateAt: new Date(0), nickname: null, phone: null,
+                password: null, email: null, qqId: null, telegramId: null,
+            },
+            session: { id: 1, name: 'rea' },
+        })
+        const { GET } = await import('./route')
+        const context = { params: Promise.resolve({ id: 'batch-1' }) }
+        const publicPreview = await (await GET(request, context)).json()
+        const adminPreview = await (await GET(adminRequest, context)).json()
+
+        expect(publicPreview.preview.changes).toEqual([])
+        expect(adminPreview.preview.changes[0].diffs[0].itemId).toBe(1550)
+    })
+
+    it('checks admin access before reading the review preview', async () => {
+        mockCheckAdminPermission.mockResolvedValue({
+            authorized: false,
+            response: NextResponse.json({ error: '权限不足' }, { status: 403 }),
+        })
+        const { GET } = await import('./route')
+        const result = await GET(adminRequest, { params: Promise.resolve({ id: 'batch-1' }) })
+
+        expect(result.status).toBe(403)
+        expect(mockPrisma.batch.findUnique).not.toHaveBeenCalled()
     })
 })

@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import useSWR from 'swr'
+import useSWR, { type SWRConfiguration } from 'swr'
 import { useAuthStore } from '@/lib/store/auth'
 
 interface FetcherOptions {
@@ -89,7 +89,8 @@ const fetcher = async (url: string, token: string | null, options?: FetcherOptio
 
 export function useAPI<T = unknown>(
   url: string | null,
-  options?: FetcherOptions & { refreshInterval?: number; keepPreviousData?: boolean }
+  options?: FetcherOptions & Pick<SWRConfiguration,
+    'refreshInterval' | 'keepPreviousData' | 'revalidateOnFocus' | 'revalidateOnReconnect'>
 ) {
   const token = useAuthStore((state) => state.token)
   const withAuth = options?.withAuth ?? true
@@ -105,8 +106,8 @@ export function useAPI<T = unknown>(
     ([url, token]: [string, string | null]) => fetcher(url, token, options),
     {
       refreshInterval: options?.refreshInterval ?? 0,
-      revalidateOnFocus: true,
-      revalidateOnReconnect: true,
+      revalidateOnFocus: options?.revalidateOnFocus ?? true,
+      revalidateOnReconnect: options?.revalidateOnReconnect ?? true,
       revalidateIfStale: true,
       dedupingInterval: 2000,
       keepPreviousData: options?.keepPreviousData ?? true,

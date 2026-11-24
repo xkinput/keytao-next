@@ -18,6 +18,7 @@ import {
 
 async function submit(batchId: string) {
   await prisma.batch.update({ where: { id: batchId }, data: { status: 'Submitted' } })
+  await prisma.pullRequest.updateMany({ where: { batchId }, data: { status: 'Approved' } })
 }
 
 describe('approveSubmittedBatch transactional guarantees', () => {
@@ -457,8 +458,8 @@ describe('approveSubmittedBatch transactional guarantees', () => {
     })
 
     it('never assigns the same weight twice when two batches create at one code', async () => {
-      // Different batches are different rows, so the batch-row serialisation
-      // cannot help here — the (code, type) advisory lock is what does.
+      // The second approval may have to refresh after the first changes its
+      // dictionary snapshot. Both writes must use distinct weights.
       await seedPhrases(testUserId, [
         { word: '占位词', code: 'tongma', type: 'Phrase', weight: 100 },
       ])
@@ -476,7 +477,13 @@ describe('approveSubmittedBatch transactional guarantees', () => {
       const results = await Promise.allSettled(
         batches.map(b => approveSubmittedBatch({ batchId: b.batch.id, reviewerId: testUserId }))
       )
-      expect(results.every(r => r.status === 'fulfilled')).toBe(true)
+      expect(results.some(result => result.status === 'fulfilled')).toBe(true)
+      for (const [index, result] of results.entries()) {
+        if (result.status === 'rejected') {
+          expect(result.reason).toBeInstanceOf(BatchConcurrentUpdateError)
+          await approveSubmittedBatch({ batchId: batches[index].batch.id, reviewerId: testUserId })
+        }
+      }
 
       const created = await prisma.phrase.findMany({
         where: { code: 'tongma', type: 'Phrase' },

@@ -77,7 +77,7 @@ describe('draft todos and empty draft cleanup', () => {
       })
       return (await approveSubmittedBatch({
         batchId: batch.id, reviewerId: reviewer.id,
-        finalizeItemReview: true, expectedContentVersion: version + 1,
+        expectedContentVersion: version + 1,
       })).batch
     }
 

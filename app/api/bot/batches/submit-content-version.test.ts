@@ -50,6 +50,7 @@ function draftBatch() {
     pullRequests: [{
       id: 1,
       action: 'Create',
+      status: 'Pending',
       word: '测试',
       oldWord: null,
       code: 'ces',
@@ -96,6 +97,25 @@ describe('bot batch submit content snapshot', () => {
       batchId: 'batch-1',
       contentVersion: 7,
     })
+    expect(mockUpdateMany).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    { id: 2 },
+    { id: 1, needsManualReview: true },
+    { id: 1, action: 'Delete' },
+    { id: 1, appliedAt: new Date() },
+  ])('refuses decisions for ineligible entries (%j)', async overrides => {
+    const batch = draftBatch()
+    batch.pullRequests[0] = { ...batch.pullRequests[0], ...overrides }
+    mockFindUnique.mockResolvedValue(batch)
+    const { POST } = await import('./[id]/submit/route')
+    const res = await POST(request({
+      platform: 'qq', platformId: 'u-1', expectedContentVersion: 7, approvedItemIds: [1],
+    }), { params: Promise.resolve({ id: 'batch-1' }) })
+
+    expect(res.status).toBe(409)
+    expect(mockCheckBatchConflicts).not.toHaveBeenCalled()
     expect(mockUpdateMany).not.toHaveBeenCalled()
   })
 
