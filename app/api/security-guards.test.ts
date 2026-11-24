@@ -394,7 +394,7 @@ describe('API abuse guards', () => {
     expect(res.status).toBe(200)
   })
 
-  it('shows public AI review details after a batch is submitted', async () => {
+  it('keeps public per-item AI review details without generating the batch summary', async () => {
     mockGetSession.mockResolvedValue(null)
     mockPrisma.batch.findUnique.mockResolvedValue({
       id: 'batch-1',
@@ -409,6 +409,8 @@ describe('API abuse guards', () => {
         type: 'Phrase',
         weight: 100,
         remark: '喵喵审词：读音 an bo；来源 汉典',
+        hasConflict: true,
+        conflictReason: '编码冲突',
         phrase: null,
         conflicts: [],
         dependencies: [],
@@ -421,8 +423,10 @@ describe('API abuse guards', () => {
     const data = await res.json()
 
     expect(res.status).toBe(200)
-    expect(data.batch.aiReview.riskCounts.botReviewed).toBe(1)
+    expect(data.batch).not.toHaveProperty('aiReview')
+    expect(data.batch.pullRequests[0].aiReview.status).toBe('manual_review')
     expect(data.batch.pullRequests[0].aiReview.reviewRecord.summary).toContain('喵喵审词')
+    expect(mockPrisma.phrase.findMany).not.toHaveBeenCalled()
     expect(mockCheckAdminPermission).not.toHaveBeenCalled()
   })
 

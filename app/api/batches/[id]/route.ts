@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { checkIsAdmin } from '@/lib/adminAuth'
-import { buildBatchAiReview } from '@/lib/services/batchAiReviewService'
+import { buildBatchAiReviewItems } from '@/lib/services/batchAiReviewService'
 import { getItemReviewProgress, reviewNotesInclude } from '@/lib/services/batchItemReview'
 
 // GET /api/batches/:id - Get batch details
@@ -129,15 +129,9 @@ export async function GET(
     })
 
     const shouldExposeAiReview = batch.status !== 'Draft' && enrichedPRs.length > 0
-    const aiReview = shouldExposeAiReview
-      ? await buildBatchAiReview({
-        id: batch.id,
-        status: batch.status,
-        pullRequests: enrichedPRs,
-      })
-      : undefined
-    const aiItemsByPrId = new Map(aiReview?.items.map(item => [item.prId, item]) ?? [])
-    const reviewedPRs = aiReview
+    const aiItems = shouldExposeAiReview ? await buildBatchAiReviewItems(enrichedPRs) : []
+    const aiItemsByPrId = new Map(aiItems.map(item => [item.prId, item]))
+    const reviewedPRs = aiItems.length
       ? enrichedPRs.map(pr => ({
         ...pr,
         aiReview: aiItemsByPrId.get(pr.id),
@@ -148,7 +142,6 @@ export async function GET(
       batch: {
         ...batch,
         pullRequests: reviewedPRs,
-        aiReview,
         reviewProgress: getItemReviewProgress(batch.pullRequests, conflictResults),
       }
     })

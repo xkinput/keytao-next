@@ -861,16 +861,26 @@ function buildHeadline(items: BatchAiReviewItem[]): string {
   return `${passCount} 项已通过喵喵检查，可进入批准流程。`
 }
 
-export async function buildBatchAiReview(batch: BuildBatchAiReviewInput): Promise<BatchAiReviewResult> {
-  const moves = detectCodeMoves(batch.pullRequests)
-  const referenceWords = batch.pullRequests
+async function prepareBatchAiReviewItems(pullRequests: ReviewPullRequest[]) {
+  const moves = detectCodeMoves(pullRequests)
+  const referenceWords = pullRequests
     .filter(pr => pr.action === 'Create' || pr.action === 'Change')
     .map(getWord)
   const referenceByWord = await loadReferenceWordData(referenceWords)
 
   // Reference agreement enriches evidence only. It is intentionally not an
   // approval gate and cannot lower existing manual-review or warning status.
-  const items = batch.pullRequests.map(pr => buildReviewItem(pr, moves, referenceByWord))
+  const items = pullRequests.map(pr => buildReviewItem(pr, moves, referenceByWord))
+  return { items, moves, referenceByWord }
+}
+
+export async function buildBatchAiReviewItems(pullRequests: ReviewPullRequest[]): Promise<BatchAiReviewItem[]> {
+  const { items } = await prepareBatchAiReviewItems(pullRequests)
+  return items
+}
+
+export async function buildBatchAiReview(batch: BuildBatchAiReviewInput): Promise<BatchAiReviewResult> {
+  const { items, moves, referenceByWord } = await prepareBatchAiReviewItems(batch.pullRequests)
   const codeChains = await buildCodeChains(batch.pullRequests, moves, referenceByWord)
 
   const manualReview = items.filter(item => item.status === 'manual_review').length

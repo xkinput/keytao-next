@@ -15,7 +15,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/lib/auth', () => ({ getSession: mocks.getSession }))
 vi.mock('@/lib/adminAuth', () => ({ checkIsAdmin: mocks.checkIsAdmin }))
 vi.mock('@/lib/prisma', () => ({ prisma: mocks.prisma }))
-vi.mock('@/lib/services/batchAiReviewService', () => ({ buildBatchAiReview: vi.fn() }))
+vi.mock('@/lib/services/batchAiReviewService', () => ({ buildBatchAiReviewItems: vi.fn() }))
 
 beforeEach(() => {
   vi.clearAllMocks()
