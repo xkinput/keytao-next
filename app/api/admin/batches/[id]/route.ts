@@ -16,7 +16,7 @@ export async function GET(
 
     const { id } = await params
 
-    const batch = await getAdminBatchReviewDetail(id)
+    const batch = await getAdminBatchReviewDetail(id, true)
 
     if (!batch) {
       return NextResponse.json({ error: '批次不存在' }, { status: 404 })

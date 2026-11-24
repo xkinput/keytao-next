@@ -10,6 +10,21 @@ import type { BatchItemVoteChoice, BatchItemVoteSummary } from '@/app/api/batche
 
 export type { BatchItemVoteSummary }
 
+export function BatchItemVoteCounts({ likes, dislikes }: Pick<BatchItemVoteSummary, 'likes' | 'dislikes'>) {
+  return (
+    <span className="inline-flex items-center gap-2 whitespace-nowrap text-xs tabular-nums">
+      <span className="inline-flex items-center gap-1" title="赞同">
+        <ThumbsUp aria-hidden="true" className="size-3.5" />
+        <span className="sr-only">赞同 </span>{likes}
+      </span>
+      <span className="inline-flex items-center gap-1" title="反对">
+        <ThumbsDown aria-hidden="true" className="size-3.5" />
+        <span className="sr-only">反对 </span>{dislikes}
+      </span>
+    </span>
+  )
+}
+
 export function useBatchItemVotes(batchId: string, contentVersion?: number) {
   const { data, error, isLoading, mutate } = useAPI<{ contentVersion: number; votes: BatchItemVoteSummary[] }>(
     contentVersion === undefined ? null : `/api/batches/${batchId}/votes?version=${contentVersion}`,
@@ -65,18 +80,7 @@ export default function BatchItemVote({
   }
 
   if (!viewerId || !vote.canVote || !isOpen) {
-    return (
-      <span className="inline-flex items-center gap-2 whitespace-nowrap text-xs">
-        <span className="inline-flex items-center gap-1">
-          <ThumbsUp aria-hidden="true" className="size-3.5" />
-          <span className="sr-only">赞同 </span>{vote.likes}
-        </span>
-        <span className="inline-flex items-center gap-1">
-          <ThumbsDown aria-hidden="true" className="size-3.5" />
-          <span className="sr-only">反对 </span>{vote.dislikes}
-        </span>
-      </span>
-    )
+    return <BatchItemVoteCounts likes={vote.likes} dislikes={vote.dislikes} />
   }
 
   return (

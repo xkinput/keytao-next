@@ -1,7 +1,7 @@
 import { prisma } from '@/lib/prisma'
 import { getItemReviewProgress, reviewNotesInclude } from '@/lib/services/batchItemReview'
 
-export async function getAdminBatchReviewDetail(id: string) {
+export async function getAdminBatchReviewDetail(id: string, includeVoteCounts = false) {
   const batch = await prisma.batch.findUnique({
     where: { id },
     include: {
@@ -23,6 +23,7 @@ export async function getAdminBatchReviewDetail(id: string) {
           phrase: true,
           conflicts: true,
           reviewNotes: reviewNotesInclude,
+          _count: includeVoteCounts ? { select: { likedBy: true, dislikedBy: true } } : undefined,
           dependencies: {
             include: {
               dependsOn: {

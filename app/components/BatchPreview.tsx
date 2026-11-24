@@ -55,6 +55,7 @@ interface PreviewResult {
 interface BatchPreviewProps {
     batchId: string
     expectedContentVersion?: number
+    reviewedFromContentVersion?: number
     renderLineActions?: (itemId: number) => ReactNode
     lineActionItems?: readonly { id: number; label: string; code?: string | null }[]
 }
@@ -427,13 +428,19 @@ function DiffView({ group, layout, renderLineActions }: {
     )
 }
 
-export default function BatchPreview({ batchId, expectedContentVersion, renderLineActions, lineActionItems }: BatchPreviewProps) {
+export default function BatchPreview({
+    batchId, expectedContentVersion, reviewedFromContentVersion, renderLineActions, lineActionItems,
+}: BatchPreviewProps) {
     const { data, error, isLoading, mutate } = useAPI<{ contentVersion: number; preview: PreviewResult }>(
         `/api/batches/${batchId}/preview`,
         { keepPreviousData: false },
     )
     const previewVersion = data?.contentVersion
-    const outdated = Boolean(data && expectedContentVersion !== undefined && previewVersion !== expectedContentVersion)
+    const compatibleReviewedVersion = previewVersion !== undefined && expectedContentVersion !== undefined &&
+        reviewedFromContentVersion !== undefined &&
+        previewVersion >= reviewedFromContentVersion && previewVersion <= expectedContentVersion
+    const outdated = Boolean(data && expectedContentVersion !== undefined &&
+        previewVersion !== expectedContentVersion && !compatibleReviewedVersion)
     useEffect(() => {
         if (outdated) void mutate().catch(() => undefined)
     }, [outdated, expectedContentVersion, previewVersion, mutate])
