@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { checkAdminPermission } from '@/lib/adminAuth'
 import { getAdminBatchReviewDetail } from '@/lib/services/adminBatchReviewDetailService'
+import { buildMiaomiaoItemReviewContext } from '@/lib/services/batchAiReviewService'
 import {
-  requestMiaomiaoBatchReview,
+  requestMiaomiaoItemReview,
   StaleBatchReviewError,
   writeMiaomiaoBatchReview,
 } from '@/lib/services/batchBotReviewService'
@@ -22,11 +23,22 @@ export async function POST(
 
     const { id } = await params
     const body = await request.json().catch(() => ({}))
-    const prId = Number(body?.prId)
+    const prId: unknown = body?.prId
+    if (prId !== undefined && (typeof prId !== 'number' || !Number.isInteger(prId) || prId < 1 || prId > 2147483647)) {
+      return NextResponse.json({ error: '词条 ID 无效' }, { status: 400 })
+    }
     const batch = await getAdminBatchReviewDetail(id)
 
     if (!batch) {
       return NextResponse.json({ error: '批次不存在' }, { status: 404 })
+    }
+    if (batch.status === 'Approved') {
+      return NextResponse.json({ error: '已通过的批次不能重新复审' }, { status: 409 })
+    }
+    const pullRequests = batch.pullRequests.filter(pr => !pr.appliedAt)
+    const targets = prId === undefined ? pullRequests : pullRequests.filter(pr => pr.id === prId)
+    if (!targets.length) {
+      return NextResponse.json({ error: '未找到可复审的词条' }, { status: 404 })
     }
     // Capture the content version the reviewer is about to look at. The remote
     // review can take minutes; binding the result to this version means a
@@ -34,27 +46,23 @@ export async function POST(
     // applying a result to a batch that has moved on.
     const reviewedContentVersion = batch.contentVersion
 
-    const aiReview = await requestMiaomiaoBatchReview({
-      batch,
-      localReview: batch.aiReview,
-      focusPrId: Number.isInteger(prId) ? prId : undefined,
+    const aiReview = await requestMiaomiaoItemReview({
+      batch: { id: batch.id, status: batch.status, description: batch.description, pullRequests },
+      localReview: await buildMiaomiaoItemReviewContext(pullRequests),
+      focusPrId: prId,
     })
+    const reviewedIds = new Set(aiReview.items.map(item => item.prId))
+    if (targets.some(pr => !reviewedIds.has(pr.id))) {
+      return NextResponse.json({ error: '喵喵未返回完整的逐词复审结果' }, { status: 502 })
+    }
 
     await writeMiaomiaoBatchReview({
-      batch,
+      batch: { ...batch, pullRequests: targets },
       aiReview,
       expectedContentVersion: reviewedContentVersion,
     })
 
-    const focusItem = Number.isInteger(prId)
-      ? aiReview.items.find(item => item.prId === prId)
-      : undefined
-
-    return NextResponse.json({
-      aiReview,
-      focusItem,
-      reviewedAt: aiReview.generatedAt,
-    })
+    return NextResponse.json({ reviewedAt: aiReview.generatedAt })
   } catch (error) {
     if (error instanceof StaleBatchReviewError) {
       return NextResponse.json({ error: error.message }, { status: error.status })

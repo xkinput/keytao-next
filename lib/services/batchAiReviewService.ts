@@ -531,8 +531,8 @@ function referenceFields(
 
 async function buildCodeChains(
   prs: ReviewPullRequest[],
-  moves: MovePair[],
   referenceByWord: Map<string, ReferenceWordData>,
+  moves?: MovePair[],
 ): Promise<BatchAiReviewCodeChain[]> {
   const affectedGroups = new Map<string, { type: PhraseType; code: string }>()
   for (const pr of prs) {
@@ -659,7 +659,7 @@ async function buildCodeChains(
       type: group.type,
       before,
       after,
-      recommendations: buildChainRecommendations(group.code, before, after, moves),
+      recommendations: moves ? buildChainRecommendations(group.code, before, after, moves) : [],
     })
   }
 
@@ -879,9 +879,16 @@ export async function buildBatchAiReviewItems(pullRequests: ReviewPullRequest[])
   return items
 }
 
+export async function buildMiaomiaoItemReviewContext(pullRequests: ReviewPullRequest[]) {
+  const { items, referenceByWord } = await prepareBatchAiReviewItems(pullRequests)
+  const codeChains = (await buildCodeChains(pullRequests, referenceByWord))
+    .map(({ code, type, before, after }) => ({ code, type, before, after }))
+  return { items, codeChains }
+}
+
 export async function buildBatchAiReview(batch: BuildBatchAiReviewInput): Promise<BatchAiReviewResult> {
   const { items, moves, referenceByWord } = await prepareBatchAiReviewItems(batch.pullRequests)
-  const codeChains = await buildCodeChains(batch.pullRequests, moves, referenceByWord)
+  const codeChains = await buildCodeChains(batch.pullRequests, referenceByWord, moves)
 
   const manualReview = items.filter(item => item.status === 'manual_review').length
   const attention = items.filter(item => item.status === 'attention').length

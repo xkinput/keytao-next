@@ -1,5 +1,4 @@
 import { prisma } from '@/lib/prisma'
-import { buildBatchAiReview } from '@/lib/services/batchAiReviewService'
 import { getItemReviewProgress, reviewNotesInclude } from '@/lib/services/batchItemReview'
 
 export async function getAdminBatchReviewDetail(id: string) {
@@ -121,22 +120,10 @@ export async function getAdminBatchReviewDetail(id: string) {
     }
   })
 
-  const aiReview = await buildBatchAiReview({
-    id: batch.id,
-    status: batch.status,
-    pullRequests: enrichedPRs,
-  })
-  const aiItemsByPrId = new Map(aiReview.items.map(item => [item.prId, item]))
-  const reviewedPRs = enrichedPRs.map(pr => ({
-    ...pr,
-    aiReview: aiItemsByPrId.get(pr.id),
-  }))
-
   const progress = getItemReviewProgress(batch.pullRequests, conflictResults)
   return {
     ...batch,
-    pullRequests: reviewedPRs,
-    aiReview,
+    pullRequests: enrichedPRs,
     reviewProgress: { ...progress, canFinalize: batch.status === 'Submitted' && progress.canFinalize },
   }
 }

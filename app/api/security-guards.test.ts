@@ -493,7 +493,7 @@ describe('API abuse guards', () => {
     expect(mockPrisma.batch.findUnique).not.toHaveBeenCalled()
   })
 
-  it('lets admins manually rerun AI batch review', async () => {
+  it('keeps admin AI reviews at the item level', async () => {
     const botAiReview = {
       reviewer: 'Miaomiao',
       generatedAt: '2026-07-05T05:00:00.000Z',
@@ -539,6 +539,7 @@ describe('API abuse guards', () => {
     mockPrisma.batch.findUnique.mockResolvedValue({
       id: 'batch-1',
       status: 'Submitted',
+      contentVersion: 12,
       creator: { id: 1, name: 'rea', nickname: 'Rea' },
       sourceIssue: null,
       pullRequests: [{
@@ -555,6 +556,20 @@ describe('API abuse guards', () => {
         dependencies: [],
       }],
     })
+    const { GET } = await import('./admin/batches/[id]/route')
+    const detail = await GET(
+      new NextRequest('http://localhost/api/admin/batches/batch-1'),
+      { params: Promise.resolve({ id: 'batch-1' }) },
+    )
+    const detailBody = await detail?.json()
+    expect(detail?.status).toBe(200)
+    expect(detailBody.batch).not.toHaveProperty('aiReview')
+    expect(detailBody.batch.pullRequests[0].aiReview.referenceEvidence).toMatchObject({
+      dictionaryPresent: true,
+      frequency: 88,
+    })
+    expect(mockPrisma.phrase.findMany).not.toHaveBeenCalled()
+
     const { POST } = await import('./admin/batches/[id]/ai-review/route')
 
     const res = await POST(
@@ -564,16 +579,18 @@ describe('API abuse guards', () => {
     const data = await res?.json()
 
     expect(res?.status).toBe(200)
-    expect(data?.aiReview.riskCounts.botReviewed).toBe(1)
-    expect(data?.focusItem).toMatchObject({ prId: 1 })
-    expect(data?.focusItem.referenceEvidence).toMatchObject({
-      dictionaryPresent: true,
-      frequency: 88,
-    })
+    expect(data).toEqual({ reviewedAt: botAiReview.generatedAt })
     expect(fetch).toHaveBeenCalledWith(
       'http://localhost:8080/api/keytao/batches/review',
       expect.objectContaining({ method: 'POST' })
     )
+    const sent = vi.mocked(fetch).mock.calls[0]?.[1]
+    expect(new Headers(sent?.headers).get('X-KeyTao-Review-Output')).toBe('items')
+    const body = JSON.parse(String(sent?.body))
+    expect(body.focus_pr_id).toBe(1)
+    expect(Object.keys(body.local_review).sort()).toEqual(['codeChains', 'items'])
+    expect(body.local_review.codeChains[0]).toMatchObject({ code: 'xfblo', type: 'Phrase' })
+    expect(body.local_review.codeChains[0]).not.toHaveProperty('recommendations')
     expect(mockPrisma.pullRequest.updateMany).toHaveBeenCalledWith(expect.objectContaining({
       where: { id: 1, batchId: 'batch-1' },
       data: expect.objectContaining({
@@ -585,9 +602,9 @@ describe('API abuse guards', () => {
     expect(persistedRemark).toContain('来源：汉典')
     expect(persistedRemark).not.toContain('证据：读音：an bo')
     expect(persistedRemark).not.toContain('证据：来源：汉典')
-    expect(mockPrisma.batch.update).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: 'batch-1' },
-      data: { reviewNote: '本喵复审：可通过。' },
+    expect(mockPrisma.batch.update).not.toHaveBeenCalled()
+    expect(mockPrisma.batch.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ id: 'batch-1', contentVersion: 12 }),
     }))
     expect(mockCheckBatchConflictsWithWeight).toHaveBeenCalled()
   })

@@ -1,5 +1,5 @@
 import { prisma } from '@/lib/prisma'
-import type { BatchAiReviewItem, BatchAiReviewResult } from '@/lib/types/batchAiReview'
+import type { BatchAiReviewCodeChain, BatchAiReviewItem, BatchAiReviewResult } from '@/lib/types/batchAiReview'
 import { getMiaomiaoSemanticEvidence, stripMiaomiaoReviewRemark } from './miaomiaoReviewRemark'
 import {
   BatchContentLockedError,
@@ -19,32 +19,43 @@ type ReviewableBatch = {
   }>
 }
 
-type BotBatchReviewResponse = {
+type BotBatchReviewResponse<T> = {
   success?: boolean
   message?: string
   detail?: string
   warning?: string
-  aiReview?: BatchAiReviewResult
+  aiReview?: T
 }
 
 const MIAOMIAO_REVIEW_TIMEOUT_MS = 290_000
+type ItemReviewResult = Pick<BatchAiReviewResult, 'items' | 'generatedAt'>
+
+interface BotReviewInput {
+  batch: ReviewableBatch
+  localReview: {
+    items: BatchAiReviewItem[]
+    codeChains: Omit<BatchAiReviewCodeChain, 'recommendations'>[]
+  }
+  focusPrId?: number
+  timeoutMs?: number
+}
 
 export interface MiaomiaoBatchReviewResponse {
   aiReview: BatchAiReviewResult
   warning?: string
 }
 
-function bindLocalReferenceEvidence(
-  botReview: BatchAiReviewResult,
-  localReview: BatchAiReviewResult,
-): BatchAiReviewResult {
-  const localItems = new Map(localReview.items.map(item => [item.prId, item]))
-  const items = botReview.items.map((item) => {
+function bindLocalItemEvidence(
+  botItems: BatchAiReviewItem[],
+  localItems: BatchAiReviewItem[],
+): BatchAiReviewItem[] {
+  const localItemsById = new Map(localItems.map(item => [item.prId, item]))
+  return botItems.map((item) => {
     // Trusted offline evidence is server-owned advisory input. Never accept a
     // bot-authored replacement, and never use agreement to lower review gates.
     const botItem = { ...item }
     delete botItem.referenceEvidence
-    const localItem = localItems.get(item.prId)
+    const localItem = localItemsById.get(item.prId)
     const referenceEvidence = localItem?.referenceEvidence
     if (!referenceEvidence) return botItem
 
@@ -67,6 +78,13 @@ function bindLocalReferenceEvidence(
       referenceEvidence,
     }
   })
+}
+
+function bindLocalReferenceEvidence(
+  botReview: BatchAiReviewResult,
+  localReview: BatchAiReviewResult,
+): BatchAiReviewResult {
+  const items = bindLocalItemEvidence(botReview.items, localReview.items)
   const pass = items.filter(item => item.status === 'pass').length
   const attention = items.filter(item => item.status === 'attention').length
   const manualReview = items.filter(item => item.status === 'manual_review').length
@@ -112,12 +130,7 @@ function botReviewHeaders(): HeadersInit {
   }
 }
 
-export async function requestMiaomiaoBatchReviewDetailed(input: {
-  batch: ReviewableBatch
-  localReview: BatchAiReviewResult
-  focusPrId?: number
-  timeoutMs?: number
-}): Promise<MiaomiaoBatchReviewResponse> {
+async function fetchMiaomiaoReview<T extends ItemReviewResult>(input: BotReviewInput, itemsOnly = false) {
   const controller = new AbortController()
   const timeoutMs = Math.min(
     Math.max(input.timeoutMs ?? MIAOMIAO_REVIEW_TIMEOUT_MS, 10_000),
@@ -126,9 +139,11 @@ export async function requestMiaomiaoBatchReviewDetailed(input: {
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
   let response: Response
   try {
+    const headers = new Headers(botReviewHeaders())
+    if (itemsOnly) headers.set('X-KeyTao-Review-Output', 'items')
     response = await fetch(botReviewUrl(), {
       method: 'POST',
-      headers: botReviewHeaders(),
+      headers,
       body: JSON.stringify({
         batch: input.batch,
         local_review: input.localReview,
@@ -145,25 +160,28 @@ export async function requestMiaomiaoBatchReviewDetailed(input: {
     clearTimeout(timeoutId)
   }
 
-  const data = await response.json().catch(() => ({})) as BotBatchReviewResponse
-  if (!response.ok || data.success === false || !data.aiReview) {
+  const data = await response.json().catch(() => ({})) as BotBatchReviewResponse<T>
+  if (!response.ok || data.success === false || !Array.isArray(data.aiReview?.items)
+    || typeof data.aiReview.generatedAt !== 'string') {
     throw new Error(data.detail || data.message || `喵喵复审服务返回 ${response.status}`)
   }
 
   return {
-    aiReview: bindLocalReferenceEvidence(data.aiReview, input.localReview),
+    aiReview: data.aiReview,
     warning: data.warning,
   }
 }
 
-export async function requestMiaomiaoBatchReview(input: {
-  batch: ReviewableBatch
-  localReview: BatchAiReviewResult
-  focusPrId?: number
-  timeoutMs?: number
-}): Promise<BatchAiReviewResult> {
-  const result = await requestMiaomiaoBatchReviewDetailed(input)
-  return result.aiReview
+export async function requestMiaomiaoBatchReviewDetailed(
+  input: BotReviewInput & { localReview: BatchAiReviewResult },
+): Promise<MiaomiaoBatchReviewResponse> {
+  const result = await fetchMiaomiaoReview<BatchAiReviewResult>(input)
+  return { ...result, aiReview: bindLocalReferenceEvidence(result.aiReview, input.localReview) }
+}
+
+export async function requestMiaomiaoItemReview(input: BotReviewInput): Promise<ItemReviewResult> {
+  const { aiReview } = await fetchMiaomiaoReview<ItemReviewResult>(input, true)
+  return { generatedAt: aiReview.generatedAt, items: bindLocalItemEvidence(aiReview.items, input.localReview.items) }
 }
 
 function statusText(item: BatchAiReviewItem): string {
@@ -217,7 +235,7 @@ export class StaleBatchReviewError extends Error {
 
 export async function writeMiaomiaoBatchReview(input: {
   batch: ReviewableBatch
-  aiReview: BatchAiReviewResult
+  aiReview: ItemReviewResult
   expectedContentVersion: number
 }): Promise<void> {
   const reviewByPrId = new Map(input.aiReview.items.map(item => [item.prId, item]))
@@ -255,17 +273,6 @@ export async function writeMiaomiaoBatchReview(input: {
         data: { remark: update.remark },
       })
       if (updated.count !== 1) throw new StaleBatchReviewError()
-    }
-
-    const fresh = await tx.batch.findUniqueOrThrow({
-      where: { id: input.batch.id },
-      select: { status: true },
-    })
-    if (fresh.status === 'Submitted') {
-      await tx.batch.update({
-        where: { id: input.batch.id },
-        data: { reviewNote: input.aiReview.suggestedReviewNote },
-      })
     }
   })
 }
