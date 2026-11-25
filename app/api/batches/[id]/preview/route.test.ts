@@ -129,6 +129,26 @@ describe('GET /api/batches/[id]/preview', () => {
         })
     })
 
+    it('projects the bound same-code live replacement as a single candidate', async () => {
+        const batch = draftChangeBatch()
+        const [change] = batch.pullRequests
+        const live = { code: change.code, type: change.type, status: 'Finish', remark: null }
+        mockPrisma.batch.findUnique.mockResolvedValue({ ...batch, pullRequests: [{ ...change, targetPhraseId: 2, weight: 108 }] })
+        mockPrisma.phrase.findMany.mockResolvedValueOnce([
+            { ...live, id: 1, word: change.oldWord, weight: 100 },
+            { ...live, id: 2, word: change.word, weight: 105 },
+        ])
+
+        const { GET } = await import('./route')
+        const response = await GET(request, { params: Promise.resolve({ id: 'batch-1' }) })
+        expect(response.status).toBe(200)
+        expect(mockCheckBatchConflictsWithWeight).toHaveBeenCalledWith([expect.objectContaining({ oldWord: change.word })])
+        expect(await response.json()).toMatchObject({ preview: { rejected: [], changes: [{
+            diffs: [{ itemId: change.id, type: 'modify', before: { word: change.word, weight: 105 } }],
+            after: [{ word: change.oldWord, weight: 100 }, { word: change.word, weight: 108 }],
+        }] } })
+    })
+
     it('keeps rejected proposal lines in the administrator review preview only', async () => {
         const batch = draftChangeBatch()
         mockPrisma.batch.findUnique.mockResolvedValue({

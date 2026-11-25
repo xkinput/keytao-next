@@ -13,9 +13,10 @@ import { resetVotesForProposalEdit } from './pullRequestVotes'
 export { planChainOrder } from './suggestedOrderPlanner'
 
 const CHAIN_CHANGED = '编码链已变化，请重新复审'
-const MANUAL_ORDER_ERRORS = {
-  order_requires_current_phrase_change: '只能调整本批词条，现有词条位置不能移动',
-  no_weight_gap: '没有可用的权重间隔',
+const ORDER_ERRORS = {
+  order_requires_current_phrase_change: '需要移动已上线词条，请改为新增一条修改',
+  no_weight_gap: '相邻权重没有空位，请先调整相邻词条',
+  duplicate_word: '同码链中有重复词，请先合并重复项',
 }
 
 export async function applySuggestedOrder(input: {
@@ -36,7 +37,7 @@ export type ChainReorderTarget = { beforePrId: number | null; afterWord?: never 
 
 export function moveChainEntry(after: ChainEntry[], movedPrId: number, target: ChainReorderTarget): string[] {
   const moved = after.find(entry => writablePrId(entry) === movedPrId)
-  if (!moved) throw new BatchContentLockedError(MANUAL_ORDER_ERRORS.order_requires_current_phrase_change)
+  if (!moved) throw new BatchContentLockedError(ORDER_ERRORS.order_requires_current_phrase_change)
   const destination = target.beforePrId !== undefined ? target.beforePrId : target.afterWord
   if (destination === movedPrId) return after.map(entry => entry.word)
   const remaining = after.filter(entry => entry !== moved)
@@ -107,11 +108,11 @@ async function applyChainOrder(tx: Prisma.TransactionClient, input: {
   if (input.remarkMode === 'restamp' && (!chain || computeChainDigest(chain.after) !== input.chainDigest)) {
     throw new BatchContentLockedError(CHAIN_CHANGED)
   }
-  if (!chain) throw new BatchContentLockedError(MANUAL_ORDER_ERRORS.order_requires_current_phrase_change)
+  if (!chain) throw new BatchContentLockedError(ORDER_ERRORS.order_requires_current_phrase_change)
   const orderedWords = typeof order.orderedWords === 'function' ? order.orderedWords(chain.after) : order.orderedWords
   const nullCreateIds = new Set(activeRows.filter(row => row.action === 'Create' && row.weight === null).map(row => row.id))
   const plan = planChainOrder(chain.after, orderedWords, chain.originalWeights, nullCreateIds)
-  if ('error' in plan) throw new BatchContentLockedError(remarkMode === 'manual' ? MANUAL_ORDER_ERRORS[plan.error] : plan.error)
+  if ('error' in plan) throw new BatchContentLockedError(ORDER_ERRORS[plan.error])
   if (chain.after.every((entry, index) => entry.word === orderedWords[index])) {
     throw new BatchContentLockedError(remarkMode === 'manual' ? '词条顺序未变化' : CHAIN_CHANGED)
   }

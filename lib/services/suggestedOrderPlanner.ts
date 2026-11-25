@@ -12,7 +12,7 @@ export function compareChainEntry(a: ChainEntry, b: ChainEntry): number {
 }
 
 type WeightUpdate = { prId: number; weight: number }
-type OrderPlan = { updates: WeightUpdate[] } | { error: 'order_requires_current_phrase_change' | 'no_weight_gap' }
+type OrderPlan = { updates: WeightUpdate[] } | { error: 'order_requires_current_phrase_change' | 'no_weight_gap' | 'duplicate_word' }
 
 export function writablePrId(entry: ChainEntry) {
   return entry.source === 'draft' && (entry.action === 'Create' || entry.action === 'Change')
@@ -81,8 +81,10 @@ export function planChainOrder(
   nullCreateIds: ReadonlySet<number> = new Set(),
 ): OrderPlan {
   const byWord = new Map(after.map(entry => [entry.word, entry]))
-  if (orderedWords.length !== after.length || byWord.size !== after.length ||
-      new Set(orderedWords).size !== after.length || orderedWords.some(word => !byWord.has(word))) {
+  if (byWord.size !== after.length || new Set(orderedWords).size !== orderedWords.length) {
+    return { error: 'duplicate_word' }
+  }
+  if (orderedWords.length !== after.length || orderedWords.some(word => !byWord.has(word))) {
     return { error: 'order_requires_current_phrase_change' }
   }
 

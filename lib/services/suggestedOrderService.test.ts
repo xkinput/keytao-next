@@ -28,7 +28,7 @@ describe('moveChainEntry', () => {
   })
 
   it('rejects foreign or non-writable sources and targets identified through the wrong field', () => {
-    expect(() => moveChainEntry(after, 99, { beforePrId: 1 })).toThrow('只能调整本批词条')
+    expect(() => moveChainEntry(after, 99, { beforePrId: 1 })).toThrow('需要移动已上线词条，请改为新增一条修改')
     expect(() => moveChainEntry(after, 1, { beforePrId: 99 })).toThrow('编码链已变化')
     expect(() => moveChainEntry(after, 1, { afterWord: '丁' })).toThrow('编码链已变化')
   })
@@ -116,6 +116,13 @@ describe('planChainOrder', () => {
       .toEqual({ error: 'order_requires_current_phrase_change' })
     expect(planChainOrder([current('甲', 2147483647), draft('乙', null, 1)], ['甲', '乙']))
       .toEqual({ error: 'no_weight_gap' })
+  })
+
+  it('reports repeated words in the chain or requested order separately', () => {
+    expect(planChainOrder([current('甲', 105), draft('甲', 110, 1)], ['甲', '甲']))
+      .toEqual({ error: 'duplicate_word' })
+    expect(planChainOrder([current('甲', 105), draft('乙', 110, 1)], ['甲', '甲']))
+      .toEqual({ error: 'duplicate_word' })
   })
 })
 

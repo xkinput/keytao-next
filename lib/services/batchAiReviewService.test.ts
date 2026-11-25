@@ -14,7 +14,7 @@ vi.mock('@/lib/prisma', () => ({
   },
 }))
 
-import { buildBatchAiReview } from './batchAiReviewService'
+import { buildBatchAiReview, buildSuggestedOrderChains } from './batchAiReviewService'
 
 async function reviewRemark(remark: string) {
   const review = await buildBatchAiReview({
@@ -38,6 +38,21 @@ beforeEach(() => {
   mocks.phraseFindMany.mockResolvedValue([])
   mocks.pronunciationReferenceFindMany.mockResolvedValue([])
   mocks.corpusFrequencyFindMany.mockResolvedValue([])
+})
+
+it.each([1, 2, undefined])('uses the same-word live row only when the Change is bound to it (%s)', async targetPhraseId => {
+  const slot = { code: 'pxci', type: 'Phrase' } as const
+  mocks.phraseFindMany.mockResolvedValueOnce([
+    { ...slot, id: 1, word: '甲', weight: 110 },
+    { ...slot, id: 2, word: '乙', weight: 115 },
+  ])
+  const [chain] = await buildSuggestedOrderChains([
+    { ...slot, action: 'Change', id: 10, oldWord: '甲', word: '乙', targetPhraseId, weight: null, remark: null },
+  ], [slot])
+  expect(chain.originalWeights).toEqual([110, 115])
+  expect(chain.after).toMatchObject(targetPhraseId === 2
+    ? [{ word: '甲', weight: 110, source: 'current' }, { word: '乙', weight: 115, source: 'draft', prId: 10 }]
+    : [{ word: '乙', weight: 110, source: 'draft', prId: 10 }, { word: '乙', weight: 115, source: 'current' }])
 })
 
 describe('batch AI review reference evidence', () => {

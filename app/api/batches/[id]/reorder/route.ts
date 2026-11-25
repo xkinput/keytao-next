@@ -16,10 +16,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   try {
     const admin = await checkAdminPermission()
     if (!admin.authorized && admin.response?.status !== 403) {
-      return admin.response?.status === 503 ? admin.response : NextResponse.json({ error: '权限不足' }, { status: 403 })
+      return admin.response?.status === 401 || admin.response?.status === 503
+        ? admin.response : NextResponse.json({ error: '权限不足' }, { status: 403 })
     }
     const session = admin.authorized ? admin.session : await getSession()
-    if (!session) return NextResponse.json({ error: '权限不足' }, { status: 403 })
+    if (!session) return NextResponse.json({ error: '未登录' }, { status: 401 })
 
     const { id: batchId } = await params
     const body = await request.json().catch(() => null)

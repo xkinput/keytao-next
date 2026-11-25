@@ -41,6 +41,15 @@ export function createPhraseTargetFingerprint(target: PhraseTargetSnapshot): str
   return createCanonicalDigest(toPhraseTargetSnapshot(target))
 }
 
+export function findBoundLiveReplacement<T extends Pick<PhraseTargetSnapshot, 'word' | 'code' | 'type'>>(
+  liveById: ReadonlyMap<number, T>,
+  change: { targetPhraseId?: number | null; phraseId?: number | null; word: string | null; code: string | null; type?: string | null },
+): T | undefined {
+  const id = change.targetPhraseId ?? change.phraseId
+  const target = id == null ? undefined : liveById.get(id)
+  if (target?.word === change.word && target.code === change.code && target.type === (change.type || 'Phrase')) return target
+}
+
 type PhraseTargetReader = Pick<Prisma.TransactionClient['phrase'], 'findFirst'>
 
 export class PhraseTargetBindingError extends Error {

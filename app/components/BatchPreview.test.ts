@@ -138,6 +138,47 @@ it.each([false, true])('keeps a single visible card through review and refresh (
     }
 })
 
+it.each([false, true])('shows the review summary on click and focus (public: %s)', async publicView => {
+    const summary = '已核对用法'
+    const reason = '请补充来源'
+    const item: ItemReviewDetailItem = {
+        id: 1, word: '欧标', code: null, weight: 100, status: 'Rejected', action: 'Create',
+        remark: null, hasConflict: false, conflictReason: null, dependencies: [],
+        aiReview: { prId: 1, status: 'pass', severity: 'success', title: summary, reasons: [], suggestions: [],
+            reviewRecord: { reviewedBy: 'Miaomiao', source: 'bot-remark', summary, sources: [], evidence: [] } },
+        reviewNotes: [{ id: 1, decision: 'Rejected', reason, createdAt: '2026-11-25T00:00:00Z' }],
+    }
+    const container = document.body.appendChild(document.createElement('div'))
+    const root = createRoot(container)
+    const tooltip = () => document.body.querySelector('[role="tooltip"]')
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+    try {
+        await act(() => root.render(createElement(ItemReviewDetail, {
+            item, publicView, waitingOnDependencies: false, actions: null, rejectedReason: reason,
+        })))
+        const trigger = [...container.querySelectorAll('button')].find(button => button.textContent === '喵审')!
+        const detail = container.querySelector<HTMLButtonElement>('button[aria-label="词条详情"]')!
+        expect(tooltip()).toBeNull()
+        await act(() => trigger.click())
+        expect(tooltip()?.textContent).toBe(summary)
+        await act(() => detail.focus())
+        expect(tooltip()).toBeNull()
+        await act(() => trigger.focus())
+        expect(tooltip()?.textContent).toBe(summary)
+
+        if (publicView) {
+            expect(container.textContent?.match(/请补充来源/g)).toHaveLength(1)
+            expect(container.querySelector('p')?.closest('[hidden]')).toBeNull()
+            await act(() => detail.click())
+            expect(container.textContent?.match(/请补充来源/g)).toHaveLength(1)
+        }
+    } finally {
+        await act(() => root.unmount())
+        container.remove()
+        vi.unstubAllGlobals()
+    }
+})
+
 it('matches actions to the operation behind each changed line and keeps an unmapped operation available', () => {
     const before = [phrase('删除词', 'aa'), phrase('修改前', 'bb'), phrase('原候选', 'cc')]
     const after = [phrase('修改后', 'bb'), phrase('新增词', 'cc', 50), before[2]]
@@ -303,37 +344,47 @@ it('keeps public items and votes in place through refresh and resubmission, then
     }
 })
 
-it('reorders by keyboard and same-code drop while keeping the other code in its frozen row', async () => {
+it.each([true, false])('matches a fresh Delete layout and preserves other rows after reorder (refreshed: %s)', async hasFreshRun => {
     const moved = phrase('先候选', 'aa', 104)
     const live = phrase('现有候选', 'aa', 105)
+    const deleted = phrase('待删候选', 'aa', 107)
     const next = phrase('后候选', 'aa', 108)
     const other = phrase('其他编码', 'bb')
     const movedAfter = { ...moved, weight: 106 }
     const preview = (contentVersion: number, after: typeof moved[]) => ({
         contentVersion,
         preview: {
-            changes: [{ phraseType: 'Phrase', codes: ['aa', 'bb'], before: [live], after, beforeStartLine: 1,
-                diffs: [moved, next, other].map((p, index) => ({ type: 'add', itemId: index + 1, phrase: p })),
+            changes: [{ phraseType: 'Phrase', codes: ['aa', 'bb'], before: [live, deleted], after, beforeStartLine: 1,
+                diffs: [...[moved, next, other].map((p, index) => ({ type: 'add', itemId: index + 1, phrase: p })),
+                    { type: 'remove', itemId: 4, phrase: deleted }],
             }],
-            rejected: [], summary: { added: 3, modified: 0, deleted: 0, rejected: 0 },
+            rejected: [], summary: { added: 3, modified: 0, deleted: 1, rejected: 0 },
         },
     })
     const initial = preview(1, [moved, live, next, other])
     const refreshed = preview(2, [live, movedAfter, next, { ...other, word: '外部更新' }])
-    const mutate = vi.fn().mockResolvedValue(refreshed)
+    const mutate = vi.fn().mockResolvedValue(hasFreshRun ? refreshed : undefined)
     const container = document.createElement('div')
     const root = createRoot(container)
     let complete!: (result: { contentVersion: number; items: { id: number; weight: number }[] }) => void
     const onReorder = vi.fn(() => new Promise<Parameters<typeof complete>[0]>(resolve => { complete = resolve }))
     const draw = (version: number) => act(() => root.render(createElement(BatchPreview, {
         batchId: 'batch-1', expectedContentVersion: version, onReorder, canReorderItem: () => true,
-        reviewItems: [1, 2, 3].map(id => ({ id })),
+        reviewItems: [1, 2, 3, 4].map(id => ({ id })),
         renderReviewItem: id => createElement('span', { 'data-item': id }),
     })))
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
     try {
+        const runRows = (parent: HTMLElement) => [...parent.querySelectorAll<HTMLElement>('.whitespace-pre')]
+            .filter(node => node.title.endsWith(' aa')).map(node => node.textContent?.trim())
+        useAPI.mockReturnValue({ data: preview(2, [live, movedAfter, next, other]), mutate })
+        const fresh = document.createElement('div')
+        fresh.innerHTML = render([], 2)
+        expect(runRows(fresh).map(row => row?.split(/\s+/)[0])).toEqual([live.word, deleted.word, moved.word, next.word])
+
         useAPI.mockReturnValue({ data: initial, mutate })
         await draw(1)
+        expect(runRows(container).map(row => row?.split(/\s+/)[0])).toEqual([moved.word, live.word, deleted.word, next.word])
         const otherNode = container.querySelector('[data-item="3"]')
         expect(otherNode).not.toBeNull()
         expect(container.querySelectorAll('[draggable="true"]')).toHaveLength(2)
@@ -346,7 +397,8 @@ it('reorders by keyboard and same-code drop while keeping the other code in its 
         await draw(2)
         expect(container.textContent).not.toContain('外部更新')
         await act(() => complete({ contentVersion: 2, items: [{ id: 1, weight: 106 }] }))
-        expect(container.textContent).toMatch(/现有候选.*先候选\s+aa\s+106.*后候选.*其他编码/)
+        expect(runRows(container)).toEqual(runRows(fresh))
+        expect(container.textContent).not.toContain('外部更新')
         expect(container.querySelector('[data-item="3"]')).toBe(otherNode)
 
         const rowFor = (word: string) => [...container.querySelectorAll('.whitespace-pre')]
