@@ -1,6 +1,7 @@
 'use client'
 
-import { type FormEvent, use, useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react'
+import { type FormEvent, type ReactNode, use, useCallback, useEffect, useEffectEvent, useId, useMemo, useRef, useState } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
   Card,
@@ -20,19 +21,20 @@ import {
   PopoverTrigger,
   Tooltip,
 } from '@/lib/heroui-compat'
-import { AlertTriangle, ArrowDown, Check, ListOrdered, MessageSquareText, RefreshCw, X } from 'lucide-react'
+import { AlertTriangle, ArrowDown, Bot, Check, ChevronRight, History, ListOrdered, MessageSquareText, RefreshCw, X } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { mutate as globalMutate } from 'swr'
 import { BatchItemVoteCounts } from '@/app/components/BatchItemVote'
-import BatchPreview from '@/app/components/BatchPreview'
+import BatchPreview, { MiaomiaoDiffReview } from '@/app/components/BatchPreview'
 import { useAPI, apiRequest } from '@/lib/hooks/useSWR'
-import BatchPRList from '@/app/components/BatchPRList'
+import CodePhrasesPopover from '@/app/components/CodePhrasesPopover'
 import { useUIStore } from '@/lib/store/ui'
 import { useAuthStore } from '@/lib/store/auth'
 import { usePageFilterStore } from '@/lib/store/pageFilter'
-import type { PhraseType } from '@/lib/constants/phraseTypes'
+import { getPhraseTypeLabel, type PhraseType } from '@/lib/constants/phraseTypes'
 import type { BatchAiReviewItem } from '@/lib/types/batchAiReview'
 import type { BatchReviewTier } from '@/lib/services/batchAiReviewService'
+import { getMiaomiaoEvidenceHighlights, parseMiaomiaoReviewRemark } from '@/lib/services/miaomiaoReviewRemark'
 
 type ReviewDecision = 'Approved' | 'Rejected'
 
@@ -71,11 +73,6 @@ interface PullRequest {
   conflictInfo?: {
     hasConflict: boolean
     impact?: string
-    suggestions?: Array<{
-      action: string
-      word?: string
-      reason: string
-    }>
   }
   phrase?: {
     id: number
@@ -83,17 +80,16 @@ interface PullRequest {
     code: string
   }
   aiReview?: BatchAiReviewItem & { tier?: BatchReviewTier; reviewDigestMatches?: boolean }
-  conflicts: Array<{
-    code: string
-    currentWord: string | null
-    proposedWord: string
-  }>
   dependencies: Array<{
     dependsOn: {
       id: number
       word: string | null
       code: string | null
     }
+    reason: string
+  }>
+  dependedBy?: Array<{
+    dependent: { id: number; word: string | null; code: string | null }
     reason: string
   }>
 }
@@ -138,12 +134,11 @@ interface BulkReviewTarget {
   expectedContentVersion: number
 }
 
-type OrderOrigin = 'preview' | 'list'
-type PendingDecision = ReviewDecision | 'BulkApproved' | `ApplyOrder:${OrderOrigin}`
+type PendingDecision = ReviewDecision | 'BulkApproved' | 'ApplyOrder'
 type QueuedReview =
   | { itemIds: [number]; decision: ReviewDecision; word: string; reason?: string }
   | { itemIds: number[]; decision: 'Approved'; bulk: true }
-  | { itemIds: [number]; order: NonNullable<BatchAiReviewItem['suggestedOrder']>; origin: OrderOrigin }
+  | { itemIds: [number]; order: NonNullable<BatchAiReviewItem['suggestedOrder']> }
 
 type SavedItemReview = Pick<PullRequest, 'id' | 'status' | 'reviewNotes'> &
   Partial<Pick<PullRequest, 'weight' | 'remark' | 'reviewFresh' | '_count'>>
@@ -169,28 +164,6 @@ const reviewTierLabels: Record<ReviewTierFilter, string> = {
 }
 const miaoReviewChunkSize = 12
 
-function snapshotReviewLists(batch: BatchDetail, filter: ReviewTierFilter, previous?: {
-  initialApprovedIds: Set<number>; reviewing: boolean
-}) {
-  const dependencyPendingIds = new Set(batch.reviewProgress.dependencyPendingIds)
-  const initialApprovedIds = previous?.initialApprovedIds ?? new Set(batch.pullRequests
-    .filter(pr => pr.status === 'Approved' && (pr.appliedAt || !dependencyPendingIds.has(pr.id)))
-    .map(pr => pr.id))
-  const approved: PullRequest[] = []
-  const byTier: Record<BatchReviewTier, PullRequest[]> = { manual: [], look: [], safe: [] }
-  for (const pr of batch.pullRequests) {
-    if (initialApprovedIds.has(pr.id)) approved.push(pr)
-    else byTier[pr.aiReview?.tier ?? 'look'].push(pr)
-  }
-  const all = [...byTier.manual, ...byTier.look, ...byTier.safe]
-  const visible = filter === 'all' ? all : byTier[filter]
-  return {
-    filter, initialApprovedIds, approved, all, byTier, visible,
-    reviewing: previous?.reviewing ?? batch.status === 'Submitted',
-    byId: new Map(batch.pullRequests.map(pr => [pr.id, pr])),
-  }
-}
-
 function changedReviewContent(pr: PullRequest, latest: PullRequest) {
   return pr.action !== latest.action || pr.type !== latest.type || pr.weight !== latest.weight ||
     pr.oldWord !== latest.oldWord || (pr.word ?? pr.phrase?.word) !== (latest.word ?? latest.phrase?.word) ||
@@ -198,12 +171,160 @@ function changedReviewContent(pr: PullRequest, latest: PullRequest) {
     pr.targetPhraseId !== latest.targetPhraseId || pr.targetFingerprint !== latest.targetFingerprint
 }
 
-function withReviewListItems(
-  lists: ReturnType<typeof snapshotReviewLists>, batch: BatchDetail, ids: ReadonlySet<number>,
+type ReviewSnapshot = ReadonlyMap<number, { item: PullRequest; orderedWeight?: number }>
+
+function withReviewSnapshotItems(
+  snapshot: ReviewSnapshot, batch: BatchDetail, ids: ReadonlySet<number>,
 ) {
-  const replacements = new Map(batch.pullRequests.filter(item => ids.has(item.id)).map(item => [item.id, item]))
-  const pullRequests = [...lists.byId.values()].map(item => replacements.get(item.id) ?? item)
-  return snapshotReviewLists({ ...batch, pullRequests }, lists.filter, lists)
+  const next = new Map(snapshot)
+  for (const item of batch.pullRequests) {
+    if (ids.has(item.id)) next.set(item.id, { item, orderedWeight: item.weight ?? undefined })
+  }
+  return next
+}
+
+const reviewItemActions = {
+  Create: { label: '新增', color: 'success' },
+  Change: { label: '修改', color: 'warning' },
+  Delete: { label: '删除', color: 'danger' },
+} as const
+
+function ItemReviewDetail({ item, reviewing, waitingOnDependencies, actions, rejectedReason }: {
+  item: PullRequest
+  reviewing: boolean
+  waitingOnDependencies: boolean
+  actions: ReactNode
+  rejectedReason?: string
+}) {
+  const [expanded, setExpanded] = useState(false)
+  const detailId = useId()
+  const { aiReview, conflictInfo } = item
+  const tier = aiReview?.tier ?? 'look'
+  const status = item.status === 'Pending' ? '待审核' : item.status === 'Rejected' ? '已拒绝' :
+    waitingOnDependencies ? '已同意，等待依赖处理' : '已同意'
+  const statusColor = item.status === 'Pending' ? 'default' : item.status === 'Rejected' ? 'danger' :
+    waitingOnDependencies ? 'warning' : 'success'
+  const word = item.word || item.phrase?.word || ''
+  const code = item.code || item.phrase?.code || ''
+  const remark = expanded ? parseMiaomiaoReviewRemark(item.remark) : undefined
+  const action = reviewItemActions[item.action]
+  const notes = item.reviewNotes ?? []
+  const noteList = notes.length > 0 && (
+    <ol className="space-y-2" aria-label="词条审核记录">
+      {notes.map(note => (
+        <li key={note.id}>
+          <div className="flex flex-wrap items-baseline gap-x-2">
+            <span className="font-medium">{decisionLabels[note.decision]} · {note.reviewer?.nickname || note.reviewer?.name || '审核员'}</span>
+            <time className="text-default-500" dateTime={note.createdAt}>{new Date(note.createdAt).toLocaleString('zh-CN')}</time>
+          </div>
+          {note.reason && <p className="whitespace-pre-wrap break-words">{note.reason}</p>}
+        </li>
+      ))}
+    </ol>
+  )
+
+  return (
+    <>
+      <div className="flex min-h-8 min-w-max items-center gap-2 whitespace-nowrap text-xs">
+        <button type="button" aria-expanded={expanded} aria-controls={detailId} aria-label="词条详情"
+          className="grid size-7 shrink-0 cursor-pointer place-items-center rounded-md hover:bg-default-500/20"
+          onClick={() => setExpanded(value => !value)}>
+          <ChevronRight className={`size-4 ${expanded ? 'rotate-90' : ''}`} aria-hidden="true" />
+        </button>
+        <span className="tabular-nums">#{item.id}</span>
+        <Chip size="sm" variant="flat" color={action.color}>{action.label}</Chip>
+        {item.type && <Chip size="sm" variant="flat">{getPhraseTypeLabel(item.type)}</Chip>}
+        {item.action === 'Change' && item.oldWord && (
+          <>
+            <del className="max-w-32 truncate opacity-75" title={item.oldWord}>{item.oldWord}</del>
+            <span aria-hidden="true">→</span>
+          </>
+        )}
+        <span className="max-w-40 truncate font-semibold" title={word}>{word}</span>
+        {code && (
+          <CodePhrasesPopover code={code}>
+            <code className="cursor-pointer underline decoration-dotted underline-offset-2">{code}</code>
+          </CodePhrasesPopover>
+        )}
+        <Link href={`/phrases/history?${new URLSearchParams({ word: item.oldWord || word, code })}`}
+          aria-label="词条修改历史" title="词条修改历史" className="rounded-md p-1.5 hover:bg-default-500/20">
+          <History className="size-4" aria-hidden="true" />
+        </Link>
+        <Chip size="sm" variant="flat" color={tier === 'manual' ? 'danger' : tier === 'safe' ? 'success' : 'warning'}>
+          {reviewTierLabels[tier]}
+        </Chip>
+        <span className="grid w-[12em] shrink-0 justify-items-start">
+          <Chip size="sm" variant="flat" color={statusColor}>{status}</Chip>
+        </span>
+        <Tooltip content={aiReview?.reviewRecord?.summary}>
+          <Chip size="sm" variant="flat" color="primary" className={aiReview?.reviewRecord ? undefined : 'invisible'}
+            startContent={<Bot className="size-3" aria-hidden="true" />}>喵审</Chip>
+        </Tooltip>
+        <Chip size="sm" variant="flat" color="warning" className={conflictInfo?.hasConflict || item.hasConflict ? undefined : 'invisible'}
+          startContent={<AlertTriangle className="size-3" aria-hidden="true" />}>冲突</Chip>
+        {reviewing && notes.length > 0 ? (
+          <Popover placement="top">
+            <PopoverTrigger className="grid size-7 shrink-0 cursor-pointer place-items-center rounded-md hover:bg-default-500/20"
+              aria-label="词条审核记录" title="词条审核记录">
+              <MessageSquareText className="size-4" aria-hidden="true" />
+            </PopoverTrigger>
+            <PopoverContent aria-label="词条审核记录" className="max-h-72 max-w-xs overflow-auto p-3 text-small">
+              {noteList}
+            </PopoverContent>
+          </Popover>
+        ) : <span className="size-7 shrink-0" aria-hidden="true" />}
+        <span className="min-w-[4.5rem] shrink-0">
+          {item._count && <BatchItemVoteCounts likes={item._count.likedBy} dislikes={item._count.dislikedBy} />}
+        </span>
+        <div className="ml-auto">{actions}</div>
+      </div>
+      <div id={detailId} hidden={!expanded}
+        className="mt-1 h-48 w-full max-w-xl space-y-2 overflow-auto break-words rounded-md bg-content1 px-3 py-2 text-small text-foreground">
+        {expanded && (
+          <>
+            {item.weight != null && <p>权重：{item.weight}</p>}
+            {remark?.baseRemark && <p className="whitespace-pre-wrap">备注：{remark.baseRemark}</p>}
+            {aiReview?.referenceEvidence && <p className="whitespace-pre-wrap text-default-600">{aiReview.referenceEvidence.line}</p>}
+            {aiReview?.reviewRecord && (
+              <div className="flex flex-wrap items-center gap-1">
+                <span className="text-primary">喵备注</span>
+                {getMiaomiaoEvidenceHighlights(aiReview.reviewRecord).slice(0, 2).map(evidence => (
+                  <span key={evidence} className="rounded-md bg-default-100 px-2 py-1">{evidence}</span>
+                ))}
+              </div>
+            )}
+            {aiReview && aiReview.status !== 'pass' && (
+              <div className="space-y-1">
+                <p className="font-medium">{aiReview.title}</p>
+                {aiReview.reasons.slice(0, 2).map((reason, index) => <p key={index}>{reason}</p>)}
+                {aiReview.suggestions[0] && <p>建议：{aiReview.suggestions[0]}</p>}
+              </div>
+            )}
+            {(conflictInfo?.impact || item.conflictReason) && <p className="text-warning">{conflictInfo?.impact || item.conflictReason}</p>}
+            {rejectedReason && <p className="text-warning">拒绝原因：{rejectedReason}</p>}
+            {item.dependencies.length > 0 && (
+              <div>
+                <p className="font-medium">依赖于</p>
+                <ul>{item.dependencies.map(({ dependsOn, reason }) => (
+                  <li key={dependsOn.id}>#{dependsOn.id} {dependsOn.word} {reason}</li>
+                ))}</ul>
+              </div>
+            )}
+            {!!item.dependedBy?.length && (
+              <div>
+                <p className="font-medium">被依赖</p>
+                <ul>{item.dependedBy.map(({ dependent, reason }) => (
+                  <li key={dependent.id}>#{dependent.id} {dependent.word} {reason}</li>
+                ))}</ul>
+              </div>
+            )}
+            {!reviewing && noteList}
+            {remark?.review && <MiaomiaoDiffReview review={remark.review} />}
+          </>
+        )}
+      </div>
+    </>
+  )
 }
 
 function getReviewErrorMessage(error: unknown, fallback: string) {
@@ -295,8 +416,9 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
 
 function AdminBatchReview({ resolvedParams }: { resolvedParams: { id: string } }) {
   const router = useRouter()
-  const pendingReviewList = useRef<HTMLElement>(null)
-  const [reviewLists, setReviewLists] = useState<ReturnType<typeof snapshotReviewLists> | null>(null)
+  const reviewPanel = useRef<HTMLDivElement>(null)
+  const [tierFilter, setTierFilter] = useState<ReviewTierFilter>('all')
+  const [reviewSnapshot, setReviewSnapshot] = useState<ReviewSnapshot | null>(null)
   const [selectedItemId, setSelectedItemId] = useState<number | null>(null)
   const [reviewTarget, setReviewTarget] = useState<ItemReviewTarget | null>(null)
   const [bulkReviewTarget, setBulkReviewTarget] = useState<BulkReviewTarget | null>(null)
@@ -322,9 +444,8 @@ function AdminBatchReview({ resolvedParams }: { resolvedParams: { id: string } }
   )
 
   const batchDataForReview = batch?.batch
-  // Freeze the lists for the review session while the SWR payload keeps updating.
-  if (batchDataForReview && !reviewLists) {
-    setReviewLists(snapshotReviewLists(batchDataForReview, 'all'))
+  if (batchDataForReview && !reviewSnapshot) {
+    setReviewSnapshot(new Map(batchDataForReview.pullRequests.map(item => [item.id, { item }])))
   }
   const reviewBusy = savingReviews || finalizing || checkingTarget !== null
   const miaoProgress = typeof checkingTarget === 'object' ? checkingTarget : null
@@ -341,6 +462,14 @@ function AdminBatchReview({ resolvedParams }: { resolvedParams: { id: string } }
   const pullRequestById = useMemo(() => {
     return new Map((batchDataForReview?.pullRequests ?? []).map(pr => [pr.id, pr]))
   }, [batchDataForReview?.pullRequests])
+  const reviewItems = useMemo(() => {
+    const codeFor = (latest: PullRequest) => {
+      const item = reviewSnapshot?.get(latest.id)?.item ?? latest
+      return item.code ?? item.phrase?.code ?? ''
+    }
+    return [...(batchDataForReview?.pullRequests ?? [])]
+      .sort((a, b) => codeFor(a).localeCompare(codeFor(b)) || a.id - b.id)
+  }, [batchDataForReview?.pullRequests, reviewSnapshot])
 
   const batchStatus = batch?.batch.status
   const { data: batchList, mutate: mutateBatchList } = useAPI<ReviewBatchList>(
@@ -382,7 +511,7 @@ function AdminBatchReview({ resolvedParams }: { resolvedParams: { id: string } }
         ids.add(id)
         orderItemsToSync.current.delete(id)
       }
-      if (ids.size) setReviewLists(lists => lists && withReviewListItems(lists, latest.batch, ids))
+      if (ids.size) setReviewSnapshot(snapshot => snapshot && withReviewSnapshotItems(snapshot, latest.batch, ids))
     }
     setReviewSyncError(false)
   }, [detailUrl, mutate])
@@ -463,7 +592,7 @@ function AdminBatchReview({ resolvedParams }: { resolvedParams: { id: string } }
           }, { revalidate: false })
           if (orderBatch) {
             const updated = orderBatch
-            setReviewLists(lists => lists && withReviewListItems(lists, updated, orderIds))
+            setReviewSnapshot(snapshot => snapshot && withReviewSnapshotItems(snapshot, updated, orderIds))
           }
           queue.entries.shift()
           setUnconfirmedReviews(current => {
@@ -539,7 +668,7 @@ function AdminBatchReview({ resolvedParams }: { resolvedParams: { id: string } }
     setPendingDecisions(current => {
       const next = { ...current }
       for (const id of entry.itemIds) {
-        next[id] = 'order' in entry ? `ApplyOrder:${entry.origin}` : 'bulk' in entry ? 'BulkApproved' : entry.decision
+        next[id] = 'order' in entry ? 'ApplyOrder' : 'bulk' in entry ? 'BulkApproved' : entry.decision
       }
       return next
     })
@@ -580,8 +709,9 @@ function AdminBatchReview({ resolvedParams }: { resolvedParams: { id: string } }
     return !failure
   }
 
+  const reviewTierSelector = tierFilter === 'all' ? '' : `[data-review-tier="${tierFilter}"]`
   const jumpToReviewItem = (direction: 1 | -1) => {
-    const rows = Array.from(pendingReviewList.current?.querySelectorAll<HTMLElement>('[data-review-item]') ?? [])
+    const rows = Array.from(reviewPanel.current?.querySelectorAll<HTMLElement>(`[data-review-item]${reviewTierSelector}`) ?? [])
     if (direction === -1) rows.reverse()
     const currentIndex = rows.findIndex(row => Number(row.dataset.reviewItem) === selectedItemId)
     const queuedItems = new Set(reviewQueue.current?.entries.flatMap(entry => entry.itemIds))
@@ -593,8 +723,8 @@ function AdminBatchReview({ resolvedParams }: { resolvedParams: { id: string } }
   }
 
   const changeReviewTierFilter = (filter: ReviewTierFilter) => {
-    if (!batchDataForReview || !reviewLists || reviewLists.filter === filter) return
-    setReviewLists(snapshotReviewLists(batchDataForReview, filter, reviewLists))
+    if (tierFilter === filter) return
+    setTierFilter(filter)
     setSelectedItemId(null)
   }
 
@@ -609,15 +739,15 @@ function AdminBatchReview({ resolvedParams }: { resolvedParams: { id: string } }
     if (event.code === 'KeyJ' || event.code === 'KeyK') {
       event.preventDefault()
       jumpToReviewItem(event.code === 'KeyJ' ? 1 : -1)
-    } else if (event.code === 'KeyT' && reviewLists) {
+    } else if (event.code === 'KeyT') {
       event.preventDefault()
-      const next = (reviewTierFilters.indexOf(reviewLists.filter) + 1) % reviewTierFilters.length
-      pendingReviewList.current?.querySelector<HTMLElement>(`[data-tier-filter="${reviewTierFilters[next]}"]`)
+      const next = (reviewTierFilters.indexOf(tierFilter) + 1) % reviewTierFilters.length
+      reviewPanel.current?.querySelector<HTMLElement>(`[data-tier-filter="${reviewTierFilters[next]}"]`)
         ?.focus({ preventScroll: true })
       changeReviewTierFilter(reviewTierFilters[next])
     } else if (selectedItemId !== null && (event.code === 'KeyA' || event.code === 'KeyR')) {
       if (event.target instanceof HTMLElement && event.target.closest('[data-review-stale]')) return
-      const row = pendingReviewList.current?.querySelector(`[data-review-item="${selectedItemId}"]:not([data-review-stale])`)
+      const row = reviewPanel.current?.querySelector(`[data-review-item="${selectedItemId}"]${reviewTierSelector}:not([data-review-stale])`)
       if (!row) return
       event.preventDefault()
       const decision = event.code === 'KeyA' ? 'Approved' : 'Rejected'
@@ -686,7 +816,7 @@ function AdminBatchReview({ resolvedParams }: { resolvedParams: { id: string } }
 
   const handleAskMiaoAgain = async (prId?: number) => {
     if (
-      !batchDataForReview || !reviewLists || batchDataForReview.status === 'Approved' ||
+      !batchDataForReview || batchDataForReview.status === 'Approved' ||
       reviewInFlight.current || reviewQueue.current || reviewTarget?.batchId === batchDataForReview.id
     ) return
 
@@ -697,15 +827,13 @@ function AdminBatchReview({ resolvedParams }: { resolvedParams: { id: string } }
       targetIds = [prId]
     } else {
       if (error || reviewSyncError) return
-      const orderedItems = [
-        ...reviewLists.all,
-        ...reviewLists.approved,
-        ...batchDataForReview.pullRequests.filter(item => !reviewLists.byId.has(item.id)),
-      ]
-      targetIds = orderedItems.flatMap(item => {
-        const latest = pullRequestById.get(item.id)
-        return latest && !latest.appliedAt && latest.reviewFresh !== true ? [item.id] : []
-      })
+      const dependencyPendingIds = new Set(batchDataForReview.reviewProgress.dependencyPendingIds)
+      const priority = (item: PullRequest) => item.status === 'Approved' && !dependencyPendingIds.has(item.id)
+        ? reviewTierFilters.length : reviewTierFilters.indexOf(item.aiReview?.tier ?? 'look')
+      targetIds = batchDataForReview.pullRequests
+        .filter(item => !item.appliedAt && item.reviewFresh !== true)
+        .sort((a, b) => priority(a) - priority(b))
+        .map(item => item.id)
       if (!targetIds.length) {
         toast('没有需要复审的词条')
         return
@@ -785,7 +913,7 @@ function AdminBatchReview({ resolvedParams }: { resolvedParams: { id: string } }
     )
   }
 
-  if (!batch || !reviewLists) {
+  if (!batch || !reviewSnapshot) {
     return (
       <div className="min-h-screen flex items-center justify-center p-8">
         <Card className="max-w-md">
@@ -812,16 +940,17 @@ function AdminBatchReview({ resolvedParams }: { resolvedParams: { id: string } }
   const canAskMiao = batchData.status !== 'Approved' && batchData.pullRequests.some(item => !item.appliedAt)
   const hasConflicts = batchData.pullRequests.some(pr => pr.conflictInfo?.hasConflict ?? pr.hasConflict)
   const dependencyPendingIds = new Set(batchData.reviewProgress?.dependencyPendingIds)
-  const pendingPullRequests = reviewLists.visible
-  const approvedPullRequests = reviewLists.approved
-  const showBulkReview = canReview && (reviewLists.filter === 'all' || reviewLists.filter === 'safe')
+  const showBulkReview = canReview && (tierFilter === 'all' || tierFilter === 'safe')
   const rejectedGroupIds = new Set(batchData.reviewProgress.rejectedGroupIds)
-  const bulkItemIds = showBulkReview ? pendingPullRequests.filter(snapshot => {
-    const latest = pullRequestById.get(snapshot.id)
-    return latest?.status === 'Pending' && !latest.appliedAt && latest.aiReview?.tier === 'safe' &&
-      latest.aiReview.reviewDigestMatches && !pendingDecisions[latest.id] &&
-      !latest.reviewNotes?.some(note => note.decision === 'Rejected') &&
-      !rejectedGroupIds.has(latest.id) && !changedReviewContent(snapshot, latest)
+  const isStaleItem = (item: PullRequest) => {
+    const snapshot = reviewSnapshot.get(item.id)?.item
+    return !!snapshot && changedReviewContent(snapshot, item)
+  }
+  const bulkItemIds = showBulkReview ? batchData.pullRequests.filter(item => {
+    return item.status === 'Pending' && !item.appliedAt && item.aiReview?.tier === 'safe' &&
+      item.aiReview.reviewDigestMatches && !pendingDecisions[item.id] &&
+      !item.reviewNotes?.some(note => note.decision === 'Rejected') &&
+      !rejectedGroupIds.has(item.id) && !isStaleItem(item)
   }).slice(0, 500).map(pr => pr.id) : []
   const queuedBulkCount = Object.values(pendingDecisions).filter(decision => decision === 'BulkApproved').length
   const canQueueBulkReview = !error && !reviewSyncError && !finalizing && checkingTarget === null && !activeReview && !queuedBulkCount
@@ -841,45 +970,34 @@ function AdminBatchReview({ resolvedParams }: { resolvedParams: { id: string } }
 
   const awaitingReview = (item: PullRequest) => item.status === 'Pending' ||
     (!!batchData.reviewProgress.dependencyConflictCount && dependencyPendingIds.has(item.id))
-  const hasVisibleReviewItem = pendingPullRequests.some(pr => {
-    const latest = pullRequestById.get(pr.id)
-    return latest && !latest.appliedAt && !pendingDecisions[pr.id] && awaitingReview(latest) && !changedReviewContent(pr, latest)
-  })
+  const tierCounts = { all: 0, manual: 0, look: 0, safe: 0 }
+  let hasVisibleReviewItem = false
+  for (const item of batchData.pullRequests) {
+    if (item.appliedAt || !awaitingReview(item)) continue
+    const tier = item.aiReview?.tier ?? 'look'
+    tierCounts.all++
+    tierCounts[tier]++
+    if ((tierFilter === 'all' || tier === tierFilter) && !pendingDecisions[item.id] && !isStaleItem(item)) {
+      hasVisibleReviewItem = true
+    }
+  }
   const activeItem = activeReview ? pullRequestById.get(activeReview.itemId) : undefined
   const reviewOutdated = !!activeReview && (
     activeReview.expectedContentVersion < (batch.reviewedFromContentVersion ?? batchData.contentVersion) ||
     activeReview.expectedContentVersion > batchData.contentVersion || !canReview || !!activeItem?.appliedAt
   )
-  const lineActionItems = canAskMiao ? batchData.pullRequests.filter(pr => !pr.appliedAt).map(pr => ({
-    id: pr.id,
-    label: pr.word ?? pr.phrase?.word ?? '词条',
-    code: pr.code ?? pr.phrase?.code,
-  })) : undefined
-
-  const renderReviewActions = (itemId: number, stale = false, origin: OrderOrigin = 'preview') => {
-    const item = pullRequestById.get(itemId)
-    if (!item || item.appliedAt || !canAskMiao) return null
+  const renderReviewActions = (item: PullRequest, stale: boolean) => {
+    if (item.appliedAt || !canAskMiao) return canReview ? <span className="block w-[8.5rem]" aria-hidden="true" /> : null
+    const itemId = item.id
     const word = item.word ?? item.phrase?.word ?? '词条'
     const pendingDecision = pendingDecisions[itemId]
     const busy = stale || finalizing || checkingTarget !== null || !!activeReview || !!pendingDecision || !!error || reviewSyncError
-    const selectedItem = selectedItemId === itemId && canReview
-    const tally = item._count
+    const selectedItem = selectedItemId === itemId && (tierFilter === 'all' || tierFilter === (item.aiReview?.tier ?? 'look'))
     const order = item.suggestedOrderApplicable ? item.aiReview?.suggestedOrder : undefined
-    const savingOrder = pendingDecision === `ApplyOrder:${origin}`
+    const savingOrder = pendingDecision === 'ApplyOrder'
 
     return (
-      <div role="group" aria-label={`审核词条「${word}」`}
-        tabIndex={canReview ? -1 : undefined}
-        data-review-item={canReview ? itemId : undefined}
-        data-review-pending={canReview && awaitingReview(item) && !pendingDecision && !stale}
-        data-review-stale={stale || undefined}
-        onFocusCapture={() => setSelectedItemId(stale ? null : itemId)}
-        className={`flex shrink-0 items-center gap-0.5 rounded-lg ${selectedItem ? 'ring-2 ring-primary' : ''}`}>
-        {tally && (
-          <span className="me-2">
-            <BatchItemVoteCounts likes={tally.likedBy} dislikes={tally.dislikedBy} />
-          </span>
-        )}
+      <div className="flex shrink-0 items-center gap-0.5">
         {canReview && (['Approved', 'Rejected'] as const).map(decision => {
           const selected = item.status === decision
           const saving = pendingDecision === decision
@@ -898,7 +1016,7 @@ function AdminBatchReview({ resolvedParams }: { resolvedParams: { id: string } }
               aria-keyshortcuts={selectedItem ? `Alt+${decision === 'Approved' ? 'A' : 'R'}` : undefined}
               aria-pressed={selected}
               aria-disabled={busy || selected || undefined}
-              title={label}
+              title={stale ? '差异已过期' : label}
               onPress={() => {
                 if (!busy && !selected) selectReviewDecision(itemId, decision)
               }}
@@ -922,7 +1040,7 @@ function AdminBatchReview({ resolvedParams }: { resolvedParams: { id: string } }
               aria-disabled={busy || !!bulkReviewTarget || undefined}
               onPress={() => {
                 if (busy || bulkReviewTarget) return
-                const failure = enqueueReviews(batchData.id, batchData.contentVersion, { itemIds: [itemId], order, origin })
+                const failure = enqueueReviews(batchData.id, batchData.contentVersion, { itemIds: [itemId], order })
                 if (failure) toast.error(failure)
               }}
             >
@@ -951,66 +1069,26 @@ function AdminBatchReview({ resolvedParams }: { resolvedParams: { id: string } }
     )
   }
 
-  const renderReviewFooter = (itemId: number, pendingList = false) => {
-    const snapshotItem = reviewLists.byId.get(itemId)
-    if (!snapshotItem) return null
-    const latest = reviewLists.reviewing ? pullRequestById.get(itemId) : snapshotItem
-    const item = latest ?? snapshotItem
-    const waitingOnDependencies = item.status === 'Approved' && !item.appliedAt && dependencyPendingIds.has(item.id)
-    const notes = item.reviewNotes ?? []
-    const noteList = notes.length > 0 && (
-      <ol className="space-y-2" aria-label="词条审核记录">
-        {notes.map(note => (
-          <li key={note.id} className="text-small">
-            <div className="flex flex-wrap items-baseline gap-x-2">
-              <p className="font-medium">{decisionLabels[note.decision]} · {note.reviewer?.nickname || note.reviewer?.name || '审核员'}</p>
-              <time className="text-default-500" dateTime={note.createdAt}>
-                {new Date(note.createdAt).toLocaleString('zh-CN')}
-              </time>
-            </div>
-            {note.reason && <p className="whitespace-pre-wrap break-words text-default-600">{note.reason}</p>}
-          </li>
-        ))}
-      </ol>
-    )
-
-    if (reviewLists.reviewing) {
-      const status = item.status === 'Pending' ? '待审核' : item.status === 'Rejected' ? '已拒绝' :
-        waitingOnDependencies ? '已同意，等待依赖处理' : '已同意'
-      const color = item.status === 'Pending' ? 'default' : item.status === 'Rejected' ? 'danger' :
-        waitingOnDependencies ? 'warning' : 'success'
-      return (
-        <div className="mt-3 flex items-center justify-between gap-1 border-t border-default-200 pt-3">
-          <div className="flex min-w-0 items-center gap-1">
-            <Chip size="sm" color={color} variant="flat" className="min-w-0 truncate" title={status}>{status}</Chip>
-            {notes.length > 0 ? (
-              <Popover placement="top">
-                <PopoverTrigger className="grid size-8 shrink-0 cursor-pointer place-items-center rounded-md hover:bg-default-100"
-                  aria-label="词条审核记录" title="词条审核记录">
-                  <MessageSquareText className="size-4" aria-hidden="true" />
-                </PopoverTrigger>
-                <PopoverContent aria-label="词条审核记录" className="max-h-72 max-w-xs overflow-auto p-3">
-                  {noteList}
-                </PopoverContent>
-              </Popover>
-            ) : <span className="size-8 shrink-0" aria-hidden="true" />}
-          </div>
-          {pendingList && <div className="h-8 shrink-0">
-            {renderReviewActions(itemId, !latest || changedReviewContent(snapshotItem, latest), 'list')}
-          </div>}
-        </div>
-      )
-    }
-
-    if (!waitingOnDependencies && !notes.length && item.status !== 'Rejected') return null
-
+  const renderReviewItem = (itemId: number, outdated: boolean, rejectedReason?: string) => {
+    const latest = pullRequestById.get(itemId)
+    const item = latest ?? reviewSnapshot.get(itemId)?.item
+    if (!item) return null
+    const tier = item.aiReview?.tier ?? 'look'
+    const stale = outdated || !latest || isStaleItem(item)
+    const actionable = canReview && !item.appliedAt
+    const selected = actionable && selectedItemId === itemId && (tierFilter === 'all' || tierFilter === tier)
     return (
-      <div className="mt-3 space-y-3 border-t border-default-200 pt-3">
-        {item.status === 'Rejected' && <Chip size="sm" color="danger" variant="flat">已拒绝</Chip>}
-        {waitingOnDependencies && (
-          <Chip size="sm" color="warning" variant="flat">已同意，等待依赖处理</Chip>
-        )}
-        {noteList}
+      <div role="group" aria-label={`审核词条「${item.word ?? item.phrase?.word ?? '词条'}」`}
+        tabIndex={actionable ? -1 : undefined}
+        data-review-item={itemId}
+        data-review-pending={actionable && awaitingReview(item) && !pendingDecisions[itemId] && !stale}
+        data-review-tier={tier}
+        data-review-stale={stale || undefined}
+        onFocusCapture={() => setSelectedItemId(actionable && !stale ? itemId : null)}
+        className={`rounded-md ${selected ? 'ring-2 ring-inset ring-primary' : ''}`}>
+        <ItemReviewDetail item={item} reviewing={canReview} rejectedReason={rejectedReason}
+          waitingOnDependencies={item.status === 'Approved' && !item.appliedAt && dependencyPendingIds.has(itemId)}
+          actions={renderReviewActions(item, stale)} />
       </div>
     )
   }
@@ -1129,73 +1207,51 @@ function AdminBatchReview({ resolvedParams }: { resolvedParams: { id: string } }
           </Card>
         </div>
 
-        {reviewLists.reviewing && (
-          <div className="sticky top-16 z-20 mb-4 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-default-200 bg-background px-3 py-2">
+        {canReview && (
+          <div className="sticky top-16 z-20 mb-4 rounded-lg border border-default-200 bg-background px-3 py-2">
             <Button size="sm" variant="flat" color="primary" aria-keyshortcuts="Alt+J"
-              startContent={<ArrowDown className="size-4" aria-hidden="true" />}
+              title="Alt+J / Alt+K" startContent={<ArrowDown className="size-4" aria-hidden="true" />}
               onPress={() => jumpToReviewItem(1)}
-              isDisabled={!canReview || !hasVisibleReviewItem}>
+              isDisabled={!hasVisibleReviewItem}>
               下一个待审词条
             </Button>
-            <p className="text-small text-default-600">
-              <kbd>Alt+J</kbd> 下一个 <span aria-hidden="true">·</span> <kbd>Alt+K</kbd> 上一个
-              {' '}<span aria-hidden="true">·</span> <kbd>Alt+A</kbd> 同意并跳到下一条
-              {' '}<span aria-hidden="true">·</span> <kbd>Alt+R</kbd> 拒绝当前词条
-              {' '}<span aria-hidden="true">·</span> <kbd>Alt+T</kbd> 切换筛选
-              {' '}<span>（Mac 用 Option ⌥）</span>
-            </p>
           </div>
         )}
-        <div className="space-y-6 mb-6">
+        <div ref={reviewPanel} className="space-y-6 mb-6">
           <BatchPreview batchId={resolvedParams.id}
-            defaultCollapsed={batchData.pullRequests.length > 200} reviewing expectedContentVersion={batchData.contentVersion}
+            reviewing expectedContentVersion={batchData.contentVersion}
             reviewedFromContentVersion={canReview ? batch.reviewedFromContentVersion : undefined}
             reviewCounts={canReview ? {
               pending: pendingReviewCount,
               reviewed: batchData.pullRequests.length - pendingReviewCount,
             } : undefined}
             onNewerReviewPreview={refreshReviewDetails}
-            lineActionItems={lineActionItems} renderLineActions={renderReviewActions} />
-          <section ref={pendingReviewList} aria-labelledby="pending-item-reviews">
-            <div className="flex min-h-8 items-center gap-3">
-              <h3 id="pending-item-reviews" className="text-xl font-semibold">
-                待审核 <span className="text-default-500">{pendingPullRequests.length}</span>
-              </h3>
-              {showBulkReview && (queuedBulkCount > 0 || bulkItemIds.length > 0) && (
-                <Button type="button" size="sm" color="primary" className="h-8 tabular-nums"
-                  isDisabled={!canQueueBulkReview} isLoading={queuedBulkCount > 0}
-                  onPress={() => setBulkReviewTarget({ itemIds: bulkItemIds, expectedContentVersion: batchData.contentVersion })}>
-                  全部通过（{queuedBulkCount || bulkItemIds.length}）
-                </Button>
-              )}
-            </div>
-            {reviewLists.reviewing && (
-              <div className="mt-2 flex flex-wrap gap-2" role="group" aria-label="待审核筛选">
-                {reviewTierFilters.map(filter => (
-                  <Button key={filter} type="button" size="sm" variant="flat" className="rounded-full tabular-nums"
-                    color={reviewLists.filter === filter ? 'primary' : undefined}
-                    data-tier-filter={filter} aria-pressed={reviewLists.filter === filter}
-                    aria-keyshortcuts={reviewLists.filter === filter ? 'Alt+T' : undefined}
-                    onPress={() => changeReviewTierFilter(filter)}>
-                    {reviewTierLabels[filter]} {filter === 'all' ? reviewLists.all.length : reviewLists.byTier[filter].length}
-                  </Button>
-                ))}
+            reviewItems={reviewItems} renderReviewItem={renderReviewItem}
+            getReviewWeight={id => reviewSnapshot.get(id)?.orderedWeight}
+            renderReviewControls={outdated => canReview && (
+              <div className="flex min-h-8 flex-wrap items-center gap-2">
+                <div className="flex flex-wrap gap-2" role="group" aria-label="待审核筛选">
+                  {reviewTierFilters.map(filter => (
+                    <Button key={filter} type="button" size="sm" variant="flat" className="rounded-full tabular-nums"
+                      color={tierFilter === filter ? 'primary' : undefined}
+                      data-tier-filter={filter} aria-pressed={tierFilter === filter}
+                      aria-keyshortcuts={tierFilter === filter ? 'Alt+T' : undefined}
+                      title="Alt+T" onPress={() => changeReviewTierFilter(filter)}>
+                      {reviewTierLabels[filter]} <span className="min-w-[3ch] text-end">{tierCounts[filter]}</span>
+                    </Button>
+                  ))}
+                </div>
+                <div className="h-8 w-36 shrink-0">
+                  {showBulkReview && (queuedBulkCount > 0 || bulkItemIds.length > 0) && (
+                    <Button type="button" size="sm" color="primary" className="h-full w-full tabular-nums"
+                      isDisabled={outdated || !canQueueBulkReview} isLoading={queuedBulkCount > 0}
+                      onPress={() => setBulkReviewTarget({ itemIds: bulkItemIds, expectedContentVersion: batchData.contentVersion })}>
+                      全部通过（{queuedBulkCount || bulkItemIds.length}）
+                    </Button>
+                  )}
+                </div>
               </div>
-            )}
-            {pendingPullRequests.length > 0 ? (
-              <BatchPRList pullRequests={pendingPullRequests} getItemStatus={id => pullRequestById.get(id)}
-                renderItemFooter={id => renderReviewFooter(id, true)} />
-            ) : <p className="mt-2 text-small text-default-500">暂无待审核词条。</p>}
-          </section>
-          <section aria-labelledby="approved-item-reviews">
-            <h3 id="approved-item-reviews" className="text-xl font-semibold">
-              已通过 <span className="text-default-500">{approvedPullRequests.length}</span>
-            </h3>
-            {approvedPullRequests.length > 0 ? (
-              <BatchPRList pullRequests={approvedPullRequests} getItemStatus={id => pullRequestById.get(id)}
-                renderItemFooter={renderReviewFooter} />
-            ) : <p className="mt-2 text-small text-default-500">暂无已通过词条。</p>}
-          </section>
+            )} />
           {(error || reviewSyncError) && (
             <div className="flex flex-wrap items-center gap-2 text-sm text-danger" role="status">
               审核进度暂时无法同步。
@@ -1263,7 +1319,7 @@ function AdminBatchReview({ resolvedParams }: { resolvedParams: { id: string } }
               <ModalHeader id="bulk-review-dialog-title">确认通过这 {bulkReviewTarget.itemIds.length} 条词条？</ModalHeader>
               {pendingReviewCount === bulkReviewTarget.itemIds.length +
                 batchData.pullRequests.filter(pr => !pr.appliedAt && pr.status === 'Pending' &&
-                  pendingDecisions[pr.id] && !pendingDecisions[pr.id].startsWith('ApplyOrder:')).length && (
+                  pendingDecisions[pr.id] && pendingDecisions[pr.id] !== 'ApplyOrder').length && (
                 <ModalBody>将自动提交审核结果并进入下一批</ModalBody>
               )}
               <ModalFooter>
