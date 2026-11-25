@@ -17,6 +17,7 @@ const DATABASE_BACKED_TESTS = [
   'lib/services/__tests__/batchApprovalTransaction.test.ts',
   'lib/services/__tests__/batchBulkReview.test.ts',
   'lib/services/__tests__/batchItemReviewLifecycle.test.ts',
+  'lib/services/__tests__/applySuggestedOrder.test.ts',
 ]
 
 export default defineConfig({

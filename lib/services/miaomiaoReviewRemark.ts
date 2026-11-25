@@ -190,3 +190,27 @@ export function extractMiaomiaoReviewBlocks(remark?: string | null): string[] {
   if (!remark) return []
   return Array.from(remark.matchAll(MIAOMIAO_REVIEW_BLOCK_EXACT_PATTERN), match => match[0])
 }
+
+export function rewriteMiaomiaoOrderRemark(
+  remark: string | null,
+  slot: { code: string; type: string },
+  digest?: { before: string; after: string },
+): string | null {
+  if (!remark) return remark
+  const latest = Array.from(remark.matchAll(MIAOMIAO_REVIEW_BLOCK_EXACT_PATTERN)).at(-1)?.index
+  return remark.replace(MIAOMIAO_REVIEW_BLOCK_EXACT_PATTERN, (_match, block: string, offset: number) => {
+    let next = block.replace(/^排序[：:]([^\r\n\u2028\u2029]*)(?:\r\n|[\r\n\u2028\u2029]|$)/gm, (line, value: string) => {
+      const order = parseSuggestedOrder(value)
+      return order?.code === slot.code && order.type === slot.type ? '' : line
+    })
+    if (offset === latest && digest) {
+      const previous = getLineValue(block, '校验')
+      if (previous === digest.before || previous === digest.after) {
+        // A stale digest can coincide with the new weight after reverting to an older order.
+        next = next.replace(/^校验[：:][^\r\n\u2028\u2029]*(\r\n|[\r\n\u2028\u2029]|$)/gm,
+          (_line, ending: string) => previous === digest.before ? `校验：${digest.after}${ending}` : '')
+      }
+    }
+    return MIAOMIAO_REVIEW_BLOCK_START + next + MIAOMIAO_REVIEW_BLOCK_END
+  })
+}

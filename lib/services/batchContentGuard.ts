@@ -68,16 +68,19 @@ export async function claimBatchContentMutation(
     expectedContentVersion: number
     allowedStatuses?: readonly string[]
     allowReviewMetadata?: boolean
+    allowSuggestedOrderDuringItemReview?: boolean
   }
 ): Promise<void> {
-  const allowedStatuses = options.allowedStatuses ?? EDITABLE_BATCH_STATUSES
+  const allowedStatuses = options.allowSuggestedOrderDuringItemReview
+    ? ['Submitted']
+    : options.allowedStatuses ?? EDITABLE_BATCH_STATUSES
   const claimed = await tx.batch.updateMany({
     where: {
       id: batchId,
       ...(options.creatorId === undefined ? {} : { creatorId: options.creatorId }),
       contentVersion: options.expectedContentVersion,
       status: { in: allowedStatuses as Prisma.EnumBatchStatusFilter['in'] },
-      ...(options.allowReviewMetadata ? {} : { itemReviewStarted: false }),
+      ...(options.allowReviewMetadata || options.allowSuggestedOrderDuringItemReview ? {} : { itemReviewStarted: false }),
     },
     data: { contentVersion: { increment: 1 } },
   })

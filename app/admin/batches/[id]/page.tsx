@@ -18,8 +18,9 @@ import {
   Popover,
   PopoverContent,
   PopoverTrigger,
+  Tooltip,
 } from '@/lib/heroui-compat'
-import { AlertTriangle, ArrowDown, Check, MessageSquareText, RefreshCw, X } from 'lucide-react'
+import { AlertTriangle, ArrowDown, Check, ListOrdered, MessageSquareText, RefreshCw, X } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { mutate as globalMutate } from 'swr'
 import { BatchItemVoteCounts } from '@/app/components/BatchItemVote'
@@ -64,6 +65,7 @@ interface PullRequest {
   weight: number | null
   remark: string | null
   readonly reviewFresh?: boolean
+  suggestedOrderApplicable?: boolean
   hasConflict: boolean
   conflictReason: string | null
   conflictInfo?: {
@@ -136,11 +138,15 @@ interface BulkReviewTarget {
   expectedContentVersion: number
 }
 
+type OrderOrigin = 'preview' | 'list'
+type PendingDecision = ReviewDecision | 'BulkApproved' | `ApplyOrder:${OrderOrigin}`
 type QueuedReview =
   | { itemIds: [number]; decision: ReviewDecision; word: string; reason?: string }
   | { itemIds: number[]; decision: 'Approved'; bulk: true }
+  | { itemIds: [number]; order: NonNullable<BatchAiReviewItem['suggestedOrder']>; origin: OrderOrigin }
 
-type SavedItemReview = Pick<PullRequest, 'id' | 'status' | 'reviewNotes'>
+type SavedItemReview = Pick<PullRequest, 'id' | 'status' | 'reviewNotes'> &
+  Partial<Pick<PullRequest, 'weight' | 'remark' | 'reviewFresh' | '_count'>>
 
 interface ItemReviewQueue {
   reviewerId: number
@@ -190,6 +196,14 @@ function changedReviewContent(pr: PullRequest, latest: PullRequest) {
     pr.oldWord !== latest.oldWord || (pr.word ?? pr.phrase?.word) !== (latest.word ?? latest.phrase?.word) ||
     (pr.code ?? pr.phrase?.code) !== (latest.code ?? latest.phrase?.code) || pr.phrase?.id !== latest.phrase?.id ||
     pr.targetPhraseId !== latest.targetPhraseId || pr.targetFingerprint !== latest.targetFingerprint
+}
+
+function withReviewListItems(
+  lists: ReturnType<typeof snapshotReviewLists>, batch: BatchDetail, ids: ReadonlySet<number>,
+) {
+  const replacements = new Map(batch.pullRequests.filter(item => ids.has(item.id)).map(item => [item.id, item]))
+  const pullRequests = [...lists.byId.values()].map(item => replacements.get(item.id) ?? item)
+  return snapshotReviewLists({ ...batch, pullRequests }, lists.filter, lists)
 }
 
 function getReviewErrorMessage(error: unknown, fallback: string) {
@@ -288,7 +302,8 @@ function AdminBatchReview({ resolvedParams }: { resolvedParams: { id: string } }
   const [bulkReviewTarget, setBulkReviewTarget] = useState<BulkReviewTarget | null>(null)
   const reviewInFlight = useRef(false)
   const reviewQueue = useRef<ItemReviewQueue | null>(null)
-  const [pendingDecisions, setPendingDecisions] = useState<Record<number, ReviewDecision | 'BulkApproved'>>({})
+  const orderItemsToSync = useRef(new Map<number, number>())
+  const [pendingDecisions, setPendingDecisions] = useState<Record<number, PendingDecision>>({})
   const [rejectionDrafts, setRejectionDrafts] = useState<Record<number, string>>({})
   const [savingReviews, setSavingReviews] = useState(false)
   const [reviewSyncError, setReviewSyncError] = useState(false)
@@ -347,10 +362,12 @@ function AdminBatchReview({ resolvedParams }: { resolvedParams: { id: string } }
     if (useAuthStore.getState().user?.id !== reviewerId) return
     const latest = await apiRequest<BatchReviewData>(detailUrl)
     if (useAuthStore.getState().user?.id !== reviewerId) return
+    let synced = false
     await mutate(current => {
       if (!current || current.batch.id !== latest.batch.id || current.batch.contentVersion > latest.batch.contentVersion) {
         return current
       }
+      synced = true
       return {
         ...latest,
         reviewedFromContentVersion: current.batch.contentVersion === latest.batch.contentVersion
@@ -358,6 +375,15 @@ function AdminBatchReview({ resolvedParams }: { resolvedParams: { id: string } }
           : undefined,
       }
     }, { revalidate: false })
+    if (synced) {
+      const ids = new Set<number>()
+      for (const [id, version] of orderItemsToSync.current) {
+        if (version > latest.batch.contentVersion) continue
+        ids.add(id)
+        orderItemsToSync.current.delete(id)
+      }
+      if (ids.size) setReviewLists(lists => lists && withReviewListItems(lists, latest.batch, ids))
+    }
     setReviewSyncError(false)
   }, [detailUrl, mutate])
 
@@ -371,44 +397,77 @@ function AdminBatchReview({ resolvedParams }: { resolvedParams: { id: string } }
       do {
         while (queue.entries.length) {
           const entry = queue.entries[0]
-          const { itemIds, decision } = entry
+          const { itemIds } = entry
           if (useAuthStore.getState().user?.id !== queue.reviewerId) throw new Error('登录账号已变化')
           const expectedContentVersion = queue.nextVersion
           const endpoint = `/api/admin/batches/${queue.batchId}/items`
-          const saved = 'bulk' in entry
-            ? await apiRequest<{ items: SavedItemReview[]; contentVersion: number }>(
+          let saved
+          if ('order' in entry) {
+            saved = await apiRequest<{ items: SavedItemReview[]; contentVersion: number }>(
+              `${endpoint}/${itemIds[0]}/apply-order`,
+              { method: 'POST', body: { chainDigest: entry.order.chainDigest, expectedContentVersion } },
+            )
+          } else if ('bulk' in entry) {
+            saved = await apiRequest<{ items: SavedItemReview[]; contentVersion: number }>(
               `${endpoint}/review-bulk`, { method: 'POST', body: { itemIds, expectedContentVersion } },
             )
-            : await apiRequest<{ item: SavedItemReview; contentVersion: number }>(
+          } else {
+            saved = await apiRequest<{ item: SavedItemReview; contentVersion: number }>(
               `${endpoint}/${itemIds[0]}/review`,
-              { method: 'POST', body: { decision, reason: entry.reason, expectedContentVersion } },
+              { method: 'POST', body: { decision: entry.decision, reason: entry.reason, expectedContentVersion } },
             )
+          }
           if (useAuthStore.getState().user?.id !== queue.reviewerId) throw new Error('登录账号已变化')
           queue.nextVersion = saved.contentVersion
           const savedItems = new Map(('items' in saved ? saved.items : [saved.item]).map(item => [item.id, item]))
+          const orderIds = new Set('order' in entry ? savedItems.keys() : [])
+          for (const id of orderIds) orderItemsToSync.current.set(id, saved.contentVersion)
+          let orderBatch: BatchDetail | undefined
           await mutate(current => {
-            if (!current || current.batch.id !== queue.batchId || current.batch.contentVersion !== expectedContentVersion) return current
+            if (!current || current.batch.id !== queue.batchId) return current
+            if ('order' in entry && current.batch.contentVersion === saved.contentVersion) {
+              // A preview refresh may have loaded the saved version before this response arrived.
+              orderBatch = current.batch
+              return current
+            }
+            if (current.batch.contentVersion !== expectedContentVersion) return current
             const pullRequests = current.batch.pullRequests.map(item => {
               const reviewed = savedItems.get(item.id)
-              return reviewed ? { ...item, status: reviewed.status, reviewNotes: reviewed.reviewNotes } : item
+              if (!reviewed) return item
+              if (!('order' in entry)) return { ...item, status: reviewed.status, reviewNotes: reviewed.reviewNotes }
+              const order = item.aiReview?.suggestedOrder
+              const clearOrder = order?.code === entry.order.code && order.type === entry.order.type
+              return {
+                ...item, ...reviewed,
+                ...(clearOrder ? {
+                  suggestedOrderApplicable: false, aiReview: { ...item.aiReview!, suggestedOrder: undefined },
+                } : {}),
+              }
             })
-            return {
-              reviewedFromContentVersion: current.reviewedFromContentVersion ?? expectedContentVersion,
-              batch: {
-                ...current.batch,
-                contentVersion: saved.contentVersion,
-                pullRequests,
-                reviewProgress: {
-                  ...current.batch.reviewProgress,
-                  canFinalize: false,
-                  pendingCount: pullRequests.filter(item => !item.appliedAt && item.status === 'Pending').length,
-                },
+            const batch = {
+              ...current.batch,
+              contentVersion: saved.contentVersion,
+              pullRequests,
+              reviewProgress: {
+                ...current.batch.reviewProgress,
+                canFinalize: false,
+                pendingCount: pullRequests.filter(item => !item.appliedAt && item.status === 'Pending').length,
               },
             }
+            if ('order' in entry) orderBatch = batch
+            return {
+              reviewedFromContentVersion: 'order' in entry
+                ? saved.contentVersion : current.reviewedFromContentVersion ?? expectedContentVersion,
+              batch,
+            }
           }, { revalidate: false })
+          if (orderBatch) {
+            const updated = orderBatch
+            setReviewLists(lists => lists && withReviewListItems(lists, updated, orderIds))
+          }
           queue.entries.shift()
           setUnconfirmedReviews(current => {
-            if (current?.batchId !== queue.batchId) return current
+            if ('order' in entry || current?.batchId !== queue.batchId) return current
             const remaining = current.itemIds.filter(id => !savedItems.has(id))
             return remaining.length ? { batchId: current.batchId, itemIds: remaining } : null
           })
@@ -432,8 +491,8 @@ function AdminBatchReview({ resolvedParams }: { resolvedParams: { id: string } }
         const requestError = err as { status?: number; info?: { ineligibleIds?: number[] } } | null
         const ineligibleIds = 'bulk' in failed && requestError?.status === 409 &&
           Array.isArray(requestError.info?.ineligibleIds) ? requestError.info.ineligibleIds : null
-        const remaining = queue.entries.slice(1).flatMap(entry => entry.itemIds)
-        const unsavedItemIds = ineligibleIds ? remaining : [...failed.itemIds, ...remaining]
+        const remaining = queue.entries.slice(1).filter(entry => !('order' in entry)).flatMap(entry => entry.itemIds)
+        const unsavedItemIds = ineligibleIds || 'order' in failed ? remaining : [...failed.itemIds, ...remaining]
         if (unsavedItemIds.length) setUnconfirmedReviews(current => ({
           batchId: queue.batchId,
           itemIds: current?.batchId === queue.batchId
@@ -441,7 +500,7 @@ function AdminBatchReview({ resolvedParams }: { resolvedParams: { id: string } }
             : unsavedItemIds,
         }))
         const message = getReviewErrorMessage(err, '审核结果保存失败')
-        const label = 'bulk' in failed
+        const label = 'order' in failed ? message : 'bulk' in failed
           ? ineligibleIds ? `${ineligibleIds.length} 条词条不满足批量放行条件` : message
           : `「${failed.word}」${message}`
         toast.error(`${label}${remaining.length ? `，另有 ${remaining.length} 条未保存` : ''}`)
@@ -468,6 +527,10 @@ function AdminBatchReview({ resolvedParams }: { resolvedParams: { id: string } }
     }
     const queuedIds = new Set(currentQueue?.entries.flatMap(queued => queued.itemIds))
     if (entry.itemIds.some(id => queuedIds.has(id))) return '有词条的审核结果正在保存'
+    if ('order' in entry && currentQueue?.entries.some(queued => 'order' in queued &&
+      queued.order.code === entry.order.code && queued.order.type === entry.order.type)) {
+      return '有词条的审核结果正在保存'
+    }
 
     const queue: ItemReviewQueue = currentQueue ?? {
       reviewerId, batchId, nextVersion: batchDataForReview.contentVersion, entries: [],
@@ -475,7 +538,9 @@ function AdminBatchReview({ resolvedParams }: { resolvedParams: { id: string } }
     queue.entries.push(entry)
     setPendingDecisions(current => {
       const next = { ...current }
-      for (const id of entry.itemIds) next[id] = 'bulk' in entry ? 'BulkApproved' : entry.decision
+      for (const id of entry.itemIds) {
+        next[id] = 'order' in entry ? `ApplyOrder:${entry.origin}` : 'bulk' in entry ? 'BulkApproved' : entry.decision
+      }
       return next
     })
     if (!currentQueue) {
@@ -791,7 +856,7 @@ function AdminBatchReview({ resolvedParams }: { resolvedParams: { id: string } }
     code: pr.code ?? pr.phrase?.code,
   })) : undefined
 
-  const renderReviewActions = (itemId: number, stale = false) => {
+  const renderReviewActions = (itemId: number, stale = false, origin: OrderOrigin = 'preview') => {
     const item = pullRequestById.get(itemId)
     if (!item || item.appliedAt || !canAskMiao) return null
     const word = item.word ?? item.phrase?.word ?? '词条'
@@ -799,6 +864,8 @@ function AdminBatchReview({ resolvedParams }: { resolvedParams: { id: string } }
     const busy = stale || finalizing || checkingTarget !== null || !!activeReview || !!pendingDecision || !!error || reviewSyncError
     const selectedItem = selectedItemId === itemId && canReview
     const tally = item._count
+    const order = item.suggestedOrderApplicable ? item.aiReview?.suggestedOrder : undefined
+    const savingOrder = pendingDecision === `ApplyOrder:${origin}`
 
     return (
       <div role="group" aria-label={`审核词条「${word}」`}
@@ -842,6 +909,29 @@ function AdminBatchReview({ resolvedParams }: { resolvedParams: { id: string } }
             </Button>
           )
         })}
+        {canReview && (order ? (
+          <Tooltip content={order.orderedWords.join(' › ')}>
+            <Button
+              type="button"
+              size="sm"
+              isIconOnly
+              variant="light"
+              className="h-8 w-8 min-w-0"
+              aria-label="采纳喵喵排序"
+              aria-busy={savingOrder || undefined}
+              aria-disabled={busy || !!bulkReviewTarget || undefined}
+              onPress={() => {
+                if (busy || bulkReviewTarget) return
+                const failure = enqueueReviews(batchData.id, batchData.contentVersion, { itemIds: [itemId], order, origin })
+                if (failure) toast.error(failure)
+              }}
+            >
+              {savingOrder
+                ? <RefreshCw className="size-4 motion-safe:animate-spin" aria-hidden="true" />
+                : <ListOrdered className="size-4" aria-hidden="true" />}
+            </Button>
+          </Tooltip>
+        ) : <span className="size-8 shrink-0" aria-hidden="true" />)}
         <Button
           type="button"
           size="sm"
@@ -906,7 +996,7 @@ function AdminBatchReview({ resolvedParams }: { resolvedParams: { id: string } }
             ) : <span className="size-8 shrink-0" aria-hidden="true" />}
           </div>
           {pendingList && <div className="h-8 shrink-0">
-            {renderReviewActions(itemId, !latest || changedReviewContent(snapshotItem, latest))}
+            {renderReviewActions(itemId, !latest || changedReviewContent(snapshotItem, latest), 'list')}
           </div>}
         </div>
       )
@@ -1172,7 +1262,8 @@ function AdminBatchReview({ resolvedParams }: { resolvedParams: { id: string } }
             <ModalContent aria-labelledby="bulk-review-dialog-title">
               <ModalHeader id="bulk-review-dialog-title">确认通过这 {bulkReviewTarget.itemIds.length} 条词条？</ModalHeader>
               {pendingReviewCount === bulkReviewTarget.itemIds.length +
-                batchData.pullRequests.filter(pr => !pr.appliedAt && pr.status === 'Pending' && pendingDecisions[pr.id]).length && (
+                batchData.pullRequests.filter(pr => !pr.appliedAt && pr.status === 'Pending' &&
+                  pendingDecisions[pr.id] && !pendingDecisions[pr.id].startsWith('ApplyOrder:')).length && (
                 <ModalBody>将自动提交审核结果并进入下一批</ModalBody>
               )}
               <ModalFooter>

@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import { prisma } from '@/lib/prisma'
+import type { Prisma } from '@prisma/client'
 import type { PhraseType } from '@/lib/constants/phraseTypes'
 import type {
   BatchAiReviewChainEntry,
@@ -12,6 +13,7 @@ import type {
 } from '@/lib/types/batchAiReview'
 import type { ConflictInfo } from './conflictDetector'
 import { computeReviewDigest } from './batchBotReviewService'
+import { calculateDynamicWeight, checkBatchDuplicates, type BatchPRItem } from './batchConflictService'
 import {
   getMiaomiaoEvidenceHighlights,
   parseMiaomiaoReviewRemark as parseStructuredRemark,
@@ -110,7 +112,7 @@ function getCode(pr: ReviewPullRequest): string {
   return pr.code || pr.phrase?.code || ''
 }
 
-function chainKey(type: PhraseType, code: string): string {
+function chainKey(type: string, code: string): string {
   return `${type}:${code}`
 }
 
@@ -581,9 +583,9 @@ function buildReviewItem(
 
 function referenceFields(
   word: string,
-  referenceByWord: Map<string, ReferenceWordData>,
+  referenceByWord: Map<string, ReferenceWordData> | undefined,
 ): Pick<BatchAiReviewChainEntry, 'referenceFrequency' | 'dictionaryPresent'> {
-  const reference = referenceByWord.get(word)
+  const reference = referenceByWord?.get(word)
   if (!reference) return {}
   return {
     referenceFrequency: reference.frequency ?? undefined,
@@ -593,8 +595,9 @@ function referenceFields(
 
 async function buildCodeChains(
   prs: ReviewPullRequest[],
-  referenceByWord: Map<string, ReferenceWordData>,
+  referenceByWord?: Map<string, ReferenceWordData>,
   moves?: MovePair[],
+  client: Pick<Prisma.TransactionClient, 'phrase'> = prisma,
 ): Promise<BatchAiReviewCodeChain[]> {
   const affectedGroups = new Map<string, { type: PhraseType; code: string }>()
   for (const pr of prs) {
@@ -612,7 +615,7 @@ async function buildCodeChains(
     status: 'Finish' as const,
   }))
 
-  const currentPhrases = await prisma.phrase.findMany({
+  const currentPhrases = await client.phrase.findMany({
     where: { OR: where },
     select: {
       id: true,
@@ -629,9 +632,11 @@ async function buildCodeChains(
     ],
   })
 
-  const currentReferenceData = await loadReferenceWordData(currentPhrases.map(phrase => phrase.word))
-  for (const [word, reference] of currentReferenceData) {
-    referenceByWord.set(word, reference)
+  if (referenceByWord) {
+    const currentReferenceData = await loadReferenceWordData(currentPhrases.map(phrase => phrase.word))
+    for (const [word, reference] of currentReferenceData) {
+      referenceByWord.set(word, reference)
+    }
   }
 
   const chains = new Map<string, BatchAiReviewChainEntry[]>()
@@ -728,7 +733,7 @@ async function buildCodeChains(
   return result
 }
 
-function compareChainEntry(a: BatchAiReviewChainEntry, b: BatchAiReviewChainEntry): number {
+export function compareChainEntry(a: BatchAiReviewChainEntry, b: BatchAiReviewChainEntry): number {
   const weightA = a.weight ?? Number.MAX_SAFE_INTEGER
   const weightB = b.weight ?? Number.MAX_SAFE_INTEGER
   if (weightA !== weightB) return weightA - weightB
@@ -966,6 +971,46 @@ export async function buildMiaomiaoItemReviewContext(pullRequests: ReviewPullReq
   const codeChains = (await buildCodeChains(pullRequests, referenceByWord))
     .map(({ code, type, before, after }) => ({ code, type, before, after }))
   return { items, codeChains }
+}
+
+function toReviewConflictItem(pr: ReviewPullRequest & { action: PullRequestAction }): BatchPRItem {
+  return {
+    id: String(pr.id), action: pr.action, word: pr.word || '', oldWord: pr.oldWord || undefined,
+    code: pr.code || '', type: normalizeType(pr.type), weight: pr.weight ?? undefined,
+  }
+}
+
+export async function buildSuggestedOrderChains(
+  pullRequests: Array<ReviewPullRequest & { action: PullRequestAction }>,
+  slots: ReadonlyArray<{ code: string; type: string }>,
+  tx?: Prisma.TransactionClient,
+) {
+  const keys = new Set(slots.map(slot => chainKey(slot.type, slot.code)))
+  let candidates = pullRequests.filter(pr => keys.has(chainKey(normalizeType(pr.type), getCode(pr))))
+  // Detail already has calculated weights. The write path must derive them using the transaction snapshot.
+  if (tx) {
+    const items = pullRequests.map(toReviewConflictItem)
+    const indexes = new Map(pullRequests.map((pr, index) => [pr.id, index]))
+    candidates = await Promise.all(candidates.map(async pr => {
+      const index = indexes.get(pr.id)!
+      return pr.action === 'Create' && pr.weight === null && !checkBatchDuplicates(items, index).hasDuplicate
+        ? { ...pr, weight: await calculateDynamicWeight(items[index], items, index, tx) }
+        : pr
+    }))
+  }
+  const chains = await buildCodeChains(candidates, undefined, undefined, tx)
+  if (!chains.length) return []
+
+  // Approval checks weight collisions against every phrase status.
+  const otherPhrases = await (tx ?? prisma).phrase.findMany({
+    where: { status: { not: 'Finish' }, OR: chains.map(({ code, type }) => ({ code, type })) },
+    select: { code: true, type: true, weight: true },
+  })
+  const weightsBySlot = new Map(chains.map(chain => [chainKey(chain.type, chain.code),
+    chain.before.flatMap(entry => entry.weight === null ? [] : [entry.weight]),
+  ]))
+  for (const phrase of otherPhrases) weightsBySlot.get(chainKey(phrase.type, phrase.code))!.push(phrase.weight)
+  return chains.map(chain => ({ ...chain, originalWeights: weightsBySlot.get(chainKey(chain.type, chain.code))! }))
 }
 
 export async function buildBatchAiReview(batch: BuildBatchAiReviewInput): Promise<BatchAiReviewResult> {

@@ -1,7 +1,9 @@
 import { prisma } from '@/lib/prisma'
+import { buildSuggestedOrderChains, computeChainDigest } from '@/lib/services/batchAiReviewService'
 import { computeReviewDigest } from '@/lib/services/batchBotReviewService'
 import { getItemReviewProgress, reviewNotesInclude } from '@/lib/services/batchItemReview'
 import { parseMiaomiaoReviewRemark } from '@/lib/services/miaomiaoReviewRemark'
+import { planChainOrder } from '@/lib/services/suggestedOrderService'
 
 export async function getAdminBatchReviewDetail(id: string, includeVoteCounts = false) {
   const batch = await prisma.batch.findUnique({
@@ -39,9 +41,7 @@ export async function getAdminBatchReviewDetail(id: string, includeVoteCounts = 
             },
           },
         },
-        orderBy: {
-          createAt: 'asc',
-        },
+        orderBy: [{ createAt: 'asc' }, { id: 'asc' }],
       },
     },
   })
@@ -54,12 +54,12 @@ export async function getAdminBatchReviewDetail(id: string, includeVoteCounts = 
   const currentItems = batch.pullRequests.filter(pr => !pr.appliedAt)
   const prItems = currentItems.map(pr => ({
     id: String(pr.id),
-    action: pr.action as 'Create' | 'Change' | 'Delete',
+    action: pr.action,
     word: pr.word || '',
     code: pr.code || '',
     oldWord: pr.oldWord || undefined,
-    weight: pr.weight || undefined,
-    type: pr.type || 'Phrase',
+    weight: pr.weight ?? undefined,
+    type: pr.type || 'Phrase' as const,
   }))
 
   let conflictResults: ConflictResult[] = []
@@ -112,9 +112,10 @@ export async function getAdminBatchReviewDetail(id: string, includeVoteCounts = 
   }
 
   const conflictsById = new Map(conflictResults.map(result => [result.id, result]))
+  const reviewsById = new Map(batch.pullRequests.map(pr => [pr.id, parseMiaomiaoReviewRemark(pr.remark).review]))
   const enrichedPRs = batch.pullRequests.map(pr => {
     const conflictResult = conflictsById.get(String(pr.id))
-    const reviewDigest = parseMiaomiaoReviewRemark(pr.remark).review?.reviewDigest
+    const reviewDigest = reviewsById.get(pr.id)?.reviewDigest
     return {
       ...pr,
       reviewFresh: Boolean(reviewDigest && reviewDigest === computeReviewDigest(pr)),
@@ -126,10 +127,28 @@ export async function getAdminBatchReviewDetail(id: string, includeVoteCounts = 
     }
   })
 
+  const suggestions = batch.status === 'Submitted' ? currentItems.flatMap(pr => {
+    const order = reviewsById.get(pr.id)?.suggestedOrder
+    return order ? [order] : []
+  }) : []
+  const slotKey = ({ code, type }: { code: string; type: string }) => JSON.stringify([code, type])
+  const chains = suggestions.length ? await buildSuggestedOrderChains(enrichedPRs.filter(pr => !pr.appliedAt), suggestions) : []
+  const chainsBySlot = new Map(chains.map(chain => [slotKey(chain), {
+    ...chain, digest: computeChainDigest(chain.after),
+  }]))
+  const nullCreateIds = new Set(currentItems.filter(pr => pr.action === 'Create' && pr.weight === null).map(pr => pr.id))
+
   const progress = getItemReviewProgress(batch.pullRequests, conflictResults)
   return {
     ...batch,
-    pullRequests: enrichedPRs,
+    pullRequests: enrichedPRs.map(pr => {
+      const order = reviewsById.get(pr.id)?.suggestedOrder
+      if (!order) return pr
+      const chain = chainsBySlot.get(slotKey(order))
+      return { ...pr, suggestedOrderApplicable: Boolean(!pr.appliedAt && chain && chain.digest === order.chainDigest &&
+        chain.after.some((entry, index) => entry.word !== order.orderedWords[index]) &&
+        'updates' in planChainOrder(chain.after, order.orderedWords, chain.originalWeights, nullCreateIds)) }
+    }),
     reviewProgress: { ...progress, canFinalize: batch.status === 'Submitted' && progress.canFinalize },
   }
 }

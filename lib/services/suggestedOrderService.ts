@@ -1,0 +1,190 @@
+import { prisma } from '@/lib/prisma'
+import { getDefaultWeight } from '@/lib/constants/phraseTypes'
+import type { BatchAiReviewChainEntry as ChainEntry } from '@/lib/types/batchAiReview'
+import { buildSuggestedOrderChains, compareChainEntry, computeChainDigest } from './batchAiReviewService'
+import { computeReviewDigest } from './batchBotReviewService'
+import { BatchContentLockedError, claimBatchContentMutation } from './batchContentGuard'
+import { ItemReviewError, reviewNotesInclude } from './batchItemReview'
+import { parseMiaomiaoReviewRemark, rewriteMiaomiaoOrderRemark } from './miaomiaoReviewRemark'
+import { lockPhraseWeightSlots } from './phraseWeightLock'
+import { resetVotesForProposalEdit } from './pullRequestVotes'
+
+const MIN_WEIGHT = -2147483648
+const MAX_WEIGHT = 2147483647
+const CHAIN_CHANGED = '编码链已变化，请重新复审'
+
+type WeightUpdate = { prId: number; weight: number }
+type OrderPlan = { updates: WeightUpdate[] } | { error: 'order_requires_current_phrase_change' | 'no_weight_gap' }
+
+function writablePrId(entry: ChainEntry) {
+  return entry.source === 'draft' && (entry.action === 'Create' || entry.action === 'Change')
+    && Number.isInteger(entry.prId) && entry.prId! > 0 ? entry.prId : undefined
+}
+
+function planDraftWeights(
+  entries: ChainEntry[], lower: number, upper: number, reserved: ReadonlySet<number>,
+  nullCreateIds: ReadonlySet<number>, updates: WeightUpdate[],
+) {
+  if (!entries.length) return lower < upper
+  const minimum = getDefaultWeight(entries[0].type)
+  const anchors = [lower, ...entries.map(({ weight }) => weight !== null && reserved.has(weight) ? null : weight), upper]
+  const end = anchors.length - 1
+  const retained = anchors.map(() => -Infinity)
+  const nextAnchor = anchors.map(() => -1)
+  retained[end] = 0
+
+  const skipReserved = (weight: number, step: 1 | -1) => {
+    while (reserved.has(weight)) weight += step
+    return weight
+  }
+
+  // Keep as many stored weights as possible, including legacy weights below the write minimum.
+  for (let i = end - 1; i >= 0; i--) {
+    const weight = anchors[i]
+    if (weight === null || !Number.isInteger(weight)) continue
+    let lastNeeded = weight
+    for (let j = i + 1; j <= end; j++) {
+      const nextWeight = anchors[j]
+      if (nextWeight !== null && nextWeight > lastNeeded && retained[j] + 1 > retained[i]) {
+        retained[i] = retained[j] + 1
+        nextAnchor[i] = j
+      }
+      lastNeeded = skipReserved(Math.max(lastNeeded + 1, minimum), 1)
+    }
+  }
+
+  if (nextAnchor[0] < 0) return false
+  for (let i = 0; i < end; i = nextAnchor[i]) {
+    const j = nextAnchor[i]
+    const latest = []
+    let max = anchors[j]!
+    for (let index = j - 1; index > i; index--) {
+      max = skipReserved(max - 1, -1)
+      latest[index - i - 1] = max
+    }
+    let min = Math.max(anchors[i]! + 1, minimum)
+    for (let index = i + 1; index < j; index++) {
+      const entry = entries[index - 1]
+      const preferred = Number.isInteger(entry.weight) ? entry.weight! : minimum
+      const weight = skipReserved(Math.max(min, Math.min(preferred, latest[index - i - 1])), 1)
+      updates.push({ prId: entry.prId!, weight })
+      min = weight + 1
+    }
+    if (j < end && nullCreateIds.has(entries[j - 1].prId!)) {
+      updates.push({ prId: entries[j - 1].prId!, weight: anchors[j]! })
+    }
+  }
+
+  return true
+}
+
+export function planChainOrder(
+  after: ChainEntry[], orderedWords: string[], originalWeights: readonly number[] = [],
+  nullCreateIds: ReadonlySet<number> = new Set(),
+): OrderPlan {
+  const byWord = new Map(after.map(entry => [entry.word, entry]))
+  if (orderedWords.length !== after.length || byWord.size !== after.length ||
+      new Set(orderedWords).size !== after.length || orderedWords.some(word => !byWord.has(word))) {
+    return { error: 'order_requires_current_phrase_change' }
+  }
+
+  const ordered = orderedWords.map(word => byWord.get(word)!)
+  const fixed = ordered.filter(entry => writablePrId(entry) === undefined)
+  if (fixed.some((entry, index) => index > 0 && compareChainEntry(fixed[index - 1], entry) > 0) ||
+      ordered.some((entry, index) => entry.weight === null && writablePrId(entry) === undefined && index !== ordered.length - 1)) {
+    return { error: 'order_requires_current_phrase_change' }
+  }
+
+  const currentWeights = after.flatMap(entry => entry.source === 'current' && entry.weight !== null ? [entry.weight] : [])
+  // A rejected Delete or Change leaves its original weight occupied.
+  const reserved = new Set([...originalWeights, ...currentWeights])
+  const isNullCreate = (entry: ChainEntry) => entry.action === 'Create' && writablePrId(entry) !== undefined &&
+    (entry.weight === null || nullCreateIds.has(entry.prId!))
+  let end = ordered.length
+  let limit = MAX_WEIGHT + 1
+  const tail = ordered.at(-1)
+  if (tail && isNullCreate(tail)) {
+    end--
+    // Approval can reorder dependent rows, so the relative order of two dynamic appends is not guaranteed.
+    if (end > 0 && isNullCreate(ordered[end - 1])) return { error: 'no_weight_gap' }
+    const base = getDefaultWeight(tail.type)
+    if (Math.max(base - 1, ...reserved) + after.filter(entry => entry.action === 'Create').length > MAX_WEIGHT) {
+      return { error: 'no_weight_gap' }
+    }
+    // Approval appends after live weights and may ignore explicit draft weights.
+    limit = 1 + (currentWeights.length ? Math.max(...currentWeights) : Math.min(base - 1, ...reserved))
+  }
+
+  const updates: WeightUpdate[] = []
+  let start = 0
+  let lower = MIN_WEIGHT - 1
+  for (let i = 0; i <= end; i++) {
+    const entry = i < end ? ordered[i] : undefined
+    if (entry && writablePrId(entry) !== undefined) continue
+    const upper = entry?.weight ?? limit
+    if (entry?.weight != null && (upper < MIN_WEIGHT || upper > MAX_WEIGHT || !Number.isInteger(upper))) {
+      return { error: 'no_weight_gap' }
+    }
+    if (!planDraftWeights(ordered.slice(start, i), lower, upper, reserved, nullCreateIds, updates)) {
+      return { error: 'no_weight_gap' }
+    }
+    if (entry?.weight === null) break
+    start = i + 1
+    lower = upper
+  }
+  return { updates }
+}
+
+export async function applySuggestedOrder(input: {
+  batchId: string
+  itemId: number
+  chainDigest: string
+  expectedContentVersion: number
+}) {
+  const { batchId, itemId, chainDigest, expectedContentVersion } = input
+  return prisma.$transaction(async tx => {
+    await claimBatchContentMutation(tx, batchId, { expectedContentVersion, allowSuggestedOrderDuringItemReview: true })
+    const rows = await tx.pullRequest.findMany({
+      where: { batchId },
+      include: { phrase: true },
+      orderBy: [{ createAt: 'asc' }, { id: 'asc' }],
+    })
+    const target = rows.find(row => row.id === itemId)
+    if (!target) throw new ItemReviewError('词条不属于此批次', 404)
+    const order = parseMiaomiaoReviewRemark(target.remark).review?.suggestedOrder
+    if (target.appliedAt || !order || order.chainDigest !== chainDigest) throw new BatchContentLockedError(CHAIN_CHANGED)
+
+    await lockPhraseWeightSlots(tx, [order])
+    const activeRows = rows.filter(row => !row.appliedAt)
+    const [chain] = await buildSuggestedOrderChains(activeRows, [order], tx)
+    if (!chain || computeChainDigest(chain.after) !== chainDigest) throw new BatchContentLockedError(CHAIN_CHANGED)
+    const nullCreateIds = new Set(activeRows.filter(row => row.action === 'Create' && row.weight === null).map(row => row.id))
+    const plan = planChainOrder(chain.after, order.orderedWords, chain.originalWeights, nullCreateIds)
+    if ('error' in plan) throw new BatchContentLockedError(plan.error)
+    if (chain.after.every((entry, index) => entry.word === order.orderedWords[index])) {
+      throw new BatchContentLockedError(CHAIN_CHANGED)
+    }
+
+    const weightById = new Map(plan.updates.map(({ prId, weight }) => [prId, weight]))
+    const items = []
+    for (const row of activeRows) {
+      const weight = weightById.get(row.id)
+      const remark = rewriteMiaomiaoOrderRemark(row.remark, order, weight === undefined ? undefined : {
+        before: computeReviewDigest(row),
+        after: computeReviewDigest({ ...row, weight }),
+      })
+      if (weight === undefined && remark === row.remark) continue
+      const saved = await tx.pullRequest.update({
+        where: { id: row.id, batchId },
+        data: { weight, remark, ...resetVotesForProposalEdit(row, { weight }) },
+        include: { reviewNotes: reviewNotesInclude, _count: { select: { likedBy: true, dislikedBy: true } } },
+      })
+      const { id, status, reviewNotes, _count } = saved
+      const digest = parseMiaomiaoReviewRemark(saved.remark).review?.reviewDigest
+      items.push({ id, status, reviewNotes, _count, weight: saved.weight, remark: saved.remark,
+        reviewFresh: !!digest && digest === computeReviewDigest(saved),
+      })
+    }
+    return { contentVersion: expectedContentVersion + 1, items }
+  })
+}
