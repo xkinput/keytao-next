@@ -21,6 +21,7 @@ const DATABASE_BACKED_TESTS = [
   'lib/services/__tests__/chainReorder.test.ts',
   'lib/services/__tests__/aiReviewChainDigestSeam.test.ts',
   'lib/services/__tests__/autoReviewByDigest.test.ts',
+  'lib/services/__tests__/idleDraftsForReminder.test.ts',
 ]
 
 export default defineConfig({
