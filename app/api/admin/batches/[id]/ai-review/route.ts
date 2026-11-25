@@ -1,10 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { checkAdminPermission } from '@/lib/adminAuth'
-import { getAdminBatchReviewDetail } from '@/lib/services/adminBatchReviewDetailService'
-import { buildMiaomiaoItemReviewContext } from '@/lib/services/batchAiReviewService'
+import { getAdminBatchReviewDetail, requestBatchMiaomiaoItemReview } from '@/lib/services/adminBatchReviewDetailService'
 import {
-  requestMiaomiaoItemReview,
-  selectAiReviewFocusContext,
   StaleBatchReviewError,
   writeMiaomiaoBatchReview,
 } from '@/lib/services/batchBotReviewService'
@@ -70,14 +67,7 @@ export async function POST(
     // applying a result to a batch that has moved on.
     const reviewedContentVersion = batch.contentVersion
 
-    const reviewContext = targetIds ? selectAiReviewFocusContext(pullRequests, ...targetIds) : pullRequests
-    const contextIds = new Set(reviewContext.map(pr => pr.id))
-    const aiReview = await requestMiaomiaoItemReview({
-      batch: { id: batch.id, status: batch.status, description: batch.description, pullRequests: reviewContext },
-      // Simulate chain edits in the same batch order as the admin detail.
-      localReview: await buildMiaomiaoItemReviewContext(pullRequests.filter(pr => contextIds.has(pr.id))),
-      focusPrId: targetIds?.length === 1 ? targetIds[0] : undefined,
-    })
+    const aiReview = await requestBatchMiaomiaoItemReview(batch, pullRequests, targetIds)
     const reviewedIds = new Set(aiReview.items.map(item => item.prId))
     if (targets.some(pr => !reviewedIds.has(pr.id))) {
       return NextResponse.json({ error: '喵喵未返回完整的逐词复审结果' }, { status: 502 })

@@ -8,7 +8,8 @@ import { calculateWeightForType } from '@/lib/services/batchConflictService'
 import { checkIsAdmin } from '@/lib/adminAuth'
 import { resolvePhraseTargetBinding } from '@/lib/services/phraseTargetBinding'
 import { BatchContentLockedError, claimBatchContentMutation } from '@/lib/services/batchContentGuard'
-import { changesPersistedMiaomiaoReviewBlocks } from '@/lib/validation/phraseInput'
+import { mergeMiaomiaoReviewRemark } from '@/lib/services/batchBotReviewService'
+import { containsMiaomiaoReviewBlockDelimiter } from '@/lib/validation/phraseInput'
 import { resetVotesForProposalEdit } from '@/lib/services/pullRequestVotes'
 
 const allowedActions = ['Create', 'Change', 'Delete'] as const
@@ -73,7 +74,7 @@ export async function PUT(
 
         const batch = await prisma.batch.findUnique({
             where: { id },
-            include: { pullRequests: true }
+            include: { pullRequests: { select: { id: true, type: true } } }
         })
 
         if (!batch) {
@@ -136,10 +137,6 @@ export async function PUT(
                     : typeof item.remark === 'string'
                         ? item.remark
                         : undefined
-            const persistedRemark = typeof itemId === 'number'
-                ? persistedPullRequestsById.get(itemId)?.remark
-                : undefined
-
             if (
                 itemId === null ||
                 weight === null ||
@@ -152,11 +149,9 @@ export async function PUT(
                 (oldWord !== undefined && oldWord.length > maxWordLength) ||
                 (type !== undefined && !isValidPhraseType(type)) ||
                 (item.remark !== undefined && item.remark !== null && typeof item.remark !== 'string') ||
-                (typeof remark === 'string' && remark.length > maxRemarkLength) ||
-                (
-                    item.remark !== undefined
-                    && changesPersistedMiaomiaoReviewBlocks(remark ?? null, persistedRemark)
-                )
+                (typeof remark === 'string' && (
+                    remark.length > maxRemarkLength || containsMiaomiaoReviewBlockDelimiter(remark)
+                ))
             ) {
                 return NextResponse.json({ error: '词条、编码或备注格式错误' }, { status: 400 })
             }
@@ -229,6 +224,9 @@ export async function PUT(
                 expectedContentVersion: expectedContentVersion as number,
                 allowedStatuses,
             })
+            const currentById = new Map((inputIds.size ? await tx.pullRequest.findMany({
+                where: { batchId: id, id: { in: Array.from(inputIds) } },
+            }) : []).map(pr => [pr.id, pr]))
 
             // A. Delete removed PRs
             if (idsToDelete.length > 0) {
@@ -322,6 +320,8 @@ export async function PUT(
                 })
 
                 if (item.id) {
+                    const current = currentById.get(item.id)
+                    if (!current) throw new BatchSyncInputError('修改项不存在或不属于此批次')
                     const data = {
                         word: item.word,
                         oldWord: item.action === 'Change' ? item.oldWord : null,
@@ -329,22 +329,27 @@ export async function PUT(
                         action: item.action,
                         type: item.type ? (item.type as PrismaPhraseType) : undefined,
                         weight: finalWeight ?? undefined,
-                        remark: item.remark !== undefined ? (item.remark || null) : undefined,
                         phraseId: finalPhraseId,
                         targetPhraseId: binding.targetPhraseId,
                         targetFingerprint: binding.targetFingerprint,
                         hasConflict: conflict.hasConflict,
                         conflictReason: conflict.hasConflict ? conflict.impact : null
                     }
-                    const result = await tx.pullRequest.updateMany({
+                    const [updated] = await tx.pullRequest.updateManyAndReturn({
                         where: { id: item.id, batchId: id },
-                        data
+                        data: {
+                            ...data,
+                            remark: mergeMiaomiaoReviewRemark(
+                                current, data, item.remark !== undefined ? (item.remark || null) : undefined,
+                            ),
+                        }
                     })
 
-                    if (result.count !== 1) {
+                    if (!updated) {
                         throw new BatchSyncInputError('修改项不存在或不属于此批次')
                     }
-                    const resetVotes = resetVotesForProposalEdit(persistedPullRequestsById.get(item.id)!, data)
+                    currentById.set(item.id, updated)
+                    const resetVotes = resetVotesForProposalEdit(current, data)
                     if (resetVotes) {
                         await tx.pullRequest.update({ where: { id: item.id, batchId: id }, data: resetVotes })
                     }

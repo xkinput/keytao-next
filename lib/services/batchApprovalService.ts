@@ -4,6 +4,7 @@ import type { BatchConflictResult } from '@/lib/services/batchConflictService'
 import { detectPhraseType, type PhraseType } from '@/lib/constants/phraseTypes'
 import type { BatchPRItem } from '@/lib/services/batchConflictService'
 import { getItemReviewProgress, ItemReviewError } from '@/lib/services/batchItemReview'
+import { stripMiaomiaoReviewRemark } from '@/lib/services/miaomiaoReviewRemark'
 import {
   assertNoDuplicateWeights,
   lockPhraseWeightSlots,
@@ -506,7 +507,7 @@ export async function approveSubmittedBatch({
                 code: pr.code,
                 type: pr.type || 'Phrase',
                 weight: finalWeight,
-                remark: pr.remark,
+                remark: stripMiaomiaoReviewRemark(pr.remark) || null,
                 userId: pr.userId,
                 status: 'Finish',
               },
@@ -528,7 +529,7 @@ export async function approveSubmittedBatch({
                 word: pr.word,
                 type: pr.type || undefined,
                 weight: finalWeight !== undefined ? finalWeight : (pr.weight !== null ? pr.weight : undefined),
-                remark: pr.remark || undefined,
+                remark: stripMiaomiaoReviewRemark(pr.remark) || undefined,
               },
             })
           } else {

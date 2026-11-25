@@ -1,11 +1,13 @@
 import { createHash } from 'node:crypto'
-import type { PullRequest } from '@prisma/client'
+import { Prisma, type BatchStatus, type PullRequest } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import type { BatchAiReviewCodeChain, BatchAiReviewItem, BatchAiReviewResult } from '@/lib/types/batchAiReview'
 import {
   getMiaomiaoSemanticEvidence,
+  extractMiaomiaoReviewBlocks,
   MIAOMIAO_REVIEW_BLOCK_END,
   MIAOMIAO_REVIEW_BLOCK_START,
+  parseMiaomiaoReviewRemark,
   readMiaomiaoSuggestedOrder,
   stripMiaomiaoReviewRemark,
 } from './miaomiaoReviewRemark'
@@ -14,6 +16,8 @@ import {
   claimBatchContentMutation,
   EDITABLE_BATCH_STATUSES,
 } from './batchContentGuard'
+
+const REVIEWABLE_BATCH_STATUSES: readonly BatchStatus[] = [...EDITABLE_BATCH_STATUSES, 'Submitted']
 
 type ReviewableBatch = {
   id: string
@@ -36,6 +40,13 @@ type BotBatchReviewResponse<T> = {
 }
 
 const MIAOMIAO_REVIEW_TIMEOUT_MS = 290_000
+
+export class MiaomiaoReviewRateLimitError extends Error {}
+
+export function isMiaomiaoReviewRateLimit(message?: string): boolean {
+  return typeof message === 'string' && /\b429\b|\brate[\s_-]*limit|限流|请求过于频繁/i.test(message)
+}
+
 type ItemReviewResult = Pick<BatchAiReviewResult, 'items' | 'generatedAt'> & {
   auditSealed?: boolean
   warning?: string
@@ -246,10 +257,14 @@ async function fetchMiaomiaoReview<T extends ItemReviewResult>(input: BotReviewI
     clearTimeout(timeoutId)
   }
 
-  const data = await response.json().catch(() => ({})) as BotBatchReviewResponse<T>
+  const data = (await response.json().catch(() => null) ?? {}) as BotBatchReviewResponse<T>
   if (!response.ok || data.success === false || !Array.isArray(data.aiReview?.items)
     || typeof data.aiReview.generatedAt !== 'string') {
-    throw new Error(data.detail || data.message || `喵喵复审服务返回 ${response.status}`)
+    const message = data.detail || data.message || `喵喵复审服务返回 ${response.status}`
+    if (response.status === 429 || isMiaomiaoReviewRateLimit(message)) {
+      throw new MiaomiaoReviewRateLimitError(message)
+    }
+    throw new Error(message)
   }
 
   return {
@@ -286,11 +301,85 @@ function guardMiaomiaoItemPass(item: BatchAiReviewItem, auditSealed?: boolean, a
   return reason ? { ...item, status: 'attention', severity: 'warning', reasons: [reason, ...item.reasons] } : item
 }
 
-export function computeReviewDigest(row: Pick<PullRequest, 'action' | 'word' | 'oldWord' | 'code' | 'type' | 'weight'>): string {
+type ReviewContent = Pick<PullRequest, 'action' | 'word' | 'oldWord' | 'code' | 'type' | 'weight'>
+
+export function computeReviewDigest(row: ReviewContent): string {
   const { action, word, oldWord, code, type, weight } = row
   return createHash('sha256')
     .update(`${action}|${word ?? ''}|${oldWord ?? ''}|${code ?? ''}|${type}|${weight ?? ''}`)
     .digest('hex').slice(0, 16)
+}
+
+export function mergeMiaomiaoReviewRemark(
+  row: ReviewContent & { remark: string | null },
+  changes: Partial<ReviewContent>,
+  userRemark: string | null | undefined,
+): string | null | undefined {
+  const blocks = extractMiaomiaoReviewBlocks(row.remark)
+  if (!blocks.length) return userRemark
+  const next = {
+    action: changes.action ?? row.action,
+    word: changes.word === undefined ? row.word : changes.word,
+    oldWord: changes.oldWord === undefined ? row.oldWord : changes.oldWord,
+    code: changes.code === undefined ? row.code : changes.code,
+    type: changes.type === undefined ? row.type : changes.type,
+    weight: changes.weight === undefined ? row.weight : changes.weight,
+  }
+  const unchanged = computeReviewDigest(next) === computeReviewDigest(row)
+  if (userRemark === undefined && unchanged) return undefined
+  const base = userRemark === undefined ? stripMiaomiaoReviewRemark(row.remark) : userRemark
+  return [base, ...(unchanged ? blocks : [])].filter(Boolean).join('\n\n') || null
+}
+
+export async function listMiaomiaoAutoReviewQueue(limit: number) {
+  const now = Date.now()
+  const quietBefore = new Date(now - 90_000)
+  // shortcut: Use a fixed six-hour delay until per-item retry state is needed.
+  const cooldownSince = now - 6 * 60 * 60 * 1000
+  const blockPattern = `${MIAOMIAO_REVIEW_BLOCK_START}(.*?)${MIAOMIAO_REVIEW_BLOCK_END}`
+  const digestWhitespace = ' \t\v\f\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u202f\u205f\u3000\ufeff'
+  const pageSize = 200
+  type QueueRow = ReviewContent & { id: number; batchId: string; remark: string | null; createAt: Date }
+  let cursor: QueueRow | undefined
+  let batchId: string | null = null
+  const items: { prId: number; digest: string }[] = []
+  while (items.length < limit) {
+    // Match the remark parser and computeReviewDigest before LIMIT so fresh drafts cannot hide new work.
+    const rows: QueueRow[] = await prisma.$queryRaw`
+      SELECT pr.id, pr."batchId", pr."createAt", pr.remark, pr.action::text AS action, pr.word, pr."oldWord", pr.code, pr.type::text AS type, pr.weight
+      FROM pull_requests pr
+      JOIN batches batch ON batch.id = pr."batchId"
+      WHERE pr."appliedAt" IS NULL AND pr."updateAt" <= ${quietBefore}
+        AND (batch.status IN ('Draft', 'Rejected') OR (batch.status = 'Submitted' AND NOT batch."itemReviewStarted"))
+        ${cursor ? Prisma.sql`AND (pr."createAt", pr.id) > (${cursor.createAt}, ${cursor.id})` : Prisma.empty}
+        ${batchId ? Prisma.sql`AND pr."batchId" = ${batchId}` : Prisma.empty}
+        AND (
+          SELECT btrim((regexp_match(
+            translate(review.block[1], ${'\r\u2028\u2029'}, ${'\n\n\n'}), '(?n)^校验[：:](.+)$'
+          ))[1], ${digestWhitespace})
+          FROM regexp_matches(pr.remark, ${blockPattern}, 'g') WITH ORDINALITY AS review(block, ordinal)
+          ORDER BY review.ordinal DESC LIMIT 1
+        ) IS DISTINCT FROM left(encode(sha256(convert_to(concat(
+          pr.action, '|', pr.word, '|', pr."oldWord", '|', pr.code, '|', coalesce(pr.type::text, 'null'), '|', pr.weight
+        ), 'UTF8')), 'hex'), 16)
+      ORDER BY pr."createAt", pr.id
+      LIMIT ${pageSize}
+    `
+    for (const row of rows) {
+      if (batchId !== null && batchId !== row.batchId) continue
+      const digest = computeReviewDigest(row)
+      const { review } = parseMiaomiaoReviewRemark(row.remark)
+      if (review?.reviewDigest === digest) continue
+      const reviewedAt = Date.parse(review?.generatedAt ?? '')
+      if (reviewedAt > cooldownSince && reviewedAt <= now) continue
+      batchId = row.batchId
+      items.push({ prId: row.id, digest })
+      if (items.length === limit) break
+    }
+    if (rows.length < pageSize) break
+    cursor = rows.at(-1)
+  }
+  return { batchId, items }
 }
 
 function statusText(item: BatchAiReviewItem): string {
@@ -366,6 +455,72 @@ export class StaleBatchReviewError extends Error {
   }
 }
 
+const reviewWriteSelect = {
+  id: true, remark: true, action: true, word: true, oldWord: true, code: true, type: true, weight: true,
+} as const
+
+function buildReviewRemark(
+  row: ReviewContent & { remark: string | null },
+  item: BatchAiReviewItem,
+  review: ItemReviewResult,
+  digest?: string,
+): string {
+  // The digest's field separator must not be mistaken for part of a different field.
+  const ambiguousDigest = [row.word, row.oldWord, row.code].some(value => value?.includes('|'))
+  return [
+    replaceReviewBlockMarkers(stripMiaomiaoReviewRemark(row.remark)),
+    formatMiaomiaoReviewRemark(guardMiaomiaoItemPass(item, review.auditSealed, ambiguousDigest), review.generatedAt, digest),
+  ].filter(Boolean).join('\n\n')
+}
+
+export async function writeMiaomiaoItemReviewsByDigest(input: {
+  batchId: string
+  targetDigests: ReadonlyMap<number, string>
+  aiReview: ItemReviewResult
+}): Promise<{ reviewed: number[]; skipped: number[] }> {
+  const { batchId, targetDigests, aiReview } = input
+  const reviewByPrId = new Map(aiReview.items.map(item => [item.prId, item]))
+  return prisma.$transaction(async (tx) => {
+    // Match the author's batch-first lock order without claiming a content version.
+    const [batch] = await tx.$queryRaw<{ status: BatchStatus; itemReviewStarted: boolean }[]>`
+      SELECT status::text AS status, "itemReviewStarted" FROM batches WHERE id = ${batchId} FOR UPDATE
+    `
+    if (!batch || !REVIEWABLE_BATCH_STATUSES.includes(batch.status) || (batch.status === 'Submitted' && batch.itemReviewStarted)) {
+      return { reviewed: [], skipped: Array.from(targetDigests.keys()) }
+    }
+    const rows = await tx.pullRequest.findMany({
+      where: { id: { in: Array.from(targetDigests.keys()) }, batchId, appliedAt: null },
+      select: reviewWriteSelect,
+    })
+    const rowsById = new Map(rows.map(row => [row.id, row]))
+    const reviewed: number[] = []
+    const skipped: number[] = []
+    for (const [id, digest] of targetDigests) {
+      const row = rowsById.get(id)
+      if (!row || computeReviewDigest(row) !== digest) {
+        skipped.push(id)
+        continue
+      }
+      const item = reviewByPrId.get(id)
+      const remark = buildReviewRemark(row, item ?? {
+        prId: id,
+        status: 'attention',
+        severity: 'warning',
+        title: '复审结果缺失',
+        reasons: ['喵喵未返回该词条的结果'],
+        suggestions: [],
+      }, aiReview, item ? digest : undefined)
+      const updated = await tx.pullRequest.updateMany({
+        where: { ...row, batchId, appliedAt: null },
+        data: { remark },
+      })
+      if (updated.count === 1) reviewed.push(id)
+      else skipped.push(id)
+    }
+    return { reviewed, skipped }
+  })
+}
+
 export async function writeMiaomiaoBatchReview(input: {
   batch: ReviewableBatch
   aiReview: ItemReviewResult
@@ -380,7 +535,7 @@ export async function writeMiaomiaoBatchReview(input: {
     try {
       await claimBatchContentMutation(tx, input.batch.id, {
         expectedContentVersion: input.expectedContentVersion,
-        allowedStatuses: [...EDITABLE_BATCH_STATUSES, 'Submitted'],
+        allowedStatuses: REVIEWABLE_BATCH_STATUSES,
         allowReviewMetadata: true,
       })
     } catch (error) {
@@ -390,18 +545,12 @@ export async function writeMiaomiaoBatchReview(input: {
 
     const rows = await tx.pullRequest.findMany({
       where: { id: { in: targetIds }, batchId: input.batch.id, appliedAt: null },
-      select: { id: true, remark: true, action: true, word: true, oldWord: true, code: true, type: true, weight: true },
+      select: reviewWriteSelect,
     })
     if (rows.length !== targetIds.length) throw new StaleBatchReviewError()
 
     for (const row of rows) {
-      // The digest's field separator must not be mistaken for part of a different field.
-      const ambiguousDigest = [row.word, row.oldWord, row.code].some(value => value?.includes('|'))
-      const item = guardMiaomiaoItemPass(reviewByPrId.get(row.id)!, input.aiReview.auditSealed, ambiguousDigest)
-      const remark = [
-        replaceReviewBlockMarkers(stripMiaomiaoReviewRemark(row.remark)),
-        formatMiaomiaoReviewRemark(item, input.aiReview.generatedAt, computeReviewDigest(row)),
-      ].filter(Boolean).join('\n\n')
+      const remark = buildReviewRemark(row, reviewByPrId.get(row.id)!, input.aiReview, computeReviewDigest(row))
       const updated = await tx.pullRequest.updateMany({
         where: { id: row.id, batchId: input.batch.id, appliedAt: null },
         data: { remark },

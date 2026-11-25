@@ -8,8 +8,9 @@ const mocks = vi.hoisted(() => {
     },
     pullRequest: {
       deleteMany: vi.fn(),
+      findMany: vi.fn(),
       update: vi.fn(),
-      updateMany: vi.fn(),
+      updateManyAndReturn: vi.fn(),
       create: vi.fn(),
     },
     phrase: {
@@ -82,7 +83,8 @@ beforeEach(() => {
   mocks.prisma.$transaction.mockImplementation(async (callback) => callback(mocks.tx))
   mocks.tx.batch.updateMany.mockResolvedValue({ count: 1 })
   mocks.tx.pullRequest.deleteMany.mockResolvedValue({ count: 0 })
-  mocks.tx.pullRequest.updateMany.mockResolvedValue({ count: 1 })
+  mocks.tx.pullRequest.findMany.mockResolvedValue([{ id: 10, remark: null }])
+  mocks.tx.pullRequest.updateManyAndReturn.mockResolvedValue([{ id: 10 }])
   mocks.tx.pullRequest.update.mockResolvedValue({ id: 10 })
   mocks.tx.pullRequest.create.mockResolvedValue({ id: 11 })
   mocks.tx.phrase.findFirst.mockResolvedValue(null)
@@ -122,7 +124,7 @@ describe('PUT /api/batches/[id]/pull-requests', () => {
       where: { id: 10, batchId: 'batch-1' },
       data: { likedBy: { set: [] }, dislikedBy: { set: [] } },
     })
-    expect(mocks.tx.pullRequest.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+    expect(mocks.tx.pullRequest.updateManyAndReturn).toHaveBeenCalledWith(expect.objectContaining({
       where: { id: 10, batchId: 'batch-1' },
       data: expect.objectContaining({ remark: null }),
     }))
@@ -192,7 +194,7 @@ describe('PUT /api/batches/[id]/pull-requests', () => {
     expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
   })
 
-  it('allows an admin edit to round-trip an unchanged server review block', async () => {
+  it('preserves the latest server review block when an admin saves unchanged content', async () => {
     const reviewBlock = [
       '--- miao-review:start ---',
       '本喵复审：需人工确认',
@@ -201,20 +203,14 @@ describe('PUT /api/batches/[id]/pull-requests', () => {
       '时间：2026-08-06T02:00:00.000Z',
       '--- miao-review:end ---',
     ].join('\n')
-    mocks.prisma.batch.findUnique.mockResolvedValue({
-      id: 'batch-1',
-      creatorId: 2,
-      status: 'Submitted',
-      contentVersion: 7,
-      pullRequests: [{
-        id: 10, action: 'Create', word: '测试词', code: 'ces', type: 'Phrase', weight: 100,
-        oldWord: null, phraseId: null, targetPhraseId: null, targetFingerprint: null,
-        remark: `旧备注\n\n${reviewBlock}`,
-      }],
-    })
+    mocks.tx.pullRequest.findMany.mockResolvedValue([{
+      id: 10, action: 'Create', word: '测试词', code: 'ces', type: 'Phrase', weight: 100,
+      oldWord: null, phraseId: null, targetPhraseId: null, targetFingerprint: null,
+      remark: `旧备注\n\n${reviewBlock}`,
+    }])
     const { PUT } = await import('./route')
 
-    const remark = `管理员更新备注\n\n${reviewBlock}`
+    const remark = '备'.repeat(500)
     const res = await PUT(
       putRequest({
         expectedContentVersion: 7,
@@ -231,9 +227,9 @@ describe('PUT /api/batches/[id]/pull-requests', () => {
     )
 
     expect(res.status).toBe(200)
-    expect(mocks.tx.pullRequest.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+    expect(mocks.tx.pullRequest.updateManyAndReturn).toHaveBeenCalledWith(expect.objectContaining({
       where: { id: 10, batchId: 'batch-1' },
-      data: expect.objectContaining({ remark }),
+      data: expect.objectContaining({ remark: `${remark}\n\n${reviewBlock}` }),
     }))
     expect(mocks.tx.pullRequest.update).not.toHaveBeenCalled()
   })
@@ -241,8 +237,8 @@ describe('PUT /api/batches/[id]/pull-requests', () => {
   it.each([
     ['modifies it', '管理员备注\n\n--- miao-review:start ---\n本喵复审：通过\n--- miao-review:end ---'],
     ['duplicates it', '管理员备注\n\n--- miao-review:start ---\n本喵复审：需人工确认\n--- miao-review:end ---\n--- miao-review:start ---\n本喵复审：通过\n--- miao-review:end ---'],
-    ['removes it', '管理员备注'],
-  ])('rejects an admin edit that %s instead of preserving the server review block', async (_case, remark) => {
+    ['copies it', '管理员备注\n\n--- miao-review:start ---\n本喵复审：需人工确认\n--- miao-review:end ---'],
+  ])('rejects a supplied server review block when the edit %s', async (_case, remark) => {
     const storedRemark = '旧备注\n\n--- miao-review:start ---\n本喵复审：需人工确认\n--- miao-review:end ---'
     mocks.prisma.batch.findUnique.mockResolvedValue({
       id: 'batch-1',

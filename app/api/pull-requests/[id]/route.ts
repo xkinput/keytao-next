@@ -8,6 +8,7 @@ import { checkIsAdmin } from '@/lib/adminAuth'
 import { getPhraseWeightValidationError, isValidPhraseType, type PhraseType } from '@/lib/constants/phraseTypes'
 import { resolvePhraseTargetBinding } from '@/lib/services/phraseTargetBinding'
 import { BatchContentLockedError, claimBatchContentMutation } from '@/lib/services/batchContentGuard'
+import { mergeMiaomiaoReviewRemark } from '@/lib/services/batchBotReviewService'
 import { containsMiaomiaoReviewBlockDelimiter } from '@/lib/validation/phraseInput'
 import { resetVotesForProposalEdit } from '@/lib/services/pullRequestVotes'
 
@@ -247,7 +248,6 @@ export async function PATCH(
       action: action as PullRequestType,
       type: type || undefined,
       weight: weight ?? undefined,
-      remark: remark !== undefined ? (remark || null) : undefined,
       hasConflict: conflict.hasConflict,
       conflictReason: conflict.hasConflict ? conflict.impact : null,
       targetPhraseId: targetBinding.targetPhraseId,
@@ -260,9 +260,14 @@ export async function PATCH(
         expectedContentVersion,
         allowedStatuses,
       })
+      const current = await tx.pullRequest.findUniqueOrThrow({ where: { id: prId, batchId: batchIdOfPr } })
       const result = await tx.pullRequest.update({
         where: { id: prId, batchId: batchIdOfPr },
-        data: { ...updateData, ...resetVotesForProposalEdit(pr, updateData) },
+        data: {
+          ...updateData,
+          ...resetVotesForProposalEdit(current, updateData),
+          remark: mergeMiaomiaoReviewRemark(current, updateData, remark !== undefined ? (remark || null) : undefined),
+        },
         include: {
           phrase: true,
           batch: true,

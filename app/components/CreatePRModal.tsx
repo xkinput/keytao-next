@@ -42,6 +42,7 @@ import {
   findCurrentFieldIndex,
 } from '@/lib/services/fieldInferenceGuard'
 import { resolveDictImportInference } from '@/lib/services/dictImportInference'
+import { stripMiaomiaoReviewRemark } from '@/lib/services/miaomiaoReviewRemark'
 
 interface CreatePRModalProps {
   isOpen: boolean
@@ -111,6 +112,18 @@ interface FormItem {
   type: string
   weight: string
   remark: string
+}
+
+export function buildEditFormItem(pr: NonNullable<CreatePRModalProps['editPR']>): FormItem {
+  return {
+    action: pr.action,
+    word: pr.word,
+    oldWord: pr.oldWord || '',
+    code: pr.code,
+    type: pr.type || 'Phrase',
+    weight: pr.weight?.toString() || '',
+    remark: stripMiaomiaoReviewRemark(pr.remark),
+  }
 }
 
 // Meta state managed separately
@@ -401,32 +414,16 @@ export default function CreatePRModal({
       // First time opening in this session - initialize form
       if (batchPRs && batchPRs.length > 0) {
         // Batch edit mode: load all PRs from the batch
-        const items: FormItem[] = batchPRs.map((pr) => ({
+        const items = batchPRs.map((pr) => ({
           pullRequestId: pr.id,
-          action: pr.action,
-          word: pr.word,
-          oldWord: pr.oldWord || '',
-          code: pr.code,
-          type: pr.type || 'Phrase',
-          weight: pr.weight?.toString() || '',
-          remark: pr.remark || ''
+          ...buildEditFormItem(pr),
         }))
         reset({ items }, { keepDirty: false })
 
         // Initialize empty meta states (will be populated as needed)
         setMetaStates(new Map())
       } else if (editPR) {
-        reset({
-          items: [{
-            action: editPR.action,
-            word: editPR.word,
-            oldWord: editPR.oldWord || '',
-            code: editPR.code,
-            type: editPR.type || 'Phrase',
-            weight: editPR.weight?.toString() || '',
-            remark: editPR.remark || ''
-          }]
-        }, { keepDirty: false })
+        reset({ items: [buildEditFormItem(editPR)] }, { keepDirty: false })
         setMetaStates(new Map())
       } else {
         reset({ items: [defaultFormItem] }, { keepDirty: false })

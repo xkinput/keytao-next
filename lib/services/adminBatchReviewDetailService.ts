@@ -1,11 +1,15 @@
 import { prisma } from '@/lib/prisma'
-import { buildSuggestedOrderChains, computeChainDigest } from '@/lib/services/batchAiReviewService'
-import { computeReviewDigest } from '@/lib/services/batchBotReviewService'
+import { buildMiaomiaoItemReviewContext, buildSuggestedOrderChains, computeChainDigest } from '@/lib/services/batchAiReviewService'
+import { computeReviewDigest, requestMiaomiaoItemReview, selectAiReviewFocusContext } from '@/lib/services/batchBotReviewService'
 import { getItemReviewProgress, reviewNotesInclude } from '@/lib/services/batchItemReview'
 import { parseMiaomiaoReviewRemark } from '@/lib/services/miaomiaoReviewRemark'
 import { planChainOrder } from '@/lib/services/suggestedOrderService'
 
 export async function getAdminBatchReviewDetail(id: string, includeVoteCounts = false) {
+  return (await getBatchReviewDetailSnapshot(id, includeVoteCounts))?.batch ?? null
+}
+
+export async function getBatchReviewDetailSnapshot(id: string, includeVoteCounts = false) {
   const batch = await prisma.batch.findUnique({
     where: { id },
     include: {
@@ -139,7 +143,7 @@ export async function getAdminBatchReviewDetail(id: string, includeVoteCounts = 
   const nullCreateIds = new Set(currentItems.filter(pr => pr.action === 'Create' && pr.weight === null).map(pr => pr.id))
 
   const progress = getItemReviewProgress(batch.pullRequests, conflictResults)
-  return {
+  const detail = {
     ...batch,
     pullRequests: enrichedPRs.map(pr => {
       const order = reviewsById.get(pr.id)?.suggestedOrder
@@ -151,4 +155,22 @@ export async function getAdminBatchReviewDetail(id: string, includeVoteCounts = 
     }),
     reviewProgress: { ...progress, canFinalize: batch.status === 'Submitted' && progress.canFinalize },
   }
+  return { batch: detail, rawPullRequests: batch.pullRequests }
+}
+
+type ReviewDetail = NonNullable<Awaited<ReturnType<typeof getAdminBatchReviewDetail>>>
+
+export async function requestBatchMiaomiaoItemReview(
+  batch: Pick<ReviewDetail, 'id' | 'status' | 'description'>,
+  pullRequests: ReviewDetail['pullRequests'],
+  targetIds?: number[],
+) {
+  const reviewContext = targetIds ? selectAiReviewFocusContext(pullRequests, ...targetIds) : pullRequests
+  const contextIds = new Set(reviewContext.map(pr => pr.id))
+  return requestMiaomiaoItemReview({
+    batch: { id: batch.id, status: batch.status, description: batch.description, pullRequests: reviewContext },
+    // Simulate chain edits in the same batch order as the admin detail.
+    localReview: await buildMiaomiaoItemReviewContext(pullRequests.filter(pr => contextIds.has(pr.id))),
+    focusPrId: targetIds?.length === 1 ? targetIds[0] : undefined,
+  })
 }

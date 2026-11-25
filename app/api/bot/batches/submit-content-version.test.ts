@@ -8,9 +8,10 @@ const mockCheckBatchConflicts = vi.fn()
 const mockBuildWarnings = vi.fn()
 const mockPhraseFindMany = vi.fn()
 const mockExecuteRaw = vi.fn()
+const mockLockedPullRequests = vi.fn()
 const mockTransaction = vi.fn(async (callback: (tx: unknown) => unknown) => callback({
   batch: { updateMany: mockUpdateMany },
-  pullRequest: { findMany: vi.fn(async () => draftBatch().pullRequests) },
+  pullRequest: { findMany: mockLockedPullRequests },
   phrase: { findMany: mockPhraseFindMany },
   $executeRawUnsafe: mockExecuteRaw,
 }))
@@ -56,6 +57,7 @@ function draftBatch() {
       code: 'ces',
       type: 'Phrase',
       weight: null,
+      remark: null as string | null,
     }],
   }
 }
@@ -64,6 +66,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   mockRequireVerifiedBotUser.mockResolvedValue({ authorized: true, user: { id: 42 } })
   mockFindUnique.mockResolvedValue(draftBatch())
+  mockLockedPullRequests.mockResolvedValue(draftBatch().pullRequests)
   mockCheckBatchConflicts.mockResolvedValue([{ conflict: { hasConflict: false } }])
   mockBuildWarnings.mockReturnValue([])
   mockUpdateMany.mockResolvedValue({ count: 1 })
@@ -171,5 +174,28 @@ describe('bot batch submit content snapshot', () => {
       success: true,
       batch: { id: 'batch-1', status: 'Submitted', contentVersion: 8 },
     })
+  })
+
+  it.each([
+    ['作者备注', 200],
+    ['修改后的备注', 409],
+  ])('rechecks only the author portion of a remark on confirmation (%j)', async (userRemark, status) => {
+    const { POST } = await import('./[id]/submit/route')
+    const batch = draftBatch()
+    batch.pullRequests[0].remark = '作者备注'
+    mockFindUnique.mockResolvedValue(batch)
+    const payload = { platform: 'qq', platformId: 'u-1', expectedContentVersion: 7 }
+    const params = { params: Promise.resolve({ id: batch.id }) }
+    const preview = await POST(request({ ...payload, previewOnly: true }), params)
+    const { warningDigest, snapshotDigest } = await preview.json()
+
+    batch.pullRequests[0].remark = `${userRemark}\n\n--- miao-review:start ---\n本喵复审：通过\n--- miao-review:end ---`
+    mockLockedPullRequests.mockResolvedValue(batch.pullRequests)
+    const response = await POST(request({
+      ...payload, confirmed: true, expectedWarningDigest: warningDigest, expectedSnapshotDigest: snapshotDigest,
+    }), params)
+
+    expect(response.status).toBe(status)
+    expect(mockUpdateMany).toHaveBeenCalledTimes(status === 200 ? 1 : 0)
   })
 })

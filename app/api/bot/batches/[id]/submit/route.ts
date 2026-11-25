@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import type { PullRequest } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { requireVerifiedBotUser } from '@/lib/botUserAuth'
 import { checkBatchConflictsWithWeight } from '@/lib/services/batchConflictService'
@@ -7,6 +8,7 @@ import { ItemReviewError } from '@/lib/services/batchItemReview'
 import { buildBatchSubmitWarnings } from '@/lib/services/batchSubmitWarnings'
 import { buildSkippedCandidateSlotWarnings } from '@/lib/services/batchSkippedCodeWarnings'
 import { buildPriorityOrderWarnings } from '@/lib/services/batchPriorityOrderWarnings'
+import { stripMiaomiaoReviewRemark } from '@/lib/services/miaomiaoReviewRemark'
 import { PhraseType } from '@/lib/constants/phraseTypes'
 import {
   buildBotWarningDigest,
@@ -24,6 +26,11 @@ function getErrorCode(error: unknown): string | undefined {
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : '未知错误'
+}
+
+function submitSnapshotItems(pullRequests: PullRequest[]) {
+  // Server-written reviews may arrive between preview and confirmation.
+  return pullRequests.map(pr => ({ ...pr, remark: stripMiaomiaoReviewRemark(pr.remark) || null }))
 }
 
 /**
@@ -217,7 +224,7 @@ export async function POST(
     const snapshotDigest = createCanonicalDigest({
       batchId: batch.id,
       contentVersion: batch.contentVersion,
-      pullRequests: batch.pullRequests,
+      pullRequests: submitSnapshotItems(batch.pullRequests),
       warnings,
       warningDigest,
       ...(approvedItemIds.length ? { approvedItemIds } : {}),
@@ -267,7 +274,7 @@ export async function POST(
       const lockedSnapshotDigest = createCanonicalDigest({
         batchId: batch.id,
         contentVersion: batch.contentVersion,
-        pullRequests: lockedPullRequests,
+        pullRequests: submitSnapshotItems(lockedPullRequests),
         warnings,
         warningDigest: lockedDigest,
         ...(approvedItemIds.length ? { approvedItemIds } : {}),
