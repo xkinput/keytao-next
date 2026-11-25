@@ -181,3 +181,68 @@ it('keeps public items and votes in place through refresh and resubmission, then
         vi.unstubAllGlobals()
     }
 })
+
+it('reorders by keyboard and same-code drop while keeping the other code in its frozen row', async () => {
+    const moved = phrase('先候选', 'aa', 104)
+    const live = phrase('现有候选', 'aa', 105)
+    const next = phrase('后候选', 'aa', 108)
+    const other = phrase('其他编码', 'bb')
+    const movedAfter = { ...moved, weight: 106 }
+    const preview = (contentVersion: number, after: typeof moved[]) => ({
+        contentVersion,
+        preview: {
+            changes: [{ phraseType: 'Phrase', codes: ['aa', 'bb'], before: [live], after, beforeStartLine: 1,
+                diffs: [moved, next, other].map((p, index) => ({ type: 'add', itemId: index + 1, phrase: p })),
+            }],
+            rejected: [], summary: { added: 3, modified: 0, deleted: 0, rejected: 0 },
+        },
+    })
+    const initial = preview(1, [moved, live, next, other])
+    const refreshed = preview(2, [live, movedAfter, next, { ...other, word: '外部更新' }])
+    const mutate = vi.fn().mockResolvedValue(refreshed)
+    const container = document.createElement('div')
+    const root = createRoot(container)
+    let complete!: (result: { contentVersion: number; items: { id: number; weight: number }[] }) => void
+    const onReorder = vi.fn(() => new Promise<Parameters<typeof complete>[0]>(resolve => { complete = resolve }))
+    const draw = (version: number) => act(() => root.render(createElement(BatchPreview, {
+        batchId: 'batch-1', expectedContentVersion: version, onReorder, canReorderItem: () => true,
+        reviewItems: [1, 2, 3].map(id => ({ id })),
+        renderReviewItem: id => createElement('span', { 'data-item': id }),
+    })))
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+    try {
+        useAPI.mockReturnValue({ data: initial, mutate })
+        await draw(1)
+        const otherNode = container.querySelector('[data-item="3"]')
+        expect(otherNode).not.toBeNull()
+        expect(container.querySelectorAll('[draggable="true"]')).toHaveLength(2)
+        const down = container.querySelector<HTMLButtonElement>('button[aria-label="下移"]')!
+        await act(() => down.click())
+        expect(onReorder).toHaveBeenCalledWith('aa', 'Phrase', 1, { beforePrId: 2 })
+        expect(container.querySelectorAll('[aria-busy="true"]')).toHaveLength(1)
+
+        useAPI.mockReturnValue({ data: refreshed, mutate })
+        await draw(2)
+        expect(container.textContent).not.toContain('外部更新')
+        await act(() => complete({ contentVersion: 2, items: [{ id: 1, weight: 106 }] }))
+        expect(container.textContent).toMatch(/现有候选.*先候选\s+aa\s+106.*后候选.*其他编码/)
+        expect(container.querySelector('[data-item="3"]')).toBe(otherNode)
+
+        const rowFor = (word: string) => [...container.querySelectorAll('.whitespace-pre')]
+            .find(node => node.textContent?.startsWith(word))!.closest('.relative')!
+        const dataTransfer = { setData: vi.fn(), effectAllowed: '', dropEffect: '' }
+        const event = (type: string) => Object.assign(new Event(type, { bubbles: true, cancelable: true }), { dataTransfer })
+        onReorder.mockRejectedValueOnce(new Error('Conflict'))
+        await act(() => {
+            rowFor(moved.word).querySelector('[draggable="true"]')!.dispatchEvent(event('dragstart'))
+            rowFor(other.word).dispatchEvent(event('drop'))
+        })
+        expect(onReorder).toHaveBeenCalledTimes(1)
+        await act(() => { rowFor(live.word).dispatchEvent(event('drop')) })
+        expect(onReorder).toHaveBeenLastCalledWith('aa', 'Phrase', 1, { afterWord: live.word })
+        expect(dataTransfer.setData).toHaveBeenCalledWith('text/plain', '1')
+    } finally {
+        await act(() => root.unmount())
+        vi.unstubAllGlobals()
+    }
+})

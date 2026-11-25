@@ -194,7 +194,7 @@ export function extractMiaomiaoReviewBlocks(remark?: string | null): string[] {
 export function rewriteMiaomiaoOrderRemark(
   remark: string | null,
   slot: { code: string; type: string },
-  digest?: { before: string; after: string },
+  digest?: { before: string; after: string } | 'remove',
 ): string | null {
   if (!remark) return remark
   const latest = Array.from(remark.matchAll(MIAOMIAO_REVIEW_BLOCK_EXACT_PATTERN)).at(-1)?.index
@@ -203,7 +203,9 @@ export function rewriteMiaomiaoOrderRemark(
       const order = parseSuggestedOrder(value)
       return order?.code === slot.code && order.type === slot.type ? '' : line
     })
-    if (offset === latest && digest) {
+    if (digest === 'remove') {
+      next = next.replace(/^校验[：:][^\r\n\u2028\u2029]*(?:\r\n|[\r\n\u2028\u2029]|$)/gm, '')
+    } else if (offset === latest && digest) {
       const previous = getLineValue(block, '校验')
       if (previous === digest.before || previous === digest.after) {
         // A stale digest can coincide with the new weight after reverting to an older order.

@@ -29,6 +29,7 @@ import { usePageFilterStore } from '@/lib/store/pageFilter'
 import type { PhraseType } from '@/lib/constants/phraseTypes'
 import type { BatchAiReviewItem } from '@/lib/types/batchAiReview'
 import type { BatchReviewTier } from '@/lib/services/batchAiReviewService'
+import type { ChainReorderTarget } from '@/lib/services/suggestedOrderService'
 
 type ReviewDecision = 'Approved' | 'Rejected'
 
@@ -128,14 +129,18 @@ interface BulkReviewTarget {
   expectedContentVersion: number
 }
 
-type PendingDecision = ReviewDecision | 'BulkApproved' | 'ApplyOrder'
+type PendingDecision = ReviewDecision | 'BulkApproved' | 'ApplyOrder' | 'Reorder'
 type QueuedReview =
   | { itemIds: [number]; decision: ReviewDecision; word: string; reason?: string }
   | { itemIds: number[]; decision: 'Approved'; bulk: true }
   | { itemIds: [number]; order: NonNullable<BatchAiReviewItem['suggestedOrder']> }
+  | { itemIds: [number]; order: { code: string; type: string }; reorder: {
+      target: ChainReorderTarget; resolve: (saved: SavedOrder) => void; reject: (error: unknown) => void
+    } }
 
 type SavedItemReview = Pick<PullRequest, 'id' | 'status' | 'reviewNotes'> &
   Partial<Pick<PullRequest, 'weight' | 'remark' | 'reviewFresh' | '_count'>>
+type SavedOrder = { items: SavedItemReview[]; contentVersion: number }
 
 interface ItemReviewQueue {
   reviewerId: number
@@ -381,8 +386,13 @@ function AdminBatchReview({ resolvedParams }: { resolvedParams: { id: string } }
           const expectedContentVersion = queue.nextVersion
           const endpoint = `/api/admin/batches/${queue.batchId}/items`
           let saved
-          if ('order' in entry) {
-            saved = await apiRequest<{ items: SavedItemReview[]; contentVersion: number }>(
+          if ('reorder' in entry) {
+            saved = await apiRequest<SavedOrder>(`/api/batches/${queue.batchId}/reorder`, {
+              method: 'POST',
+              body: { ...entry.order, movedPrId: itemIds[0], ...entry.reorder.target, expectedContentVersion },
+            })
+          } else if ('order' in entry) {
+            saved = await apiRequest<SavedOrder>(
               `${endpoint}/${itemIds[0]}/apply-order`,
               { method: 'POST', body: { chainDigest: entry.order.chainDigest, expectedContentVersion } },
             )
@@ -416,11 +426,15 @@ function AdminBatchReview({ resolvedParams }: { resolvedParams: { id: string } }
               if (!('order' in entry)) return { ...item, status: reviewed.status, reviewNotes: reviewed.reviewNotes }
               const order = item.aiReview?.suggestedOrder
               const clearOrder = order?.code === entry.order.code && order.type === entry.order.type
+              const staleReview = 'reorder' in entry && reviewed.reviewFresh === false
               return {
                 ...item, ...reviewed,
-                ...(clearOrder ? {
-                  suggestedOrderApplicable: false, aiReview: { ...item.aiReview!, suggestedOrder: undefined },
-                } : {}),
+                ...(clearOrder ? { suggestedOrderApplicable: false } : {}),
+                ...(item.aiReview && (clearOrder || staleReview) ? { aiReview: {
+                  ...item.aiReview,
+                  ...(clearOrder ? { suggestedOrder: undefined } : {}),
+                  ...(staleReview ? { reviewDigestMatches: false } : {}),
+                } } : {}),
               }
             })
             const batch = {
@@ -460,6 +474,7 @@ function AdminBatchReview({ resolvedParams }: { resolvedParams: { id: string } }
             delete next[itemIds[0]]
             return next
           })
+          if ('reorder' in entry && 'items' in saved) entry.reorder.resolve(saved)
         }
         await syncReviewDetails(queue.reviewerId)
       } while (queue.entries.length)
@@ -483,7 +498,12 @@ function AdminBatchReview({ resolvedParams }: { resolvedParams: { id: string } }
           ? ineligibleIds ? `${ineligibleIds.length} 条词条不满足批量放行条件` : message
           : `「${failed.word}」${message}`
         toast.error(`${label}${remaining.length ? `，另有 ${remaining.length} 条未保存` : ''}`)
-        await syncReviewDetails(queue.reviewerId).catch(() => setReviewSyncError(true))
+        const failedReorders = queue.entries.filter(entry => 'reorder' in entry)
+        await Promise.all([
+          syncReviewDetails(queue.reviewerId).catch(() => setReviewSyncError(true)),
+          failedReorders.length ? refreshPreview() : undefined,
+        ])
+        for (const entry of failedReorders) entry.reorder.reject(err)
       } else {
         setReviewSyncError(true)
       }
@@ -510,6 +530,10 @@ function AdminBatchReview({ resolvedParams }: { resolvedParams: { id: string } }
       queued.order.code === entry.order.code && queued.order.type === entry.order.type)) {
       return '有词条的审核结果正在保存'
     }
+    if (!('order' in entry) && currentQueue?.entries.some(queued => 'reorder' in queued && entry.itemIds.some(id => {
+      const item = pullRequestById.get(id)
+      return item && (item.code ?? item.phrase?.code) === queued.order.code && (item.type ?? 'Phrase') === queued.order.type
+    }))) return '有词条的排序正在保存'
 
     const queue: ItemReviewQueue = currentQueue ?? {
       reviewerId, batchId, nextVersion: batchDataForReview.contentVersion, entries: [],
@@ -518,7 +542,7 @@ function AdminBatchReview({ resolvedParams }: { resolvedParams: { id: string } }
     setPendingDecisions(current => {
       const next = { ...current }
       for (const id of entry.itemIds) {
-        next[id] = 'order' in entry ? 'ApplyOrder' : 'bulk' in entry ? 'BulkApproved' : entry.decision
+        next[id] = 'reorder' in entry ? 'Reorder' : 'order' in entry ? 'ApplyOrder' : 'bulk' in entry ? 'BulkApproved' : entry.decision
       }
       return next
     })
@@ -796,6 +820,23 @@ function AdminBatchReview({ resolvedParams }: { resolvedParams: { id: string } }
     const snapshot = reviewSnapshot.get(item.id)?.item
     return !!snapshot && changedReviewContent(snapshot, item)
   }
+  const canReorderItem = (id: number) => {
+    const item = pullRequestById.get(id)
+    return !!item && !item.appliedAt && item.action !== 'Delete' && !isStaleItem(item)
+  }
+  const handleReorder = (code: string, type: string, movedPrId: number, target: ChainReorderTarget) =>
+    new Promise<SavedOrder>((resolve, reject) => {
+      const failure = error || reviewSyncError || activeReview || bulkReviewTarget || !canReorderItem(movedPrId) ||
+        (typeof target.beforePrId === 'number' && !canReorderItem(target.beforePrId))
+        ? '批次正在同步或状态已变化，请重试'
+        : enqueueReviews(batchData.id, batchData.contentVersion, {
+          itemIds: [movedPrId], order: { code, type }, reorder: { target, resolve, reject },
+        })
+      if (failure) {
+        toast.error(failure)
+        reject(new Error(failure))
+      }
+    })
   const bulkItemIds = showBulkReview ? batchData.pullRequests.filter(item => {
     return item.status === 'Pending' && !item.appliedAt && item.aiReview?.tier === 'safe' &&
       item.aiReview.reviewDigestMatches && !pendingDecisions[item.id] &&
@@ -1077,6 +1118,7 @@ function AdminBatchReview({ resolvedParams }: { resolvedParams: { id: string } }
             } : undefined}
             onNewerReviewPreview={refreshReviewDetails}
             reviewItems={reviewItems} renderReviewItem={renderReviewItem}
+            onReorder={canReview ? handleReorder : undefined} canReorderItem={canReorderItem}
             getReviewWeight={id => reviewSnapshot.get(id)?.orderedWeight}
             renderReviewControls={outdated => canReview && (
               <div className="flex min-h-8 flex-wrap items-center gap-2">
@@ -1169,7 +1211,7 @@ function AdminBatchReview({ resolvedParams }: { resolvedParams: { id: string } }
               <ModalHeader id="bulk-review-dialog-title">确认通过这 {bulkReviewTarget.itemIds.length} 条词条？</ModalHeader>
               {pendingReviewCount === bulkReviewTarget.itemIds.length +
                 batchData.pullRequests.filter(pr => !pr.appliedAt && pr.status === 'Pending' &&
-                  pendingDecisions[pr.id] && pendingDecisions[pr.id] !== 'ApplyOrder').length && (
+                  pendingDecisions[pr.id] && !['ApplyOrder', 'Reorder'].includes(pendingDecisions[pr.id])).length && (
                 <ModalBody>将自动提交审核结果并进入下一批</ModalBody>
               )}
               <ModalFooter>

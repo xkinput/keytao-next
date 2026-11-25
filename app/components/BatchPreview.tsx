@@ -1,9 +1,10 @@
 'use client'
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode, type RefObject } from 'react'
 import { Button, Chip, Spinner } from '@/lib/heroui-compat'
-import { AlertTriangle, Bot, CheckCircle2, X } from 'lucide-react'
+import { AlertTriangle, ArrowDown, ArrowUp, Bot, CheckCircle2, GripVertical, RefreshCw, X } from 'lucide-react'
 import { useAPI } from '@/lib/hooks/useSWR'
 import { parseMiaomiaoReviewRemark, type MiaomiaoReviewRemarkBlock } from '@/lib/services/miaomiaoReviewRemark'
+import type { ChainReorderTarget } from '@/lib/services/suggestedOrderService'
 
 interface PreviewPhrase {
     word: string
@@ -66,6 +67,11 @@ interface BatchPreviewProps {
     renderReviewItem?: (itemId: number, stale: boolean, rejectedReason?: string, inDiff?: boolean) => ReactNode
     getReviewWeight?: (itemId: number) => number | undefined
     renderReviewControls?: (outdated: boolean) => ReactNode
+    onReorder?: (code: string, type: string, movedPrId: number, target: ChainReorderTarget) => Promise<{
+        contentVersion: number
+        items: { id: number; weight?: number | null; remark?: string | null }[]
+    }>
+    canReorderItem?: (itemId: number) => boolean
     onAddFirst?: () => void
 }
 
@@ -83,6 +89,17 @@ interface Hunk {
 }
 
 const phraseKey = (p: PreviewPhrase) => `${p.word}@@${p.code}`
+const reorderKey = (p: PreviewPhrase) => JSON.stringify([p.type, p.code, p.word])
+const reorderRunKey = (p: PreviewPhrase) => `${p.type}:${p.code}`
+const draftAfter = (diff: DiffItem) => diff.type === 'add' ? diff.phrase : diff.after
+type ReorderSource = { itemId: number; code: string; type: string }
+type DiffReorder = {
+    drag: RefObject<ReorderSource | null>
+    pendingId: number | null
+    disabled: boolean
+    canMove: NonNullable<BatchPreviewProps['canReorderItem']>
+    move: (source: ReorderSource, target: ChainReorderTarget) => void
+}
 
 function comparePhrases(a: PreviewPhrase, b: PreviewPhrase): number {
     const codeCmp = a.code.localeCompare(b.code)
@@ -243,8 +260,9 @@ function formatPhraseLine(p: PreviewPhrase, weight = p.weight): string {
 function prepareDiff(group: TypeChangeGroup) {
     const hunks = computeUnifiedDiff(group.before, group.after, 3, group.beforeStartLine)
     const actionRows = new Map<UnifiedLine, number>()
+    const base = { hunks, actionRows, after: group.after, diffs: group.diffs }
     if (!hunks.length) {
-        return { hunks, actionRows, shownIds: group.diffs.flatMap(diff => diff.itemId === undefined ? [] : [diff.itemId]) }
+        return { ...base, shownIds: group.diffs.flatMap(diff => diff.itemId === undefined ? [] : [diff.itemId]) }
     }
 
     const actionKey = (kind: 'add' | 'remove', phrase: PreviewPhrase) => JSON.stringify([kind, phrase.type, phrase.word, phrase.code])
@@ -267,7 +285,42 @@ function prepareDiff(group: TypeChangeGroup) {
             }
         }
     }
-    return { hunks, actionRows, shownIds: [...actionRows.values()] }
+    return { ...base, shownIds: [...actionRows.values()] }
+}
+
+function replaceRun(layout: ReturnType<typeof prepareDiff>, source: ReorderSource, nextRun: PreviewPhrase[]) {
+    const inRun = (phrase: PreviewPhrase) => phrase.code === source.code && phrase.type === source.type
+    const positions = new Map(nextRun.map((phrase, index) => [reorderKey(phrase), index]))
+    const start = layout.after.findIndex(inRun)
+    const after = layout.after.flatMap((phrase, index) => inRun(phrase) ? index === start ? nextRun : [] : [phrase])
+    if (!layout.hunks.length) {
+        const slots = new Map(layout.diffs.flatMap(diff => {
+            const phrase = draftAfter(diff)
+            const position = phrase && positions.get(reorderKey(phrase))
+            return position === undefined ? [] : [[diff, position] as const]
+        }))
+        const sorted = [...slots].sort((a, b) => a[1] - b[1]).map(([diff, position]) =>
+            diff.type === 'add' ? { ...diff, phrase: nextRun[position] } : { ...diff, after: nextRun[position] })
+        let index = 0
+        return { ...layout, after, diffs: layout.diffs.map(diff => slots.has(diff) ? sorted[index++] : diff) }
+    }
+    const lines = layout.hunks.flatMap(hunk => hunk.lines.filter((line): line is Exclude<UnifiedLine, { kind: 'remove' }> => line.kind !== 'remove' &&
+        inRun(line.phrase) && positions.has(reorderKey(line.phrase))))
+    const sorted = lines.toSorted((a, b) => positions.get(reorderKey(a.phrase))! - positions.get(reorderKey(b.phrase))!)
+    const actionRows = new Map(layout.actionRows)
+    const replacements = new Map(lines.map((line, index) => {
+        const moved = sorted[index]
+        const next = { ...moved, phrase: nextRun[positions.get(reorderKey(moved.phrase))!], newLine: line.newLine }
+        actionRows.delete(line)
+        return [line, next] as const
+    }))
+    sorted.forEach((line, index) => {
+        const id = layout.actionRows.get(line)
+        if (id !== undefined) actionRows.set(replacements.get(lines[index])!, id)
+    })
+    return { ...layout, after, actionRows, hunks: layout.hunks.map(hunk => ({
+        ...hunk, lines: hunk.lines.map(line => line.kind === 'remove' ? line : replacements.get(line) ?? line),
+    })) }
 }
 
 function formatReviewTime(value: string): string {
@@ -347,17 +400,114 @@ function PhraseLineContent({ phrase, colorClass, actions, reviewDetail, reviewWe
     )
 }
 
-function DiffView({ group, layout, renderLineActions, renderReviewItem, getReviewWeight, keepPhraseRemark }: {
-    group: TypeChangeGroup
+function DiffView({ layout, renderLineActions, renderReviewItem, getReviewWeight, keepPhraseRemark, reorder }: {
     layout: ReturnType<typeof prepareDiff>
     renderLineActions?: BatchPreviewProps['renderLineActions']
     renderReviewItem?: (itemId: number) => ReactNode
     getReviewWeight?: BatchPreviewProps['getReviewWeight']
     keepPhraseRemark?: boolean
+    reorder?: DiffReorder
 }) {
     const { hunks, actionRows } = layout
     const hasFull = hunks.length > 0
-    const actionsFor = (itemId?: number) => itemId === undefined ? undefined : renderLineActions?.(itemId)
+    const targets = new Map<string, number | null>()
+    const runs = new Map<string, PreviewPhrase[]>()
+    if (reorder) {
+        for (const diff of layout.diffs) {
+            const phrase = draftAfter(diff)
+            if (!phrase || diff.itemId === undefined) continue
+            const key = reorderKey(phrase)
+            targets.set(key, targets.has(key) ? null : diff.itemId)
+        }
+        for (const phrase of layout.after) {
+            const key = reorderRunKey(phrase)
+            const run = runs.get(key)
+            if (run) run.push(phrase)
+            else runs.set(key, [phrase])
+        }
+    }
+    const runFor = (phrase: PreviewPhrase) => runs.get(reorderRunKey(phrase)) ?? []
+    const targetFor = (phrase?: PreviewPhrase): ChainReorderTarget | undefined => {
+        if (!phrase) return { beforePrId: null }
+        const id = targets.get(reorderKey(phrase))
+        if (id === undefined) return { afterWord: phrase.word }
+        if (id !== null && reorder?.canMove(id)) return { beforePrId: id }
+    }
+    const dropProps = (phrase: PreviewPhrase, atEnd = false) => {
+        if (!reorder || reorder.disabled || reorder.pendingId !== null || !targetFor(phrase)) return {}
+        const target = () => {
+            const source = reorder.drag.current
+            if (!source || source.code !== phrase.code || source.type !== phrase.type) return
+            const run = runFor(phrase)
+            const index = run.findIndex(p => reorderKey(p) === reorderKey(phrase))
+            if (index < 0) return
+            const destination = atEnd ? targetFor() : targetFor(phrase)
+            if (!destination || destination.beforePrId === source.itemId ||
+                (atEnd ? targetFor(phrase)?.beforePrId === source.itemId :
+                    targetFor(run[index - 1])?.beforePrId === source.itemId)) return
+            return { source, destination }
+        }
+        return {
+            onDragOver: (event: DragEvent<HTMLElement>) => {
+                if (atEnd) event.stopPropagation()
+                if (!target()) return
+                event.preventDefault()
+                event.dataTransfer.dropEffect = 'move'
+            },
+            onDrop: (event: DragEvent<HTMLElement>) => {
+                if (atEnd) event.stopPropagation()
+                const drop = target()
+                if (!drop) return
+                event.preventDefault()
+                reorder.drag.current = null
+                reorder.move(drop.source, drop.destination)
+            },
+        }
+    }
+    const endDropTarget = (phrase: PreviewPhrase) => {
+        const run = runFor(phrase)
+        const last = run.at(-1)
+        if (!last || run.length < 2 || reorderKey(last) !== reorderKey(phrase)) return null
+        const handlers = dropProps(phrase, true)
+        return handlers.onDrop && <span aria-hidden="true" className="absolute inset-x-0 bottom-0 h-2" {...handlers} />
+    }
+    const actionsFor = (itemId?: number, phrase?: PreviewPhrase) => {
+        if (itemId === undefined) return undefined
+        const actions = renderLineActions?.(itemId)
+        if (!phrase || !reorder?.canMove(itemId) || targets.get(reorderKey(phrase)) !== itemId) return actions
+        const run = runFor(phrase)
+        const index = run.findIndex(p => reorderKey(p) === reorderKey(phrase))
+        if (index < 0 || run.length < 2) return actions
+        const source = { itemId, code: phrase.code, type: phrase.type }
+        const up = index > 0 ? targetFor(run[index - 1]) : undefined
+        const down = index < run.length - 1 ? targetFor(run[index + 2]) : undefined
+        const disabled = reorder.disabled || reorder.pendingId !== null
+        const busy = reorder.pendingId === itemId
+        return (
+            <div className="flex items-center gap-1" aria-busy={busy || undefined}>
+                <span aria-label="拖动调整顺序" role="img" draggable={!disabled}
+                    className={disabled ? undefined : 'cursor-grab'}
+                    onDragStart={event => {
+                        if (disabled) return event.preventDefault()
+                        reorder.drag.current = source
+                        event.dataTransfer.setData('text/plain', String(itemId))
+                        event.dataTransfer.effectAllowed = 'move'
+                    }} onDragEnd={() => { reorder.drag.current = null }}>
+                    {busy ? <RefreshCw className="size-4 motion-safe:animate-spin" aria-hidden="true" /> :
+                        <GripVertical className="size-4" aria-hidden="true" />}
+                </span>
+                <Button isIconOnly type="button" size="sm" variant="light" aria-label="上移" aria-disabled={disabled || !up}
+                    onPress={() => { if (!disabled && up) reorder.move(source, up) }}>
+                    <ArrowUp className="size-4" aria-hidden="true" />
+                </Button>
+                <Button isIconOnly type="button" size="sm" variant="light" aria-label="下移" aria-disabled={disabled || !down}
+                    onPress={() => { if (!disabled && down) reorder.move(source, down) }}>
+                    <ArrowDown className="size-4" aria-hidden="true" />
+                </Button>
+                {actions}
+            </div>
+        )
+    }
     const detailFor = (itemId?: number) => itemId === undefined ? undefined : renderReviewItem?.(itemId)
     const weightFor = (itemId?: number) => itemId === undefined ? undefined : getReviewWeight?.(itemId)
 
@@ -375,11 +525,12 @@ function DiffView({ group, layout, renderLineActions, renderReviewItem, getRevie
                             const key = itemId ?? `${line.kind}:${phraseKey(line.phrase)}`
                             if (line.kind === 'context') {
                                 return (
-                                    <div key={key} className="flex gap-0 text-[#565f89] hover:bg-[#1e2030]/50">
+                                    <div key={key} {...dropProps(line.phrase)} className="relative flex gap-0 text-[#565f89] hover:bg-[#1e2030]/50">
                                         <span className="w-12 text-right pr-3 py-1.5 select-none border-r border-[#2a2d3e] shrink-0 text-[#3b4261]">{line.oldLine}</span>
                                         <span className="w-12 text-right pr-3 py-1.5 select-none border-r border-[#2a2d3e] shrink-0 text-[#3b4261]">{line.newLine}</span>
                                         <span className="px-3 py-1.5 select-none w-6 shrink-0"> </span>
                                         <PhraseLineContent phrase={line.phrase} colorClass="text-[#565f89]" />
+                                        {endDropTarget(line.phrase)}
                                     </div>
                                 )
                             }
@@ -396,13 +547,14 @@ function DiffView({ group, layout, renderLineActions, renderReviewItem, getRevie
                             }
                             // add
                             return (
-                                <div key={key} className="flex gap-0 bg-[#1a3a1a]/40 hover:bg-[#1a3a1a]/60">
+                                <div key={key} {...dropProps(line.phrase)} className="relative flex gap-0 bg-[#1a3a1a]/40 hover:bg-[#1a3a1a]/60">
                                     <span className="w-12 text-right pr-3 py-1.5 select-none border-r border-[#2a5a2a] shrink-0 text-[#3b4261]"> </span>
                                     <span className="w-12 text-right pr-3 py-1.5 select-none border-r border-[#2a5a2a] shrink-0 text-[#9ece6a] font-semibold">{line.newLine}</span>
                                     <span className="px-3 py-1.5 text-[#9ece6a] select-none w-6 shrink-0">+</span>
                                     <PhraseLineContent phrase={line.phrase} colorClass="text-[#9ece6a]"
-                                        actions={actionsFor(itemId)} reviewDetail={detailFor(itemId)}
+                                        actions={actionsFor(itemId, line.phrase)} reviewDetail={detailFor(itemId)}
                                         reviewWeight={weightFor(itemId)} keepPhraseRemark={keepPhraseRemark} />
+                                    {endDropTarget(line.phrase)}
                                 </div>
                             )
                         })}
@@ -414,7 +566,7 @@ function DiffView({ group, layout, renderLineActions, renderReviewItem, getRevie
                     <div className="px-4 py-1.5 bg-[#1e2030] text-[#7dcfff] border-y border-[#2a2d3e]">
                         @@ changes @@
                     </div>
-                    {group.diffs.map(diff => {
+                    {layout.diffs.map(diff => {
                         if (diff.type === 'remove' && diff.phrase) {
                             return (
                                 <div key={diff.itemId ?? `remove:${phraseKey(diff.phrase)}`} className="flex gap-0 bg-[#3d1515]/40">
@@ -426,11 +578,12 @@ function DiffView({ group, layout, renderLineActions, renderReviewItem, getRevie
                         }
                         if (diff.type === 'add' && diff.phrase) {
                             return (
-                                <div key={diff.itemId ?? `add:${phraseKey(diff.phrase)}`} className="flex gap-0 bg-[#1a3a1a]/40">
+                                <div key={diff.itemId ?? `add:${phraseKey(diff.phrase)}`} {...dropProps(diff.phrase)} className="relative flex gap-0 bg-[#1a3a1a]/40">
                                     <span className="px-3 py-1.5 text-[#9ece6a] select-none w-6 shrink-0">+</span>
                                     <PhraseLineContent phrase={diff.phrase} colorClass="text-[#9ece6a]"
-                                        actions={actionsFor(diff.itemId)} reviewDetail={detailFor(diff.itemId)}
+                                        actions={actionsFor(diff.itemId, diff.phrase)} reviewDetail={detailFor(diff.itemId)}
                                         reviewWeight={weightFor(diff.itemId)} keepPhraseRemark={keepPhraseRemark} />
+                                    {endDropTarget(diff.phrase)}
                                 </div>
                             )
                         }
@@ -441,11 +594,12 @@ function DiffView({ group, layout, renderLineActions, renderReviewItem, getRevie
                                         <span className="px-3 py-1.5 text-[#f7768e] select-none w-6 shrink-0">-</span>
                                         <PhraseLineContent phrase={diff.before} colorClass="text-[#f7768e]" />
                                     </div>
-                                    <div className="flex gap-0 bg-[#1a3a1a]/40">
+                                    <div {...dropProps(diff.after)} className="relative flex gap-0 bg-[#1a3a1a]/40">
                                         <span className="px-3 py-1.5 text-[#9ece6a] select-none w-6 shrink-0">+</span>
                                         <PhraseLineContent phrase={diff.after} colorClass="text-[#9ece6a]"
-                                            actions={actionsFor(diff.itemId)} reviewDetail={detailFor(diff.itemId)}
+                                            actions={actionsFor(diff.itemId, diff.after)} reviewDetail={detailFor(diff.itemId)}
                                             reviewWeight={weightFor(diff.itemId)} keepPhraseRemark={keepPhraseRemark} />
+                                        {endDropTarget(diff.after)}
                                     </div>
                                 </div>
                             )
@@ -483,9 +637,16 @@ export default function BatchPreview({ defaultCollapsed = false, onAddFirst, ...
 function BatchPreviewContent({
     batchId, reviewing = false, expectedContentVersion, reviewedFromContentVersion, onNewerReviewPreview,
     renderLineActions, lineActionItems, reviewCounts, reviewItems, renderReviewItem, getReviewWeight, renderReviewControls,
+    onReorder, canReorderItem,
 }: BatchPreviewProps) {
     const [reviewLayout, setReviewLayout] = useState<PreviewResult>()
     const [publicLayout, setPublicLayout] = useState<{ contentVersion: number; preview: PreviewResult }>()
+    const [reorderedLayouts, setReorderedLayouts] = useState<{
+        preview: PreviewResult; layouts: Map<TypeChangeGroup, ReturnType<typeof prepareDiff>>
+    }>()
+    const drag = useRef<ReorderSource | null>(null)
+    const reorderInFlight = useRef(false)
+    const [reorderingId, setReorderingId] = useState<number | null>(null)
     const { data, error, isLoading, isValidating, mutate } = useAPI<{ contentVersion: number; preview: PreviewResult }>(
         `/api/batches/${batchId}/preview${reviewing ? '?review=1' : ''}`,
         { keepPreviousData: false, revalidateOnFocus: !reviewing, revalidateOnReconnect: !reviewing },
@@ -503,8 +664,8 @@ function BatchPreviewContent({
         ? onNewerReviewPreview()
         : mutate().catch(() => undefined), [newerPreview, onNewerReviewPreview, mutate])
     useEffect(() => {
-        if (outdated) void refresh()
-    }, [outdated, expectedContentVersion, previewVersion, refresh])
+        if (outdated && reorderingId === null) void refresh()
+    }, [outdated, expectedContentVersion, previewVersion, refresh, reorderingId])
 
     const adminReview = reviewing && Boolean(renderReviewItem)
     const publicDetails = !reviewing && Boolean(renderReviewItem)
@@ -518,7 +679,7 @@ function BatchPreviewContent({
     }
     // Keep displayed rows anchored while data catches up or a resubmission changes only review state.
     const keepPublicLayout = publicLayout && (
-        outdated || publicLayout.contentVersion === expectedContentVersion || isReviewedVersion(publicLayout.contentVersion)
+        reorderingId !== null || outdated || publicLayout.contentVersion === expectedContentVersion || isReviewedVersion(publicLayout.contentVersion)
     )
     const displayedPublicLayout = keepPublicLayout || !compatiblePreview ? publicLayout : data
     if (publicDetails && displayedPublicLayout !== publicLayout) setPublicLayout(displayedPublicLayout)
@@ -529,7 +690,52 @@ function BatchPreviewContent({
     const stalePublicLines = publicDetails && displayedPublicLayout && expectedContentVersion !== undefined &&
         displayedPublicLayout.contentVersion !== expectedContentVersion && !isReviewedVersion(displayedPublicLayout.contentVersion)
     const changes = preview?.changes
-    const layouts = useMemo(() => new Map(changes?.map(group => [group, prepareDiff(group)])), [changes])
+    const layouts = useMemo(() => new Map(changes?.map(group => [group,
+        (reorderedLayouts?.preview === preview ? reorderedLayouts?.layouts.get(group) : undefined) ?? prepareDiff(group),
+    ])), [changes, preview, reorderedLayouts])
+    const move = async (group: TypeChangeGroup, source: ReorderSource, target: ChainReorderTarget) => {
+        if (!preview || !onReorder || reorderInFlight.current) return
+        const layout = layouts.get(group)!
+        reorderInFlight.current = true
+        setReorderingId(source.itemId)
+        try {
+            const saved = await onReorder(source.code, source.type, source.itemId, target)
+            const inRun = (p: PreviewPhrase) => p.code === source.code && p.type === source.type
+            const fresh = await mutate().catch(() => undefined)
+            const freshRun = fresh?.contentVersion === saved.contentVersion
+                ? fresh.preview.changes.find(g => g.phraseType === source.type && g.codes.includes(source.code))?.after.filter(inRun)
+                : undefined
+            const after = layout.after.filter(inRun)
+            const phraseFor = (id: number) => {
+                const diff = group.diffs.find(item => item.itemId === id)
+                return diff && draftAfter(diff)
+            }
+            const moved = phraseFor(source.itemId)!
+            const anchor = typeof target.beforePrId === 'number' ? phraseFor(target.beforePrId)?.word : target.afterWord
+            const remaining = after.filter(phrase => phrase.word !== moved.word)
+            const at = remaining.findIndex(phrase => phrase.word === anchor)
+            remaining.splice(at < 0 ? remaining.length : at, 0, after.find(phrase => phrase.word === moved.word) ?? moved)
+            const savedPhrases = new Map(saved.items.flatMap(item => {
+                const phrase = phraseFor(item.id)
+                return phrase ? [[reorderKey(phrase), item] as const] : []
+            }))
+            const nextRun = freshRun?.length ? freshRun : remaining.map(phrase => {
+                const item = savedPhrases.get(reorderKey(phrase))
+                return item ? { ...phrase, weight: item.weight ?? phrase.weight, remark: item.remark ?? undefined } : phrase
+            })
+            setReorderedLayouts(current => {
+                const next = new Map(current?.preview === preview ? current.layouts : undefined)
+                next.set(group, replaceRun(layout, source, nextRun))
+                return { preview, layouts: next }
+            })
+            if (publicDetails) setPublicLayout({ preview, contentVersion: saved.contentVersion })
+        } catch {
+            // The caller handles the request error and resync.
+        } finally {
+            reorderInFlight.current = false
+            setReorderingId(null)
+        }
+    }
     const lineActions = renderLineActions && ((id: number) => renderLineActions(id, reviewing ? outdated : Boolean(stalePublicLines)))
     const reviewDetail = renderReviewItem && ((id: number, reason?: string, inDiff = false) =>
         renderReviewItem(id, reviewing ? outdated : inDiff && Boolean(stalePublicLines), reason, inDiff))
@@ -669,9 +875,13 @@ function BatchPreviewContent({
                                     <span className="font-bold">{type}</span>
                                 </div>
                                 {groups.map((group, i) => (
-                                    <DiffView key={group.codes.join(',') || i} group={group} layout={layouts.get(group)!}
+                                    <DiffView key={group.codes.join(',') || i} layout={layouts.get(group)!}
                                         renderLineActions={lineActions} renderReviewItem={reviewDetail && (id => reviewDetail(id, undefined, true))}
-                                        getReviewWeight={getReviewWeight} keepPhraseRemark={publicDetails} />
+                                        getReviewWeight={getReviewWeight} keepPhraseRemark={publicDetails}
+                                        reorder={onReorder && canReorderItem ? {
+                                            drag, pendingId: reorderingId, disabled: outdated || Boolean(stalePublicLines), canMove: canReorderItem,
+                                            move: (source, target) => void move(group, source, target),
+                                        } : undefined} />
                                 ))}
                             </div>
                         ))}

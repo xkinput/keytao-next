@@ -2,13 +2,36 @@ import { describe, expect, it } from 'vitest'
 import type { BatchAiReviewChainEntry } from '@/lib/types/batchAiReview'
 import { compareChainEntry } from './batchAiReviewService'
 import { parseMiaomiaoReviewRemark, rewriteMiaomiaoOrderRemark } from './miaomiaoReviewRemark'
-import { planChainOrder } from './suggestedOrderService'
+import { moveChainEntry, planChainOrder } from './suggestedOrderService'
 
 const current = (word: string, weight: number | null): BatchAiReviewChainEntry => ({
   word, weight, code: 'abcd', type: 'Phrase', source: 'current',
 })
 const draft = (word: string, weight: number | null, prId: number): BatchAiReviewChainEntry => ({
   ...current(word, weight), source: 'draft', prId, action: 'Create',
+})
+
+describe('moveChainEntry', () => {
+  const after = [current('甲', 100), draft('乙', 101, 1), current('丙', 102), draft('丁', 103, 2)]
+
+  it('places a draft before another draft or a live word and preserves the other entries', () => {
+    expect(moveChainEntry(after, 2, { beforePrId: 1 })).toEqual(['甲', '丁', '乙', '丙'])
+    expect(moveChainEntry(after, 1, { afterWord: '甲' })).toEqual(['乙', '甲', '丙', '丁'])
+    expect(after.map(entry => entry.word)).toEqual(['甲', '乙', '丙', '丁'])
+  })
+
+  it('appends on null and leaves an unchanged move in its original order', () => {
+    expect(moveChainEntry(after, 1, { beforePrId: null })).toEqual(['甲', '丙', '丁', '乙'])
+    expect(moveChainEntry(after, 1, { afterWord: null })).toEqual(['甲', '丙', '丁', '乙'])
+    expect(moveChainEntry(after, 1, { beforePrId: 1 })).toEqual(['甲', '乙', '丙', '丁'])
+    expect(moveChainEntry(after, 1, { afterWord: '丙' })).toEqual(['甲', '乙', '丙', '丁'])
+  })
+
+  it('rejects foreign or non-writable sources and targets identified through the wrong field', () => {
+    expect(() => moveChainEntry(after, 99, { beforePrId: 1 })).toThrow('只能调整本批词条')
+    expect(() => moveChainEntry(after, 1, { beforePrId: 99 })).toThrow('编码链已变化')
+    expect(() => moveChainEntry(after, 1, { afterWord: '丁' })).toThrow('编码链已变化')
+  })
 })
 
 describe('planChainOrder', () => {

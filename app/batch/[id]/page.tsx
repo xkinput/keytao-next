@@ -15,6 +15,7 @@ import {
 import { useAuthStore } from '@/lib/store/auth'
 import { useAPI, apiRequest } from '@/lib/hooks/useSWR'
 import { mutate as globalMutate } from 'swr'
+import toast from 'react-hot-toast'
 import CreatePRModal from '@/app/components/CreatePRModal'
 import BatchPreview from '@/app/components/BatchPreview'
 import BatchItemVote, { useBatchItemVotes } from '@/app/components/BatchItemVote'
@@ -25,6 +26,7 @@ import { BATCH_STATUS_MAP, STATUS_COLOR_MAP } from '@/lib/constants/status'
 import type { PhraseType } from '@/lib/constants/phraseTypes'
 import { formatBatchSubmitWarnings, type BatchSubmitWarning } from '@/lib/services/batchSubmitWarnings'
 import { Edit, AlertTriangle, Lightbulb } from 'lucide-react'
+import type { ChainReorderTarget } from '@/lib/services/suggestedOrderService'
 
 type PullRequest = ItemReviewDetailItem & { appliedAt?: string | null }
 
@@ -273,6 +275,19 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
     ? ['Draft', 'Rejected', 'Submitted']
     : ['Draft', 'Rejected']
   const canEdit = !batchData.itemReviewStarted && (isOwner || isAdmin) && editableStatuses.includes(batchData.status)
+  const handleReorder = async (code: string, type: string, movedPrId: number, target: ChainReorderTarget) => {
+    try {
+      const saved = await apiRequest<{ contentVersion: number; items: Pick<PullRequest, 'id' | 'weight' | 'remark'>[] }>(`/api/batches/${batchData.id}/reorder`, {
+        method: 'POST', body: { code, type, movedPrId, ...target, expectedContentVersion: batchData.contentVersion },
+      })
+      await Promise.allSettled([mutate(), votes.refresh()])
+      return saved
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '调整词条顺序失败')
+      if ((error as { status?: number } | null)?.status === 409) await refreshVoteContext()
+      throw error
+    }
+  }
   const waitingOnDependencies = new Set(batchData.reviewProgress?.dependencyPendingIds)
   const reviewedFromContentVersion = resubmittedVersions?.batchId === batchData.id &&
     resubmittedVersions.to === batchData.contentVersion ? resubmittedVersions.from : undefined
@@ -516,6 +531,11 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
           <BatchPreview batchId={resolvedParams.id} expectedContentVersion={batchData.contentVersion}
             reviewedFromContentVersion={reviewedFromContentVersion} onNewerReviewPreview={refreshBatchDetails}
             reviewItems={batchData.pullRequests} renderReviewItem={renderItem} renderLineActions={renderVote}
+            onReorder={canEdit && isPrivateStatus ? handleReorder : undefined}
+            canReorderItem={id => {
+              const item = pullRequestById.get(id)
+              return !!item && !item.appliedAt && item.action !== 'Delete'
+            }}
             onAddFirst={canEdit && batchData.pullRequests.length === 0 ? onOpen : undefined} />
           {votes.error && <p role="status" className="text-sm text-danger">社区投票暂时无法加载</p>}
         </div>
