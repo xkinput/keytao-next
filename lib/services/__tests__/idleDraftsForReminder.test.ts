@@ -36,7 +36,13 @@ describe('idle drafts for Bot reminders', () => {
     }
   })
 
-  it('returns only bound, non-empty idle drafts, ordered by their latest change', async () => {
+  it('rejects malformed modifiedAfter timestamps', async () => {
+    for (const modifiedAfter of ['', '2026-11-26', '2026-02-29T00:00:00Z', '2026-11-26T00:00:00+24:00']) {
+      expect((await request(`?${new URLSearchParams({ modifiedAfter })}`)).status).toBe(400)
+    }
+  })
+
+  it('orders eligible drafts by their latest change and applies filters before the limit', async () => {
     const now = Date.now()
     const minutesAgo = (minutes: number) => new Date(now - minutes * 60_000)
     const qqId = `test-${randomUUID()}`
@@ -44,6 +50,7 @@ describe('idle drafts for Bot reminders', () => {
     const unbound = await prisma.user.create({ data: { email: `test_${randomUUID()}@example.com` } })
 
     function createBatch({
+      id,
       creatorId = bound.id,
       description = 'Web draft',
       status = 'Draft',
@@ -51,6 +58,7 @@ describe('idle drafts for Bot reminders', () => {
       itemsUpdated = [90],
       contentVersion = 0,
     }: {
+      id?: string
       creatorId?: number
       description?: string
       status?: BatchStatus
@@ -60,7 +68,7 @@ describe('idle drafts for Bot reminders', () => {
     } = {}) {
       return prisma.batch.create({
         data: {
-          creatorId, description, status, contentVersion, updateAt: minutesAgo(batchUpdated),
+          id, creatorId, description, status, contentVersion, updateAt: minutesAgo(batchUpdated),
           pullRequests: { create: itemsUpdated.map(minutes => ({
             userId: creatorId,
             word: 'private draft item',
@@ -71,7 +79,9 @@ describe('idle drafts for Bot reminders', () => {
       })
     }
 
-    const personalApi = await createBatch({ description: '个人 API 草稿批次', itemsUpdated: [30], contentVersion: 3 })
+    const personalApi = await createBatch({
+      id: `personal-api-${randomUUID()}`, description: '个人 API 草稿批次', itemsUpdated: [30], contentVersion: 3,
+    })
     const web = await createBatch({ batchUpdated: 40, itemsUpdated: [120, 55], contentVersion: 7 })
     for (const status of ['Submitted', 'Rejected', 'Approved'] as const) {
       await createBatch({ status })
@@ -96,6 +106,21 @@ describe('idle drafts for Bot reminders', () => {
       },
     ]
     expect(await response.json()).toEqual({ success: true, drafts: expected })
+
+    for (const minutes of [35, 40]) {
+      const query = new URLSearchParams({ modifiedAfter: minutesAgo(minutes).toISOString(), limit: '1' })
+      expect(await (await request(`?${query}`)).json()).toEqual({ success: true, drafts: [expected[1]] })
+    }
+    expect(await (await request(`?excludeIds=${web.id}&limit=1`)).json())
+      .toEqual({ success: true, drafts: [expected[1]] })
+    expect(await (await request(`?excludeIds=${web.id},${personalApi.id}&limit=1`)).json())
+      .toEqual({ success: true, drafts: [] })
+
+    const excessiveIds = [web.id, ...Array.from({ length: 200 }, () => randomUUID())].join(',')
+    for (const excludeIds of [`${web.id},,${personalApi.id}`, excessiveIds]) {
+      expect(await (await request(`?excludeIds=${excludeIds}&limit=1`)).json())
+        .toEqual({ success: true, drafts: [expected[0]] })
+    }
 
     vi.stubEnv('KEYTAO_PUBLIC_BASE_QQ', 'https://qq.example.test/')
     const limited = await request('?idleMinutes=20&limit=1')

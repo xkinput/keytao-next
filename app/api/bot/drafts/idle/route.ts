@@ -1,3 +1,5 @@
+import { Prisma } from '@prisma/client'
+import { parseISO } from 'date-fns'
 import { NextRequest, NextResponse } from 'next/server'
 import { verifyBotToken } from '@/lib/botAuth'
 import { prisma } from '@/lib/prisma'
@@ -9,6 +11,9 @@ type IdleDraft = {
   lastModifiedAt: Date
   contentVersion: number
 }
+
+const ISO_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:[.,]\d+)?)?(?:Z|[+-](?:[01]\d|2[0-3])(?::?[0-5]\d)?)$/
+const MAX_EXCLUDE_IDS = 200
 
 function publicBaseUrl() {
   const fallback = 'https://keytao.rea.ink'
@@ -36,6 +41,18 @@ export async function GET(request: NextRequest) {
       )
     }
 
+    const modifiedAfterParam = params.get('modifiedAfter')
+    const modifiedAfter = modifiedAfterParam && ISO_TIMESTAMP.test(modifiedAfterParam)
+      ? parseISO(modifiedAfterParam)
+      : null
+    if (modifiedAfterParam !== null && (!modifiedAfter || Number.isNaN(modifiedAfter.getTime()))) {
+      return NextResponse.json({ success: false, message: 'modifiedAfter 须为带时区的 ISO 时间戳' }, { status: 400 })
+    }
+
+    const excludeIds = params.get('excludeIds')?.split(',', MAX_EXCLUDE_IDS + 1) ?? []
+    const validExcludeIds = excludeIds.length > 0 && excludeIds.length <= MAX_EXCLUDE_IDS &&
+      excludeIds.every(id => id.trim() && !/\p{Cc}/u.test(id))
+
     const cutoff = new Date(Date.now() - idleMinutes * 60_000)
     const rows = await prisma.$queryRaw<IdleDraft[]>`
       SELECT b.id AS "batchId", u."qqId" AS "creatorQqId", COUNT(*)::int AS "itemCount",
@@ -44,8 +61,10 @@ export async function GET(request: NextRequest) {
       JOIN users u ON u.id = b."creatorId"
       JOIN pull_requests pr ON pr."batchId" = b.id
       WHERE b.status = 'Draft' AND u."qqId" IS NOT NULL AND b."updateAt" < ${cutoff}
+        ${validExcludeIds ? Prisma.sql`AND b.id NOT IN (${Prisma.join(excludeIds)})` : Prisma.empty}
       GROUP BY b.id, u."qqId"
       HAVING MAX(pr."updateAt") < ${cutoff}
+        ${modifiedAfter ? Prisma.sql`AND GREATEST(b."updateAt", MAX(pr."updateAt")) > ${modifiedAfter}` : Prisma.empty}
       ORDER BY "lastModifiedAt" ASC, b.id ASC
       LIMIT ${limit}
     `
