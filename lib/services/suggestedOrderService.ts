@@ -112,7 +112,7 @@ async function applyChainOrder(tx: Prisma.TransactionClient, input: {
   const orderedWords = typeof order.orderedWords === 'function' ? order.orderedWords(chain.after) : order.orderedWords
   const nullCreateIds = new Set(activeRows.filter(row => row.action === 'Create' && row.weight === null).map(row => row.id))
   const plan = planChainOrder(chain.after, orderedWords, chain.originalWeights, nullCreateIds)
-  if ('error' in plan) throw new BatchContentLockedError(ORDER_ERRORS[plan.error])
+  if ('error' in plan) throw new BatchContentLockedError(plan.message ?? ORDER_ERRORS[plan.error])
   if (chain.after.every((entry, index) => entry.word === orderedWords[index])) {
     throw new BatchContentLockedError(remarkMode === 'manual' ? '词条顺序未变化' : CHAIN_CHANGED)
   }

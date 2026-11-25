@@ -14,7 +14,6 @@ import type {
 import type { ConflictInfo } from './conflictDetector'
 import { computeReviewDigest } from './batchBotReviewService'
 import { calculateDynamicWeight, checkBatchDuplicates, type BatchPRItem } from './batchConflictService'
-import { findBoundLiveReplacement } from './phraseTargetBinding'
 import {
   getMiaomiaoEvidenceHighlights,
   parseMiaomiaoReviewRemark as parseStructuredRemark,
@@ -40,8 +39,6 @@ interface ReviewPullRequest {
   action: PullRequestAction | string
   word: string | null
   oldWord?: string | null
-  targetPhraseId?: number | null
-  phraseId?: number | null
   code: string | null
   type?: PhraseType | null
   weight: number | null
@@ -648,7 +645,6 @@ async function buildCodeChains(
   }
 
   const chains = new Map<string, BatchAiReviewChainEntry[]>()
-  const currentById = new Map(currentPhrases.map(phrase => [phrase.id, phrase]))
   for (const group of affectedGroups.values()) {
     chains.set(chainKey(group.type, group.code), [])
   }
@@ -686,16 +682,14 @@ async function buildCodeChains(
         if (index >= 0) after.splice(index, 1)
       } else if (pr.action === 'Change') {
         const oldWord = pr.oldWord || pr.phrase?.word
-        const target = findBoundLiveReplacement(currentById, {
-          ...pr, word, code: prCode, type: prType, phraseId: pr.phraseId ?? pr.phrase?.id,
-        })
-        const index = after.findIndex(entry => target
-          ? entry.source === 'current' && entry.word === word
-          : entry.word === oldWord)
+        const index = oldWord
+          ? after.findIndex(entry => entry.word === oldWord && entry.code === prCode)
+          : -1
         if (index >= 0) {
           after[index] = {
             ...after[index],
             word,
+            oldWord,
             weight: pr.weight ?? after[index].weight,
             source: 'draft',
             action: pr.action,
@@ -705,6 +699,7 @@ async function buildCodeChains(
         } else {
           after.push({
             word,
+            oldWord,
             code: prCode,
             type: prType,
             weight: pr.weight ?? nextWeight(after),

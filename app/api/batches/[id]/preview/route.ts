@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server'
 import { checkAdminPermission } from '@/lib/adminAuth'
 import { prisma } from '@/lib/prisma'
 import type { PhraseType } from '@/lib/constants/phraseTypes'
-import { findBoundLiveReplacement } from '@/lib/services/phraseTargetBinding'
 
 interface PreviewPhrase {
     word: string
@@ -384,15 +383,7 @@ export async function GET(
 
         } else {
             const { checkBatchConflictsWithWeight } = await import('@/lib/services/batchConflictService')
-            const existingPhrases = await prisma.phrase.findMany({
-                where: { code: { in: Array.from(codes) } }
-            })
-            const liveById = new Map(existingPhrases.filter(p => p.status === 'Finish').map(p => [p.id, p]))
-            const pullRequests = batch.pullRequests.map(pr => {
-                const target = pr.action === 'Change' && findBoundLiveReplacement(liveById, pr)
-                return target ? { ...pr, oldWord: target.word } : pr
-            })
-            const prItems = pullRequests
+            const prItems = batch.pullRequests
                 .filter(pr => pr.word && pr.code)
                 .map(pr => ({
                     id: String(pr.id),
@@ -419,6 +410,10 @@ export async function GET(
                 }
             })
 
+            const existingPhrases = await prisma.phrase.findMany({
+                where: { code: { in: Array.from(codes) } }
+            })
+
             const currentState = new Map<string, PreviewPhrase[]>()
             const originalState = new Map<string, PreviewPhrase[]>()
 
@@ -429,14 +424,14 @@ export async function GET(
                 originalState.set(key, [...(originalState.get(key) || []), { ...phrase }])
             })
 
-            pullRequests.forEach(pr => {
+            batch.pullRequests.forEach(pr => {
                 if (!pr.code) return
                 const key = stateKey(pr.type || 'Phrase', pr.code)
                 if (!currentState.has(key)) currentState.set(key, [])
                 if (!originalState.has(key)) originalState.set(key, [])
             })
 
-            for (const pr of pullRequests) {
+            for (const pr of batch.pullRequests) {
                 if (!pr.code) continue
                 const prType = pr.type || 'Phrase'
                 const key = stateKey(prType, pr.code)
@@ -509,8 +504,8 @@ export async function GET(
                 currentState.set(key, codePhrases)
             }
 
-            const prsByTypeCodePend = new Map<string, typeof pullRequests>()
-            pullRequests.forEach(pr => {
+            const prsByTypeCodePend = new Map<string, typeof batch.pullRequests>()
+            batch.pullRequests.forEach(pr => {
                 if (!pr.code || conflictMap.get(pr.id)) return
                 const key = stateKey(pr.type || 'Phrase', pr.code)
                 if (!prsByTypeCodePend.has(key)) prsByTypeCodePend.set(key, [])
@@ -519,7 +514,7 @@ export async function GET(
 
             // Group affected codes by type
             const typeCodeMapPend = new Map<string, Set<string>>()
-            pullRequests.forEach(pr => {
+            batch.pullRequests.forEach(pr => {
                 if (!pr.code || conflictMap.get(pr.id)) return
                 const t = pr.type || 'Phrase'
                 if (!typeCodeMapPend.has(t)) typeCodeMapPend.set(t, new Set())

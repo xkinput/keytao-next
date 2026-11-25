@@ -9,7 +9,6 @@ import { approveSubmittedBatch } from '../batchApprovalService'
 import { computeReviewDigest, formatMiaomiaoReviewRemark } from '../batchBotReviewService'
 import { checkBatchConflictsWithWeight } from '../batchConflictService'
 import { recordItemReview } from '../batchItemReview'
-import { createPhraseTargetFingerprint } from '../phraseTargetBinding'
 import type { ChainReorderTarget } from '../suggestedOrderService'
 
 vi.mock('@/lib/auth', async importOriginal => ({
@@ -87,7 +86,7 @@ describe('manual chain reorder', () => {
     expect(await prisma.batch.findUniqueOrThrow({ where: { id: batch.id } })).toMatchObject({ contentVersion: batch.contentVersion })
   })
 
-  it.each([true, false])('reorders a same-code Change only when it targets the matching live word (%s)', async boundToNewWord => {
+  it('rejects reordering a Change that duplicates a live word at the same code', async () => {
     const author = await createTestUser()
     signIn(author)
     const anchor = await createLive(author, '现有候选', 105)
@@ -96,38 +95,21 @@ describe('manual chain reorder', () => {
     const { batch, prs: [change] } = await createTestBatch(author.id, [
       { action: 'Change', oldWord: old.word, word: live.word, code, type, weight: 114 },
     ])
-    if (boundToNewWord) {
-      await prisma.pullRequest.update({ where: { id: change.id }, data: {
-        targetPhraseId: live.id, targetFingerprint: createPhraseTargetFingerprint(live),
-      } })
-    }
-    const preview = async () => (await getPreview(new NextRequest(`http://localhost/api/batches/${batch.id}/preview`), {
+    expect(change.targetPhraseId).toBe(old.id)
+    const preview = await getPreview(new NextRequest(`http://localhost/api/batches/${batch.id}/preview`), {
       params: Promise.resolve({ id: batch.id }),
-    })).json()
-    const { preview: before } = await preview()
-    if (boundToNewWord) {
-      expect(before.rejected).toEqual([])
-      expect(before.changes[0]).toMatchObject({
-        diffs: [{ itemId: change.id, type: 'modify' }],
-        after: [{ word: anchor.word, weight: 105 }, { word: live.word, weight: 114 }, { word: old.word, weight: 125 }],
-      })
-    } else {
-      expect(before.rejected).toMatchObject([{ prId: change.id }])
-    }
+    })
+    expect(preview.status).toBe(200)
+    expect(await preview.json()).toMatchObject({ preview: {
+      rejected: [{ prId: change.id, oldWord: old.word, word: live.word }], changes: [],
+    } })
 
     const response = await reorder(batch.id, change.id, { afterWord: anchor.word }, batch.contentVersion)
-    const version = batch.contentVersion + (boundToNewWord ? 1 : 0)
-    const weight = boundToNewWord ? 104 : 114
-    expect(response.status).toBe(boundToNewWord ? 200 : 409)
-    expect(await response.json()).toMatchObject(boundToNewWord
-      ? { contentVersion: version, items: [{ id: change.id, weight }] }
-      : { error: '同码链中有重复词，请先合并重复项' })
-    expect(await prisma.batch.findUniqueOrThrow({ where: { id: batch.id } })).toMatchObject({ contentVersion: version })
-    expect(await prisma.pullRequest.findUniqueOrThrow({ where: { id: change.id } })).toMatchObject({ weight })
+    expect(response.status).toBe(409)
+    expect(await response.json()).toEqual({ error: '改词后的「新候选」已在此编码上，请改为删除「旧候选」' })
+    expect(await prisma.batch.findUniqueOrThrow({ where: { id: batch.id } })).toMatchObject({ contentVersion: batch.contentVersion })
+    expect(await prisma.pullRequest.findUniqueOrThrow({ where: { id: change.id } })).toMatchObject({ weight: 114, targetPhraseId: old.id })
     expect(await prisma.phrase.findUniqueOrThrow({ where: { id: live.id } })).toMatchObject({ weight: 115 })
-    if (boundToNewWord) expect(await preview()).toMatchObject({ contentVersion: version, preview: { changes: [{
-      after: [{ word: live.word, weight }, { word: anchor.word, weight: 105 }, { word: old.word, weight: 125 }],
-    }] } })
   })
 
   it('rolls back when a pending Delete reserves the only weight between live anchors', async () => {

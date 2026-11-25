@@ -12,7 +12,8 @@ export function compareChainEntry(a: ChainEntry, b: ChainEntry): number {
 }
 
 type WeightUpdate = { prId: number; weight: number }
-type OrderPlan = { updates: WeightUpdate[] } | { error: 'order_requires_current_phrase_change' | 'no_weight_gap' | 'duplicate_word' }
+type OrderPlan = { updates: WeightUpdate[] }
+  | { error: 'order_requires_current_phrase_change' | 'no_weight_gap' | 'duplicate_word'; message?: string }
 
 export function writablePrId(entry: ChainEntry) {
   return entry.source === 'draft' && (entry.action === 'Create' || entry.action === 'Change')
@@ -81,7 +82,16 @@ export function planChainOrder(
   nullCreateIds: ReadonlySet<number> = new Set(),
 ): OrderPlan {
   const byWord = new Map(after.map(entry => [entry.word, entry]))
-  if (byWord.size !== after.length || new Set(orderedWords).size !== orderedWords.length) {
+  if (byWord.size !== after.length) {
+    const liveWords = new Set(after.filter(entry => entry.source === 'current').map(entry => entry.word))
+    const change = after.find(entry => entry.source === 'draft' && entry.action === 'Change' &&
+      entry.oldWord && entry.oldWord !== entry.word && liveWords.has(entry.word))
+    if (change) {
+      return { error: 'duplicate_word', message: `改词后的「${change.word}」已在此编码上，请改为删除「${change.oldWord}」` }
+    }
+    return { error: 'duplicate_word' }
+  }
+  if (new Set(orderedWords).size !== orderedWords.length) {
     return { error: 'duplicate_word' }
   }
   if (orderedWords.length !== after.length || orderedWords.some(word => !byWord.has(word))) {

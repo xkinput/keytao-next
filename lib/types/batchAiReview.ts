@@ -55,6 +55,7 @@ export interface BatchAiReviewItem {
 
 export interface BatchAiReviewChainEntry {
   word: string
+  oldWord?: string
   code: string
   type: PhraseType
   weight: number | null

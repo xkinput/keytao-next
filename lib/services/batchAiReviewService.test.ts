@@ -40,19 +40,22 @@ beforeEach(() => {
   mocks.corpusFrequencyFindMany.mockResolvedValue([])
 })
 
-it.each([1, 2, undefined])('uses the same-word live row only when the Change is bound to it (%s)', async targetPhraseId => {
+it.each(['stored', 'linked'])('keeps the live candidate and the Change with its %s old word', async oldWordSource => {
   const slot = { code: 'pxci', type: 'Phrase' } as const
+  const old = { ...slot, id: 1, word: '甲', weight: 110 }
   mocks.phraseFindMany.mockResolvedValueOnce([
-    { ...slot, id: 1, word: '甲', weight: 110 },
+    old,
     { ...slot, id: 2, word: '乙', weight: 115 },
   ])
   const [chain] = await buildSuggestedOrderChains([
-    { ...slot, action: 'Change', id: 10, oldWord: '甲', word: '乙', targetPhraseId, weight: null, remark: null },
+    { ...slot, action: 'Change', id: 10, word: '乙', weight: null, remark: null,
+      ...(oldWordSource === 'stored' ? { oldWord: old.word } : { phrase: old }) },
   ], [slot])
   expect(chain.originalWeights).toEqual([110, 115])
-  expect(chain.after).toMatchObject(targetPhraseId === 2
-    ? [{ word: '甲', weight: 110, source: 'current' }, { word: '乙', weight: 115, source: 'draft', prId: 10 }]
-    : [{ word: '乙', weight: 110, source: 'draft', prId: 10 }, { word: '乙', weight: 115, source: 'current' }])
+  expect(chain.after).toMatchObject([
+    { word: '乙', oldWord: '甲', weight: 110, source: 'draft', prId: 10 },
+    { word: '乙', weight: 115, source: 'current' },
+  ])
 })
 
 describe('batch AI review reference evidence', () => {

@@ -124,6 +124,17 @@ describe('planChainOrder', () => {
     expect(planChainOrder([current('甲', 105), draft('乙', 110, 1)], ['甲', '甲']))
       .toEqual({ error: 'duplicate_word' })
   })
+
+  it('suggests deleting the old word when the Change would duplicate a live entry', () => {
+    const change = { ...draft('乙', 110, 1), action: 'Change', oldWord: '甲' }
+    const live = current('乙', 115)
+    expect(planChainOrder([change, live], ['乙', '乙'])).toEqual({
+      error: 'duplicate_word', message: '改词后的「乙」已在此编码上，请改为删除「甲」',
+    })
+    expect(planChainOrder([live, change], ['乙', '乙'])).toMatchObject({
+      message: '改词后的「乙」已在此编码上，请改为删除「甲」',
+    })
+  })
 })
 
 it('keeps a stale review stale when the new weight would match its old digest', () => {
