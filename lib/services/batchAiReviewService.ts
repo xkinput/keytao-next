@@ -25,6 +25,9 @@ import {
   loadReferenceWordData,
   type ReferenceWordData,
 } from './referenceReviewService'
+import { compareChainEntry } from './suggestedOrderPlanner'
+
+export { compareChainEntry } from './suggestedOrderPlanner'
 
 type PullRequestAction = 'Create' | 'Change' | 'Delete'
 export type BatchReviewTier = 'manual' | 'look' | 'safe'
@@ -731,13 +734,6 @@ async function buildCodeChains(
   }
 
   return result
-}
-
-export function compareChainEntry(a: BatchAiReviewChainEntry, b: BatchAiReviewChainEntry): number {
-  const weightA = a.weight ?? Number.MAX_SAFE_INTEGER
-  const weightB = b.weight ?? Number.MAX_SAFE_INTEGER
-  if (weightA !== weightB) return weightA - weightB
-  return a.word.localeCompare(b.word, 'zh-Hans-CN')
 }
 
 function nextWeight(entries: BatchAiReviewChainEntry[]): number {

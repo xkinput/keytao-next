@@ -25,7 +25,7 @@ import { CODE_PATTERN } from '@/lib/constants/codeValidation'
 import { useUIStore } from '@/lib/store/ui'
 import type { BatchPRItem } from '@/lib/services/batchConflictService'
 import { buildBatchSubmitWarnings, formatBatchSubmitWarnings, type BatchSubmitWarning } from '@/lib/services/batchSubmitWarnings'
-import { Trash2, FileText, CornerUpLeft, CornerDownLeft, ChevronUp, ChevronDown, Plus, Edit2, AlertTriangle, Eye, Check, Search, WandSparkles } from 'lucide-react'
+import { Trash2, FileText, CornerUpLeft, CornerDownLeft, ChevronUp, ChevronDown, Plus, Edit2, AlertTriangle, Eye, Check, Search, Sparkles, WandSparkles } from 'lucide-react'
 import CodePhrasesPopover from './CodePhrasesPopover'
 import WordCodesPopover from './WordCodesPopover'
 import type { InferResponse } from '@/app/api/phrases/infer/route'
@@ -43,6 +43,8 @@ import {
 } from '@/lib/services/fieldInferenceGuard'
 import { resolveDictImportInference } from '@/lib/services/dictImportInference'
 import { stripMiaomiaoReviewRemark } from '@/lib/services/miaomiaoReviewRemark'
+import { buildDraftOrderChains, getDraftCodeFills, groupDraftOrderItems, planDraftOrderWeights, type DraftOrderItem } from '@/lib/services/draftCommonnessOrder'
+import { COMMONNESS_ORDER_LIMITS, draftOrderKey, type CommonnessLines, type CommonnessOrderResponse } from '@/lib/types/commonnessOrder'
 
 interface CreatePRModalProps {
   isOpen: boolean
@@ -112,6 +114,15 @@ interface FormItem {
   type: string
   weight: string
   remark: string
+}
+
+type FieldContext = { code: string; type: string; data: ContextResponse }
+type DraftOrderMark = {
+  item: DraftOrderItem
+  codeChanged?: boolean
+  weightChanged?: boolean
+  failed?: boolean
+  commonness?: CommonnessLines
 }
 
 export function buildEditFormItem(pr: NonNullable<CreatePRModalProps['editPR']>): FormItem {
@@ -285,6 +296,8 @@ export default function CreatePRModal({
   const [submitting, setSubmitting] = useState(false)
   const [checkingAll, setCheckingAll] = useState(false)
   const [reviewingAll, setReviewingAll] = useState(false)
+  const [orderingDraft, setOrderingDraft] = useState(false)
+  const [draftOrderMarks, setDraftOrderMarks] = useState<Map<string, DraftOrderMark>>(new Map())
   const [preSubmitReviewAttempt, setPreSubmitReviewAttempt] = useState<PreSubmitReviewAttempt | null>(null)
   const [showDictParser, setShowDictParser] = useState(false)
   const [dictInput, setDictInput] = useState('')
@@ -297,6 +310,8 @@ export default function CreatePRModal({
   // Track if we've initialized the form in this modal session
   const hasInitializedRef = useRef(false)
   const preSubmitReviewRequestRef = useRef(0)
+  const draftOrderRunRef = useRef<symbol | null>(null)
+  const draftOrderCodeWriteRef = useRef<string | null>(null)
 
   // Track which fields had their code auto-filled (so user edits override auto-fill)
   const autoFilledRef = useRef<Set<string>>(new Set())
@@ -304,7 +319,7 @@ export default function CreatePRModal({
   const [encodingFields, setEncodingFields] = useState<Set<string>>(new Set())
   // Per-field infer result (code slot info + word duplicate info)
   const [inferResults, setInferResults] = useState<Map<string, InferResponse>>(new Map())
-  const [contextResults, setContextResults] = useState<Map<string, ContextResponse>>(new Map())
+  const [contextResults, setContextResults] = useState<Map<string, FieldContext>>(new Map())
 
   const setInferResult = (fieldId: string, result: InferResponse | null) => {
     setInferResults(prev => {
@@ -440,6 +455,9 @@ export default function CreatePRModal({
       hasInitializedRef.current = false
       setPreSubmitReviewAttempt(null)
       setReviewingAll(false)
+      draftOrderRunRef.current = null
+      setOrderingDraft(false)
+      setDraftOrderMarks(new Map())
       preSubmitReviewRequestRef.current += 1
       inferRequestTrackerRef.current.clear()
       autoFilledRef.current.clear()
@@ -503,6 +521,7 @@ export default function CreatePRModal({
 
       const timer = setTimeout(async () => {
         timers.delete(fieldId)
+        if (!tracker.isLatest(request)) return
         try {
           const params = new URLSearchParams({ word, ...(requestCode.trim() ? { code: requestCode.trim() } : {}) })
           const data = await apiRequest<InferResponse>(`/api/phrases/infer?${params}`)
@@ -558,6 +577,7 @@ export default function CreatePRModal({
       const word = (values.items?.[index]?.word ?? '').trim()
       const action = values.items?.[index]?.action
       const type = (values.items?.[index]?.type ?? '').trim()
+      const fromDraftOrder = draftOrderCodeWriteRef.current === fieldId
       const tracker = inferRequestTrackerRef.current
       const request = tracker.begin(fieldId, word, code)
       setEncodingFields(prev => { const next = new Set(prev); next.delete(fieldId); return next })
@@ -571,7 +591,8 @@ export default function CreatePRModal({
 
       const timer = setTimeout(async () => {
         try {
-          if (word && action !== 'Delete') {
+          if (!tracker.isLatest(request)) return
+          if (word && action !== 'Delete' && !fromDraftOrder) {
             const inferParams = new URLSearchParams({ word, code })
             try {
               const inferData = await apiRequest<InferResponse>(`/api/phrases/infer?${inferParams}`)
@@ -594,7 +615,7 @@ export default function CreatePRModal({
               request,
               tracker,
             ) < 0) return
-            setContextResults(prev => new Map(prev).set(fieldId, data))
+            setContextResults(prev => new Map(prev).set(fieldId, { code, type, data }))
           }
         } catch { /* ignore */ }
       }, 600)
@@ -610,6 +631,8 @@ export default function CreatePRModal({
 
   // Fetch context for all pre-filled codes on mount / when fields change
   useEffect(() => {
+    if (!isOpen) return
+    let cancelled = false
     const values = getValues('items')
     fields.forEach((field, index) => {
       const code = (values[index]?.code ?? '').trim()
@@ -619,12 +642,13 @@ export default function CreatePRModal({
       fetch(`/api/phrases/context?${params}`)
         .then(r => r.ok ? r.json() : null)
         .then((data: ContextResponse | null) => {
-          if (data) setContextResults(prev => new Map(prev).set(field.id, data))
+          if (!cancelled && data) setContextResults(prev => new Map(prev).set(field.id, { code, type, data }))
         })
         .catch(() => { /* ignore */ })
     })
+    return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fields.map(f => f.id).join(',')])
+  }, [isOpen, fields.map(f => f.id).join(',')])
 
   // Add new item
   const handleAddItem = () => {
@@ -781,6 +805,146 @@ export default function CreatePRModal({
     })
     closeDictParser()
     toast.success(`已添加 ${toAdd.length} 个词条`)
+  }
+
+  const getDraftOrderItems = (): DraftOrderItem[] => {
+    const items = getValues('items')
+    return fieldsRef.current.flatMap(({ id }, index) => {
+      const item = items[index]
+      return item ? [{
+        fieldId: id, prId: item.pullRequestId ?? (index === 0 ? editPR?.id : undefined),
+        action: item.action, word: item.word.trim(), oldWord: item.oldWord.trim(),
+        code: item.code.trim(), type: item.type, weight: item.weight,
+      }] : []
+    })
+  }
+
+  const handleDraftCommonnessOrder = async () => {
+    if (draftOrderRunRef.current) return
+    const run = Symbol()
+    draftOrderRunRef.current = run
+    setOrderingDraft(true)
+    const marks = new Map<string, DraftOrderMark>()
+    setDraftOrderMarks(new Map())
+    let filled = 0
+    let reordered = 0
+    let orderSucceeded = false
+
+    try {
+      const initial = getDraftOrderItems()
+      const missingCode = initial.filter(item => item.action !== 'Delete' && !item.code && item.word && item.word.length <= 100)
+      const words = [...new Set(missingCode.map(item => item.word))]
+      if (missingCode.length) {
+        for (const { fieldId } of missingCode) inferRequestTrackerRef.current.invalidate(fieldId)
+        const missingIds = new Set(missingCode.map(item => item.fieldId))
+        setEncodingFields(prev => new Set([...prev].filter(id => !missingIds.has(id))))
+      }
+      const inferred = new Map<string, InferResponse>()
+      for (let index = 0; index < words.length; index += 500) {
+        const response = await apiRequest<{ results: InferResponse[] }>('/api/phrases/infer-batch', {
+          method: 'POST', body: { words: words.slice(index, index + 500) }, withAuth: false,
+        }).catch(() => null)
+        if (draftOrderRunRef.current !== run) return
+        for (const result of response?.results ?? []) inferred.set(result.word, result)
+      }
+
+      const beforeFill = getDraftOrderItems()
+      const beforeFillById = new Map(beforeFill.map(item => [item.fieldId, item]))
+      const indexes = new Map(fieldsRef.current.map(({ id }, index) => [id, index]))
+      for (const { fieldId, code } of getDraftCodeFills(missingCode, beforeFill, [...inferred.values()])) {
+        const index = indexes.get(fieldId)!
+        const item = beforeFillById.get(fieldId)!
+        draftOrderCodeWriteRef.current = fieldId
+        try {
+          setValue(`items.${index}.code`, code, { shouldDirty: true, shouldValidate: true })
+        } finally {
+          draftOrderCodeWriteRef.current = null
+        }
+        autoFilledRef.current.add(fieldId)
+        setInferResult(fieldId, inferred.get(item.word)!)
+        updateMeta(fieldId, { hasChecked: false, conflict: null })
+        marks.set(fieldId, { item: { ...item, code }, codeChanged: true })
+        filled++
+      }
+      setDraftOrderMarks(new Map(marks))
+
+      const slots = groupDraftOrderItems(getDraftOrderItems())
+      const liveBySlot = new Map([...contextResults.values()]
+        .filter(context => context.type)
+        .map(({ code, type, data }) => [draftOrderKey(code, type), data.at]))
+      // Occupancy is cross-type, so only an empty result identifies a slot without live anchors.
+      const emptyCodes = new Set([...inferred.values()]
+        .flatMap(result => result.candidateOccupancy.filter(candidate => !candidate.occupants.length).map(candidate => candidate.code)))
+      const lookups = [...slots].filter(([key, { code, items }]) => {
+        if (liveBySlot.has(key) || items.length > COMMONNESS_ORDER_LIMITS.entries) return false
+        if (!emptyCodes.has(code)) return true
+        liveBySlot.set(key, [])
+        return false
+      })
+      let chains = buildDraftOrderChains(slots, liveBySlot)
+      for (let index = 0; index < lookups.length && chains.length < COMMONNESS_ORDER_LIMITS.chains; index += 6) {
+        await Promise.all(lookups.slice(index, index + 6).map(async ([key, { code, type }]) => {
+          const query = new URLSearchParams({ code, type })
+          const context = await apiRequest<ContextResponse>(`/api/phrases/context?${query}`, { withAuth: false }).catch(() => null)
+          if (context) liveBySlot.set(key, context.at)
+        }))
+        if (draftOrderRunRef.current !== run) return
+        chains = buildDraftOrderChains(slots, liveBySlot)
+      }
+      if (!chains.length) {
+        orderSucceeded = true
+        return
+      }
+
+      const response = await apiRequest<CommonnessOrderResponse>('/api/phrases/commonness-order', {
+        method: 'POST', body: { chains: chains.map(chain => chain.request) },
+      }).catch(() => null)
+      if (draftOrderRunRef.current !== run) return
+      if (!response) {
+        toast.error('排序服务暂不可用')
+        return
+      }
+
+      const latestItems = getDraftOrderItems()
+      const latestById = new Map(latestItems.map(item => [item.fieldId, item]))
+      const latestIndexes = new Map(fieldsRef.current.map(({ id }, index) => [id, index]))
+      const latestSlots = groupDraftOrderItems(latestItems)
+      for (const [index, chain] of chains.entries()) {
+        const result = response.chains[index]
+        if (result?.status !== 'reorder') continue
+        const key = draftOrderKey(chain.request.code, chain.request.type)
+        if (JSON.stringify(latestSlots.get(key)?.items) !== JSON.stringify(chain.items)) continue
+
+        const weights = planDraftOrderWeights(chain, result, response.reservedWeights[key])
+        if (!weights) {
+          for (const item of chain.items) {
+            marks.set(item.fieldId, { ...marks.get(item.fieldId), item, failed: true })
+          }
+          continue
+        }
+        if (weights.length) reordered++
+        for (const { fieldId, weight } of weights) {
+          const item = latestById.get(fieldId)!
+          setValue(`items.${latestIndexes.get(fieldId)!}.weight`, weight, { shouldDirty: true })
+          updateMeta(fieldId, { hasChecked: false, conflict: null })
+          marks.set(fieldId, { ...marks.get(fieldId), item: { ...item, weight }, weightChanged: true })
+        }
+        for (const { fieldId, word } of chain.items) {
+          const mark = marks.get(fieldId)
+          if (mark && Object.hasOwn(response.words, word)) {
+            marks.set(fieldId, { ...mark, commonness: response.words[word] })
+          }
+        }
+      }
+      setDraftOrderMarks(new Map(marks))
+      orderSucceeded = true
+    } finally {
+      if (draftOrderRunRef.current === run) {
+        draftOrderRunRef.current = null
+        setOrderingDraft(false)
+        if (orderSucceeded) toast.success(`已填 ${filled} 个编码，调整 ${reordered} 组顺序`)
+      }
+    }
   }
 
   const updateDictItemCode = (idx: number, code: string) => {
@@ -945,6 +1109,10 @@ export default function CreatePRModal({
 
   // Submit handler renamed to avoid conflict
   const onSubmitForm = handleSubmit(async (data) => {
+    if (draftOrderRunRef.current) {
+      draftOrderRunRef.current = null
+      setOrderingDraft(false)
+    }
     const items = buildBatchCheckItems(data.items)
     const preSubmitItems = createPreSubmitReviewItems(data.items)
     const fingerprint = buildPreSubmitFingerprint(preSubmitItems)
@@ -1261,13 +1429,30 @@ export default function CreatePRModal({
                   const currentOldWord = watch(`items.${index}.oldWord`)
                   const currentCode = watch(`items.${index}.code`)
                   const currentType = watch(`items.${index}.type`) as PhraseType
-                  const currentWeight = watch(`items.${index}.weight`) || String(getDefaultWeight(currentType))
+                  const rawWeight = watch(`items.${index}.weight`)
+                  const currentWeight = rawWeight || String(getDefaultWeight(currentType))
                   const infer = inferResults.get(field.id)
                   const isResolved = meta.conflict?.suggestions?.some(s => s.action === 'Resolved')
                   const hasConflict = !!(meta.conflict?.hasConflict && !isResolved)
                   const hasWarning = checkedSubmitWarningIds.has(field.id)
                   const isIncomplete = !currentWord || !currentCode
-                  const context = contextResults.get(field.id)
+                  const fieldContext = contextResults.get(field.id)
+                  const context = fieldContext && fieldContext.code === currentCode?.trim() && fieldContext.type === currentType
+                    ? fieldContext.data
+                    : undefined
+                  const mark = draftOrderMarks.get(field.id)
+                  const orderMark = mark && mark.item.word === currentWord?.trim() && mark.item.code === currentCode?.trim()
+                    && mark.item.oldWord === currentOldWord?.trim() && mark.item.type === currentType
+                    && mark.item.action === currentAction ? mark : undefined
+                  const codeMarked = orderMark?.codeChanged
+                  const weightMarked = orderMark?.weightChanged && orderMark.item.weight === rawWeight
+                  const commonness = (codeMarked || weightMarked) && orderMark.commonness && [
+                    orderMark.commonness?.daily && `常用：${orderMark.commonness.daily}`,
+                    orderMark.commonness?.authority && `收录：${orderMark.commonness.authority}`,
+                  ].filter(Boolean).join(' · ')
+                  const commonnessLine = commonness && <p className="truncate font-sans text-xs text-default-500">{commonness}</p>
+                  const orderErrorDot = orderMark?.failed && orderMark.item.weight === rawWeight
+                    && <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-warning" />
                   const reviewItem = reviewItemByFieldId.get(field.id)
                   const isReviewBlocker = currentPreSubmitAttempt?.response?.blockers.includes(field.id) ?? false
 
@@ -1297,6 +1482,7 @@ export default function CreatePRModal({
                             {/* Row 1: index + action pills + confirm/delete */}
                             <div className="flex items-center gap-2 flex-wrap">
                               <span className="text-xs text-default-400 shrink-0 w-5 text-center">#{index + 1}</span>
+                              {orderErrorDot}
                               <Controller
                                 name={`items.${index}.action`}
                                 control={control}
@@ -1456,7 +1642,8 @@ export default function CreatePRModal({
                                                   value={f.value} label="编码" placeholder="请输入编码"
                                                   isRequired isInvalid={!!fieldState.error} errorMessage={fieldState.error?.message}
                                                   size="sm" className="w-full min-w-0"
-                                                  onValueChange={(v: string) => { f.onChange(v); updateMeta(field.id, { hasChecked: false, conflict: null }) }}
+                                                  classNames={codeMarked ? { inputWrapper: 'ring-1 ring-primary' } : undefined}
+                                                  onValueChange={(v: string) => { f.onChange(v); updateMeta(field.id, { hasChecked: false, conflict: null }); autoFilledRef.current.delete(field.id) }}
                                                   onBlur={() => autoCheckConflictForItem(index, field.id)}
                                                   endContent={f.value && <CodePhrasesPopover code={f.value}><Button size="sm" variant="light" isIconOnly className="min-w-unit-6 w-6 h-6"><Eye className="w-4 h-4" /></Button></CodePhrasesPopover>}
                                                 />
@@ -1467,7 +1654,7 @@ export default function CreatePRModal({
                                               control={control}
                                               render={({ field: f }) => {
                                                 const t = watch(`items.${index}.type`) as PhraseType
-                                                return <Input value={f.value} label="权重" type="number" placeholder={`${getDefaultWeight(t)}`} size="sm" className="w-full min-w-0" onValueChange={(v: string) => f.onChange(v)} />
+                                                return <Input value={f.value} label="权重" type="number" placeholder={`${getDefaultWeight(t)}`} size="sm" className="w-full min-w-0" classNames={weightMarked ? { inputWrapper: 'ring-1 ring-primary' } : undefined} onValueChange={(v: string) => f.onChange(v)} />
                                               }}
                                             />
                                           </div>
@@ -1562,6 +1749,7 @@ export default function CreatePRModal({
                                                 isRequired isInvalid={!!fieldState.error} errorMessage={fieldState.error?.message}
                                                 color={fieldState.error ? 'danger' : 'default'}
                                                 size="sm" className="w-full min-w-0"
+                                                classNames={codeMarked ? { inputWrapper: 'ring-1 ring-primary' } : undefined}
                                                 onValueChange={(v: string) => { f.onChange(v); updateMeta(field.id, { hasChecked: false, conflict: null }); autoFilledRef.current.delete(field.id) }}
                                                 endContent={
                                                   encodingFields.has(field.id) ? (
@@ -1589,7 +1777,7 @@ export default function CreatePRModal({
                                             control={control}
                                             render={({ field: f }) => {
                                               const t = watch(`items.${index}.type`) as PhraseType
-                                              return <Input value={f.value} label="权重" type="number" placeholder={`${getDefaultWeight(t)}`} size="sm" className="w-full min-w-0" onValueChange={(v: string) => f.onChange(v)} />
+                                              return <Input value={f.value} label="权重" type="number" placeholder={`${getDefaultWeight(t)}`} size="sm" className="w-full min-w-0" classNames={weightMarked ? { inputWrapper: 'ring-1 ring-primary' } : undefined} onValueChange={(v: string) => f.onChange(v)} />
                                             }}
                                           />
                                         </div>
@@ -1756,6 +1944,7 @@ export default function CreatePRModal({
                                 )
                               }}
                             />
+                            {commonnessLine}
                           </div>
                           {/* Context after */}
                           {context?.after && context.after.length > 0 && context.after.map((p, i) => (
@@ -1802,6 +1991,7 @@ export default function CreatePRModal({
                               }`}>
                               {currentAction === 'Delete' ? '−' : currentAction === 'Change' ? '~' : '+'}
                             </span>
+                            {orderErrorDot}
                             {/* Content */}
                             <div className="flex-1 font-mono text-sm min-w-0">
                               {currentAction === 'Change' ? (
@@ -1809,8 +1999,9 @@ export default function CreatePRModal({
                                   <span className="text-danger/60 line-through shrink-0">{currentOldWord || <span className="text-default-300 font-normal text-xs">旧词</span>}</span>
                                   <span className="text-default-300 shrink-0">→</span>
                                   <span className="font-semibold text-default-800 dark:text-white shrink-0">{currentWord || <span className="text-default-300 font-normal text-xs">新词</span>}</span>
-                                  {currentCode && <><span className="text-default-300 shrink-0">·</span><span className="text-primary shrink-0">{currentCode}</span></>}
+                                  {currentCode && <><span className="text-default-300 shrink-0">·</span><span className={`text-primary shrink-0 ${codeMarked ? 'underline decoration-2 underline-offset-2' : ''}`}>{currentCode}</span></>}
                                   {currentType && <span className="text-default-400 text-xs shrink-0">[{getPhraseTypeOptions().find(o => o.value === currentType)?.label || currentType}]</span>}
+                                  {weightMarked && <span className="text-xs text-primary underline decoration-2 underline-offset-2">{currentWeight}</span>}
                                 </div>
                               ) : (
                                 <div className="flex items-center gap-1.5 min-w-0">
@@ -1818,16 +2009,17 @@ export default function CreatePRModal({
                                     {currentWord || <span className="text-default-300 font-normal text-xs">未填写</span>}
                                   </span>
                                   {currentCode && (
-                                    <><span className="text-default-300 shrink-0">→</span><span className="text-primary shrink-0">{currentCode}</span></>
+                                    <><span className="text-default-300 shrink-0">→</span><span className={`text-primary shrink-0 ${codeMarked ? 'underline decoration-2 underline-offset-2' : ''}`}>{currentCode}</span></>
                                   )}
                                   {currentType && (
                                     <span className="text-default-400 text-xs shrink-0">
                                       [{getPhraseTypeOptions().find(o => o.value === currentType)?.label || currentType}]
-                                      {currentAction !== 'Delete' && ` ${currentWeight}`}
+                                      {currentAction !== 'Delete' && <> <span className={weightMarked ? 'text-primary underline decoration-2 underline-offset-2' : undefined}>{currentWeight}</span></>}
                                     </span>
                                   )}
                                 </div>
                               )}
+                              {commonnessLine}
                             </div>
                             {/* Status chips */}
                             {isIncomplete && <Chip size="sm" variant="flat" color="default" className="h-4 text-[10px] shrink-0">未完成</Chip>}
@@ -1875,6 +2067,18 @@ export default function CreatePRModal({
               </ModalBody>
               <ModalFooter className="flex-col gap-2">
                 <div className="flex flex-wrap gap-2 w-full items-center">
+                  <Button
+                    type="button"
+                    color="secondary"
+                    variant="flat"
+                    size="sm"
+                    onPress={handleDraftCommonnessOrder}
+                    isLoading={orderingDraft}
+                    isDisabled={orderingDraft || formState.isSubmitting || submitting}
+                    startContent={<Sparkles aria-hidden="true" className="w-3.5 h-3.5" />}
+                  >
+                    AI 重排并生成编码
+                  </Button>
                   <Button
                     color="secondary"
                     variant="flat"
