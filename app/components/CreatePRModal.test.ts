@@ -16,6 +16,60 @@ it('loads only the author remark into the editable item', () => {
   expect(buildEditFormItem({ ...item, remark: reviewBlock }).remark).toBe('')
 })
 
+it('requires conflict clearance before saving and never requests a pre-submit review', async () => {
+  const conflictUrl = '/api/pull-requests/check-conflicts-batch'
+  const saveUrl = '/api/pull-requests/1'
+  let hasConflict = true
+  const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.startsWith('/api/phrases/context?')) return Response.json({ before: [], at: [], after: [] })
+    if (url === conflictUrl) {
+      const { items } = JSON.parse(String(init?.body))
+      return Response.json({
+        results: items.map(({ id }: { id: string }) => ({
+          id, conflict: { code: 'ceui', hasConflict, suggestions: [] },
+        })),
+        warnings: [],
+      })
+    }
+    if (url === saveUrl) return Response.json({})
+    throw new Error(`Unexpected request: ${url}`)
+  })
+  vi.stubGlobal('fetch', fetchMock)
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+  const container = document.body.appendChild(document.createElement('div'))
+  const root = createRoot(container)
+  const onSuccess = vi.fn()
+  const button = (label: string) => [...document.querySelectorAll('button')]
+    .find(button => button.textContent?.trim() === label)!
+
+  try {
+    await act(() => root.render(createElement(CreatePRModal, {
+      isOpen: true,
+      onClose: vi.fn(),
+      onSuccess,
+      batchContentVersion: 3,
+      editPR: { id: 1, action: 'Create', word: '试词', code: 'ceui', type: 'Phrase' },
+    })))
+    expect(button('保存').disabled).toBe(true)
+    await act(() => button('检查冲突').click())
+    expect(button('保存').disabled).toBe(true)
+
+    hasConflict = false
+    await act(() => button('检查冲突').click())
+    expect(button('保存').disabled).toBe(false)
+    await act(() => button('保存').click())
+
+    expect(onSuccess).toHaveBeenCalledOnce()
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method && init.method !== 'GET')
+      .map(([url]) => url)).toEqual([conflictUrl, conflictUrl, conflictUrl, saveUrl])
+  } finally {
+    await act(() => root.unmount())
+    container.remove()
+    vi.unstubAllGlobals()
+    vi.clearAllMocks()
+  }
+})
+
 it('shows only the error toast when draft ordering returns HTTP 502', async () => {
   const orderUrl = '/api/phrases/commonness-order'
   const fetchMock = vi.fn(async (url: string) => {

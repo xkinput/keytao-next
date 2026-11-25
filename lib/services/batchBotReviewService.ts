@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { Prisma, type BatchStatus, type PullRequest } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import type { BatchAiReviewCodeChain, BatchAiReviewItem, BatchAiReviewResult } from '@/lib/types/batchAiReview'
+import { aiReviewSlotKey } from './aiReviewChunks'
 import {
   getMiaomiaoSemanticEvidence,
   extractMiaomiaoReviewBlocks,
@@ -60,7 +61,8 @@ interface BotReviewInput {
     codeChains: Omit<BatchAiReviewCodeChain, 'recommendations'>[]
   }
   focusPrId?: number
-  timeoutMs?: number
+  targetIds?: number[]
+  deadlineMs?: number
 }
 
 export interface MiaomiaoBatchReviewResponse {
@@ -85,8 +87,7 @@ export function selectAiReviewFocusContext<T extends FocusReviewItem>(
   ...targetIds: number[]
 ): T[] {
   const items = unappliedItems.map(pr => {
-    const slotCode = (pr.code || pr.phrase?.code || '').toLowerCase()
-    const code = slotCode.trim()
+    const code = (pr.code || pr.phrase?.code || '').toLowerCase().trim()
     const type = pr.type || 'Phrase'
     return {
       pr,
@@ -94,7 +95,7 @@ export function selectAiReviewFocusContext<T extends FocusReviewItem>(
       oldWord: pr.action === 'Change' ? (pr.oldWord ?? '').trim() : '',
       type,
       code,
-      slot: slotCode ? `${type}:${slotCode}` : '',
+      slot: aiReviewSlotKey(pr),
       hasPrefixCode: Array.from(code).length >= 3,
       linkedIds: new Set([
         ...(pr.dependencies ?? []).map(link => 'dependsOnId' in link ? link.dependsOnId : link.dependsOn.id),
@@ -230,25 +231,38 @@ function botReviewHeaders(): HeadersInit {
 
 async function fetchMiaomiaoReview<T extends ItemReviewResult>(input: BotReviewInput, itemsOnly = false) {
   const controller = new AbortController()
-  const timeoutMs = Math.min(
-    Math.max(input.timeoutMs ?? MIAOMIAO_REVIEW_TIMEOUT_MS, 10_000),
-    MIAOMIAO_REVIEW_TIMEOUT_MS,
-  )
+  const { deadlineMs, targetIds } = input
+  const timeoutMs = deadlineMs === undefined ? MIAOMIAO_REVIEW_TIMEOUT_MS : deadlineMs + 10_000
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
-  let response: Response
   try {
     const headers = new Headers(botReviewHeaders())
     if (itemsOnly) headers.set('X-KeyTao-Review-Output', 'items')
-    response = await fetch(botReviewUrl(), {
+    const response = await fetch(botReviewUrl(), {
       method: 'POST',
       headers,
       body: JSON.stringify({
         batch: input.batch,
         local_review: input.localReview,
         focus_pr_id: input.focusPrId,
+        ...(process.env.MIAOMIAO_REVIEW_TARGET_IDS === '1' && { target_pr_ids: targetIds, deadline_ms: deadlineMs }),
       }),
       signal: controller.signal,
     })
+    const data = (await response.json().catch(() => null) ?? {}) as BotBatchReviewResponse<T>
+    controller.signal.throwIfAborted()
+    if (!response.ok || data.success === false || !Array.isArray(data.aiReview?.items)
+      || typeof data.aiReview.generatedAt !== 'string') {
+      const message = data.detail || data.message || `喵喵复审服务返回 ${response.status}`
+      if (response.status === 429 || isMiaomiaoReviewRateLimit(message)) {
+        throw new MiaomiaoReviewRateLimitError(message)
+      }
+      throw new Error(message)
+    }
+    return {
+      aiReview: data.aiReview,
+      warning: data.warning,
+      auditSealed: data.aiReview.auditSealed === true,
+    }
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') {
       throw new Error('喵喵复审服务超时，请稍后再试')
@@ -256,22 +270,6 @@ async function fetchMiaomiaoReview<T extends ItemReviewResult>(input: BotReviewI
     throw error
   } finally {
     clearTimeout(timeoutId)
-  }
-
-  const data = (await response.json().catch(() => null) ?? {}) as BotBatchReviewResponse<T>
-  if (!response.ok || data.success === false || !Array.isArray(data.aiReview?.items)
-    || typeof data.aiReview.generatedAt !== 'string') {
-    const message = data.detail || data.message || `喵喵复审服务返回 ${response.status}`
-    if (response.status === 429 || isMiaomiaoReviewRateLimit(message)) {
-      throw new MiaomiaoReviewRateLimitError(message)
-    }
-    throw new Error(message)
-  }
-
-  return {
-    aiReview: data.aiReview,
-    warning: data.warning,
-    auditSealed: data.aiReview.auditSealed === true,
   }
 }
 
@@ -289,7 +287,7 @@ export async function requestMiaomiaoItemReview(input: BotReviewInput): Promise<
 }
 
 function isFallbackReviewItem(item: BatchAiReviewItem): boolean {
-  return String(item.reviewRecord?.source) === 'bot-llm-fallback'
+  return item.reviewRecord?.source === 'bot-llm-fallback'
 }
 
 function guardMiaomiaoItemPass(item: BatchAiReviewItem, auditSealed?: boolean, ambiguousDigest = false): BatchAiReviewItem {
@@ -445,7 +443,9 @@ export function formatMiaomiaoReviewRemark(item: BatchAiReviewItem, generatedAt:
     lines.push(`排序：${json}`)
   }
   lines.push(`时间：${reviewLineValue(generatedAt)}`)
-  if (reviewDigest && !isFallbackReviewItem(item)) lines.push(`校验：${reviewDigest}`)
+  if (reviewDigest && !isFallbackReviewItem(item) && record?.source !== 'bot-lookup-transient') {
+    lines.push(`校验：${reviewDigest}`)
+  }
   lines.push(MIAOMIAO_REVIEW_BLOCK_END)
   return lines.join('\n')
 }

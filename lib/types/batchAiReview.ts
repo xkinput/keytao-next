@@ -7,7 +7,7 @@ export type BatchAiReviewPriority = 'high' | 'medium' | 'low'
 
 export interface BatchAiReviewRecord {
   reviewedBy: 'Miaomiao'
-  source: 'bot-remark' | 'bot-llm' | 'system'
+  source: 'bot-remark' | 'bot-llm' | 'bot-llm-fallback' | 'bot-lookup-transient' | 'system'
   summary: string
   pronunciation?: string
   priority?: BatchAiReviewPriority

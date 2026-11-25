@@ -21,6 +21,28 @@ describe('StaleBatchReviewError', () => {
 })
 
 describe('formatMiaomiaoReviewRemark', () => {
+  it('keeps the review timestamp without sealing a transient lookup', () => {
+    const generatedAt = '2026-11-25T00:00:00.000Z'
+    const remark = formatMiaomiaoReviewRemark({
+      prId: 1,
+      status: 'attention',
+      severity: 'warning',
+      title: '词典查询暂时失败',
+      reasons: [],
+      suggestions: [],
+      reviewRecord: {
+        reviewedBy: 'Miaomiao',
+        source: 'bot-lookup-transient',
+        summary: '词典查询暂时失败',
+        sources: [],
+        evidence: [],
+      },
+    }, generatedAt, '0123456789abcdef')
+
+    expect(remark).toContain(`时间：${generatedAt}`)
+    expect(remark).not.toContain('校验：')
+  })
+
   it('always emits the source field so an empty list retracts legacy sources', () => {
     const remark = formatMiaomiaoReviewRemark({
       prId: 1,

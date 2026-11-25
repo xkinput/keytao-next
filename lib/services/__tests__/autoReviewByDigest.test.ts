@@ -159,7 +159,7 @@ describe('Miaomiao automatic item review', () => {
     })
   })
 
-  it('writes an undigested fallback for a missing result and cools it down without blocking later batches', async () => {
+  it.each(['missing result', 'transient lookup'] as const)('requeues an undigested %s after cooldown', async source => {
     const { author, batch, pr } = await authorDraft()
     const next = await createTestBatch(author.id, [proposal])
     const nextPr = next.prs[0]
@@ -176,12 +176,17 @@ describe('Miaomiao automatic item review', () => {
     const first = { success: true, batchId: batch.id, items: [{ prId: pr.id, digest: computeReviewDigest(pr) }] }
     expect(await (await queue()).json()).toEqual(first)
 
-    fetchMock.mockResolvedValueOnce(Response.json({ aiReview: { generatedAt: recentReview, items: [] } }))
+    const reason = source === 'missing result' ? '喵喵未返回该词条的结果' : '词典查询暂时失败'
+    const items: BatchAiReviewItem[] = source === 'missing result' ? [] : [{
+      ...verdict(pr.id), status: 'attention', severity: 'warning', reasons: [reason],
+      reviewRecord: { reviewedBy: 'Miaomiao', source: 'bot-lookup-transient', summary: reason, sources: [], evidence: [] },
+    }]
+    fetchMock.mockResolvedValueOnce(Response.json({ aiReview: { generatedAt: recentReview, items } }))
     expect(await (await post(batch.id, [pr.id])).json()).toEqual({ success: true, reviewed: [pr.id], skipped: [] })
     const { remark } = await prisma.pullRequest.update({ where: { id: pr.id }, data: { updateAt: oldest } })
     expect(remark).not.toContain('校验：')
     expect(parseMiaomiaoReviewRemark(remark)).toMatchObject({ baseRemark: authorRemark, review: {
-      status: '需复核', reason: '喵喵未返回该词条的结果', generatedAt: recentReview, reviewDigest: undefined,
+      status: '需复核', reason, generatedAt: recentReview, reviewDigest: undefined,
     } })
 
     await prisma.pullRequest.createMany({ data: Array.from({ length: 200 }, () => ({

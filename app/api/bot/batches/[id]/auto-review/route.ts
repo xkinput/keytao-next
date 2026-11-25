@@ -50,7 +50,7 @@ export async function POST(
     }
 
     const aiReview = await requestBatchMiaomiaoItemReview(
-      batch, batch.pullRequests.filter(pr => !pr.appliedAt), Array.from(targetDigests.keys()),
+      batch, batch.pullRequests.filter(pr => !pr.appliedAt), 170_000, Array.from(targetDigests.keys()),
     )
     if (isMiaomiaoReviewRateLimit(aiReview.warning)) {
       return NextResponse.json({ rateLimited: true }, { status: 429 })

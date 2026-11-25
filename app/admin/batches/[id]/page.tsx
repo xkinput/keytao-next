@@ -29,6 +29,7 @@ import { usePageFilterStore } from '@/lib/store/pageFilter'
 import type { PhraseType } from '@/lib/constants/phraseTypes'
 import type { BatchAiReviewItem } from '@/lib/types/batchAiReview'
 import type { BatchReviewTier } from '@/lib/services/batchAiReviewService'
+import { chunkAiReviewTargets } from '@/lib/services/aiReviewChunks'
 import type { ChainReorderTarget } from '@/lib/services/suggestedOrderService'
 
 type ReviewDecision = 'Approved' | 'Rejected'
@@ -161,7 +162,6 @@ type ReviewTierFilter = typeof reviewTierFilters[number]
 const reviewTierLabels: Record<ReviewTierFilter, string> = {
   all: '全部', manual: '需人工', look: '需查看', safe: '可放行',
 }
-const miaoReviewChunkSize = 12
 
 function changedReviewContent(pr: PullRequest, latest: PullRequest) {
   return pr.action !== latest.action || pr.type !== latest.type || pr.weight !== latest.weight ||
@@ -695,40 +695,40 @@ function AdminBatchReview({ resolvedParams }: { resolvedParams: { id: string } }
       reviewInFlight.current || reviewQueue.current || reviewTarget?.batchId === batchDataForReview.id
     ) return
 
-    let targetIds: number[]
+    let chunks: number[][]
     if (prId !== undefined) {
       const target = pullRequestById.get(prId)
       if (!target || target.appliedAt) return
-      targetIds = [prId]
+      chunks = [[prId]]
     } else {
       if (error || reviewSyncError) return
       const dependencyPendingIds = new Set(batchDataForReview.reviewProgress.dependencyPendingIds)
       const priority = (item: PullRequest) => item.status === 'Approved' && !dependencyPendingIds.has(item.id)
         ? reviewTierFilters.length : reviewTierFilters.indexOf(item.aiReview?.tier ?? 'look')
-      targetIds = batchDataForReview.pullRequests
+      const targets = batchDataForReview.pullRequests
         .filter(item => !item.appliedAt && item.reviewFresh !== true)
         .sort((a, b) => priority(a) - priority(b))
-        .map(item => item.id)
-      if (!targetIds.length) {
+      if (!targets.length) {
         toast('没有需要复审的词条')
         return
       }
+      chunks = chunkAiReviewTargets(targets)
     }
 
     const reviewerId = useAuthStore.getState().user?.id
-    const total = Math.ceil(targetIds.length / miaoReviewChunkSize)
+    const total = chunks.length
     let completed = 0
     let warned = false
     let refresh: Promise<unknown> | undefined
     stopMiaoReview.current = false
     reviewInFlight.current = true
     try {
-      for (let offset = 0; offset < targetIds.length; offset += miaoReviewChunkSize) {
+      for (const prIds of chunks) {
         if (stopMiaoReview.current || useAuthStore.getState().user?.id !== reviewerId) break
         setCheckingTarget(prId ?? { current: completed + 1, total })
         const { warning } = await apiRequest<{ warning?: string }>(`/api/admin/batches/${batchDataForReview.id}/ai-review`, {
           method: 'POST',
-          body: prId === undefined ? { prIds: targetIds.slice(offset, offset + miaoReviewChunkSize) } : { prId },
+          body: prId === undefined ? { prIds } : { prId },
           withAuth: true,
         })
         completed++

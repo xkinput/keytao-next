@@ -1,12 +1,15 @@
 import { NextRequest } from 'next/server'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { POST } from '@/app/api/admin/batches/[id]/ai-review/route'
+import { POST as autoReview } from '@/app/api/bot/batches/[id]/auto-review/route'
 import { getAdminBatchReviewDetail } from './adminBatchReviewDetailService'
+import { chunkAiReviewTargets } from './aiReviewChunks'
 import { computeReviewDigest, formatMiaomiaoReviewRemark } from './batchBotReviewService'
 import { parseMiaomiaoReviewRemark } from './miaomiaoReviewRemark'
 
 const { tx, checkConflicts, buildContext } = vi.hoisted(() => ({
   tx: {
+    $queryRaw: vi.fn(),
     batch: { findUnique: vi.fn(), updateMany: vi.fn() },
     pullRequest: { findMany: vi.fn(), updateMany: vi.fn() },
   },
@@ -17,6 +20,7 @@ const { tx, checkConflicts, buildContext } = vi.hoisted(() => ({
 vi.mock('@/lib/adminAuth', () => ({
   checkAdminPermission: async () => ({ authorized: true }),
 }))
+vi.mock('@/lib/botAuth', () => ({ verifyBotToken: async () => true }))
 vi.mock('@/lib/prisma', () => ({
   prisma: { ...tx, $transaction: (work: (client: typeof tx) => Promise<void>) => work(tx) },
 }))
@@ -58,8 +62,10 @@ function post(body?: unknown) {
 beforeEach(() => {
   vi.resetAllMocks()
   vi.stubGlobal('fetch', fetchMock)
+  vi.stubEnv('MIAOMIAO_REVIEW_TARGET_IDS', undefined)
   checkConflicts.mockResolvedValue([])
   buildContext.mockResolvedValue({ items: [], codeChains: [] })
+  tx.$queryRaw.mockResolvedValue([{ status: 'Submitted', itemReviewStarted: false }])
   tx.batch.updateMany.mockResolvedValue({ count: 1 })
   tx.pullRequest.updateMany.mockResolvedValue({ count: 1 })
   setBatch([row(1), row(2), { ...row(3), appliedAt: new Date(generatedAt) }])
@@ -71,7 +77,70 @@ beforeEach(() => {
   })
 })
 
-afterEach(() => vi.unstubAllGlobals())
+afterEach(() => {
+  vi.unstubAllEnvs()
+  vi.unstubAllGlobals()
+  vi.restoreAllMocks()
+})
+
+describe('grouping AI review targets by slot', () => {
+  it('keeps a slot together across the 12-item boundary and separates different types', () => {
+    const firstTargets = Array.from({ length: 11 }, (_, index) => ({ id: index + 1, code: `slot${index}` }))
+    const targets = [
+      ...firstTargets,
+      { id: 12, code: 'ABCD' },
+      { id: 13, code: 'abcd', type: 'Simple' },
+      { id: 14, code: null, phrase: { code: 'abcd' }, type: 'Phrase' },
+    ]
+
+    expect(chunkAiReviewTargets(targets)).toEqual([firstTargets.map(target => target.id), [12, 14, 13]])
+  })
+
+  it('splits a slot above the request limit into consecutive chunks', () => {
+    const targets = Array.from({ length: 13 }, (_, index) => ({ id: index + 1, code: 'abcd' }))
+
+    expect(chunkAiReviewTargets(targets)).toEqual([targets.slice(0, 12).map(target => target.id), [13]])
+  })
+})
+
+describe('Miaomiao review requests', () => {
+  it.each([
+    ['admin', '0', 280_000],
+    ['admin', '1', 280_000],
+    ['bot', '0', 170_000],
+    ['bot', '1', 170_000],
+  ])('uses the %s deadline with rollout flag %s', async (caller, flag, deadline) => {
+    vi.stubEnv('MIAOMIAO_REVIEW_TARGET_IDS', flag)
+    const setTimer = vi.spyOn(globalThis, 'setTimeout')
+    const response = caller === 'admin' ? await post({ prIds: [1] }) : await autoReview(
+      new NextRequest('http://localhost/api/bot/batches/batch/auto-review', {
+        method: 'POST', body: JSON.stringify({ prIds: [1] }),
+      }),
+      { params: Promise.resolve({ id: 'batch' }) },
+    )
+
+    expect(response?.status).toBe(200)
+    const sent = JSON.parse(String(fetchMock.mock.lastCall?.[1]?.body))
+    expect(sent.focus_pr_id).toBe(1)
+    expect(sent.batch.pullRequests.map((pr: { id: number }) => pr.id)).toEqual([1, 2])
+    if (flag === '1') {
+      expect(sent).toMatchObject({ target_pr_ids: [1], deadline_ms: deadline })
+    } else {
+      expect(sent).not.toHaveProperty('target_pr_ids')
+      expect(sent).not.toHaveProperty('deadline_ms')
+    }
+    expect(setTimer).toHaveBeenCalledWith(expect.any(Function), deadline + 10_000)
+    expect(checkConflicts).toHaveBeenCalledOnce()
+  })
+
+  it('includes every unapplied target for a whole-batch admin request with the flag on', async () => {
+    vi.stubEnv('MIAOMIAO_REVIEW_TARGET_IDS', '1')
+    expect((await post())?.status).toBe(200)
+    const sent = JSON.parse(String(fetchMock.mock.lastCall?.[1]?.body))
+    expect(sent).toMatchObject({ target_pr_ids: [1, 2], deadline_ms: 280_000 })
+    expect(sent).not.toHaveProperty('focus_pr_id')
+  })
+})
 
 describe('admin review freshness', () => {
   it('compares the last digest with raw content and weight', async () => {

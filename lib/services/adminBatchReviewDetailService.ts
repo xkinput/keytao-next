@@ -163,6 +163,7 @@ type ReviewDetail = NonNullable<Awaited<ReturnType<typeof getAdminBatchReviewDet
 export async function requestBatchMiaomiaoItemReview(
   batch: Pick<ReviewDetail, 'id' | 'status' | 'description'>,
   pullRequests: ReviewDetail['pullRequests'],
+  deadlineMs: number,
   targetIds?: number[],
 ) {
   const reviewContext = targetIds ? selectAiReviewFocusContext(pullRequests, ...targetIds) : pullRequests
@@ -171,6 +172,8 @@ export async function requestBatchMiaomiaoItemReview(
     batch: { id: batch.id, status: batch.status, description: batch.description, pullRequests: reviewContext },
     // Simulate chain edits in the same batch order as the admin detail.
     localReview: await buildMiaomiaoItemReviewContext(pullRequests.filter(pr => contextIds.has(pr.id))),
+    targetIds: targetIds ?? pullRequests.map(pr => pr.id),
+    deadlineMs,
     focusPrId: targetIds?.length === 1 ? targetIds[0] : undefined,
   })
 }

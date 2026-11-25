@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { checkAdminPermission } from '@/lib/adminAuth'
+import { AI_REVIEW_CHUNK_SIZE } from '@/lib/services/aiReviewChunks'
 import { getAdminBatchReviewDetail, requestBatchMiaomiaoItemReview } from '@/lib/services/adminBatchReviewDetailService'
 import {
   StaleBatchReviewError,
@@ -37,7 +38,7 @@ export async function POST(
     const { prId, prIds } = body as { prId?: unknown; prIds?: unknown }
     let targetIds: number[] | undefined
     if (prIds !== undefined) {
-      if (prId !== undefined || !Array.isArray(prIds) || prIds.length < 1 || prIds.length > 12 ||
+      if (prId !== undefined || !Array.isArray(prIds) || prIds.length < 1 || prIds.length > AI_REVIEW_CHUNK_SIZE ||
         !prIds.every(isPullRequestId) || new Set(prIds).size !== prIds.length) {
         return NextResponse.json({ error: '每组复审须提供 1 至 12 个不重复的有效词条 ID' }, { status: 400 })
       }
@@ -67,7 +68,7 @@ export async function POST(
     // applying a result to a batch that has moved on.
     const reviewedContentVersion = batch.contentVersion
 
-    const aiReview = await requestBatchMiaomiaoItemReview(batch, pullRequests, targetIds)
+    const aiReview = await requestBatchMiaomiaoItemReview(batch, pullRequests, 280_000, targetIds)
     const reviewedIds = new Set(aiReview.items.map(item => item.prId))
     if (targets.some(pr => !reviewedIds.has(pr.id))) {
       return NextResponse.json({ error: '喵喵未返回完整的逐词复审结果' }, { status: 502 })
