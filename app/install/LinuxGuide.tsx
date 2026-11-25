@@ -226,7 +226,7 @@ export default function LinuxGuide() {
               <p>如果需要使用系统 IBus/Rime，可选择这条独立路径：</p>
               <ol className="list-decimal pl-5 space-y-2">
                 <li>通过包管理器安装 <Code>ibus-rime</Code>：Debian / Ubuntu 执行 <Code>sudo apt install ibus-rime</Code>，Fedora 执行 <Code>sudo dnf install ibus-rime</Code>。</li>
-                <li>从 <Link href="https://github.com/xkinput/KeyTao/releases" isExternal showAnchorIcon>键道方案 Releases</Link> 获取文件名含 <Code>keytao-linux</Code> 的 Linux 方案包，将方案文件放入 <Code>~/.config/ibus/rime</Code>。</li>
+                <li>从 <Link href="https://github.com/xkinput/KeyTao/releases" isExternal showAnchorIcon>键道方案 Releases</Link> 下载通用方案包 <Code>keytao-v*.zip</Code>，将方案文件放入 <Code>~/.config/ibus/rime</Code>。</li>
                 <li>在系统 IBus 中添加并选择 Rime，重新部署方案，再通过 Rime 方案菜单选择键道。</li>
               </ol>
               <Alert color="warning" description="这条路径不使用 keytao-ime 的数据目录。若从 KeyTao 独立 daemon 切换过来，应先停用其自启动及 KDE 虚拟键盘选择，避免与系统 IBus 争用。" />

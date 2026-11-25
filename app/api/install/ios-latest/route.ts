@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { findUniversalKeytaoAsset } from '@/lib/releaseAssets'
 
 type ReleaseAsset = { name: string; browser_download_url: string }
 type ReleaseSource = 'github' | 'gitee'
@@ -45,7 +46,10 @@ async function fetchGiteeAssets(): Promise<ReleaseAsset[] | null> {
 }
 
 function getIosAsset(assets: ReleaseAsset[]): ReleaseAsset | undefined {
-  return assets.find(asset => asset.name.toLowerCase().includes('keytao-ios-'))
+  return (
+    findUniversalKeytaoAsset(assets) ??
+    assets.find(asset => asset.name.toLowerCase().includes('keytao-ios-'))
+  )
 }
 
 export async function GET(req: NextRequest) {

@@ -19,6 +19,7 @@ type DownloadSource = 'github' | 'gitee'
 
 interface PlatformRelease {
   version: string
+  downloadUrl?: string | null
   downloadUrls: Record<string, string>
 }
 
@@ -329,7 +330,7 @@ export default function InstallPage() {
     }
 
     const sourceData = downloadSource === 'gitee' ? releaseInfo.gitee : releaseInfo.github
-    const downloadUrl = sourceData?.downloadUrls?.[osType]
+    const downloadUrl = sourceData?.downloadUrl || sourceData?.downloadUrls?.[osType]
     if (!downloadUrl) {
       setError(`没有找到适用于 ${getOSName()} 的安装包（${downloadSource === 'gitee' ? 'Gitee' : 'GitHub'}）`)
       return
@@ -661,7 +662,7 @@ export default function InstallPage() {
                         <Link href="https://github.com/xkinput/KeyTao/releases/latest" isExternal showAnchorIcon className="text-sm">
                           GitHub Releases
                         </Link>
-                        ，复制 <Code size="sm">keytao-ios-*.zip</Code> 的下载链接
+                        ，复制 <Code size="sm">keytao-v*.zip</Code> 的下载链接
                       </li>
                       <li>
                         打开{' '}
@@ -782,7 +783,7 @@ export default function InstallPage() {
                         title={<span className="flex items-center gap-2"><Package className="w-4 h-4" /> 手动安装方式</span>}
                         description={
                           <div className="text-xs space-y-1">
-                            <p>1. 前往 <Link href="https://github.com/xkinput/KeyTao/releases" isExternal showAnchorIcon className="text-xs">GitHub Releases</Link> 下载对应系统的压缩包</p>
+                            <p>1. 前往 <Link href="https://github.com/xkinput/KeyTao/releases" isExternal showAnchorIcon className="text-xs">GitHub Releases</Link> 下载通用方案包 <Code size="sm">keytao-v*.zip</Code></p>
                             <p>2. 解压压缩包到 Rime 配置目录中</p>
                             <p>3. 重新部署 Rime 输入法即可</p>
                           </div>
@@ -977,7 +978,7 @@ export default function InstallPage() {
                     {osType === 'ios' && (
                       <>
                         <li className="font-semibold">元书输入法安装步骤：</li>
-                        <li className="text-xs text-default-600 ml-2">1. 前往 GitHub Releases，复制 <Code size="sm">keytao-ios-*.zip</Code> 下载链接</li>
+                        <li className="text-xs text-default-600 ml-2">1. 前往 GitHub Releases，复制 <Code size="sm">keytao-v*.zip</Code> 下载链接</li>
                         <li className="text-xs text-default-600 ml-2">2. 打开元书输入法 → 输入方案 → 右上角「下载方案」→ 填写方案名称和下载链接 → 保存 → 点击下载</li>
                         <li className="text-xs text-default-600 ml-2">3. 返回「输入方案」→ 右上角「方案目录切换」→ 进入键道目录 → 右上角「打开」→ 部署 → 等待完成</li>
                       </>

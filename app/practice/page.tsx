@@ -127,7 +127,7 @@ interface PracticeSchemeReleaseInfo {
 }
 
 const PRACTICE_SCHEME_OPTIONS: Array<{ key: PracticeSchemeKey; label: string; asset: string }> = [
-  { key: 'keytao', label: '键道6', asset: 'keytao-linux' },
+  { key: 'keytao', label: '键道6', asset: 'keytao-v*.zip' },
   { key: 'xmjd', label: '星猫键道', asset: 'xmjd6.zip' },
   { key: 'xmjd-feiding', label: '星猫键道（非顶）', asset: 'feiding-xmjd6.zip' },
   { key: 'txjx', label: '天行键', asset: 'txjx.zip' },

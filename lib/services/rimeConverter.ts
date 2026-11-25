@@ -482,3 +482,44 @@ export function generateSyncSummaryData(
     stats,
   };
 }
+
+export function generateReleaseNotes(
+  summaryData: SyncSummaryData,
+  options?: { prUrl?: string; prNumber?: number }
+): string {
+  const lines: string[] = [];
+  const totalCount =
+    summaryData.stats.reduce((sum, stat) => sum + stat.create + stat.change + stat.delete, 0) ||
+    summaryData.totalEntries;
+
+  lines.push('### 更新统计');
+  lines.push('');
+  lines.push(`- 总计：**${totalCount}** 条词条`);
+
+  for (const stat of summaryData.stats) {
+    const total = stat.create + stat.change + stat.delete;
+    if (total === 0) continue;
+
+    const parts: string[] = [];
+    if (stat.create > 0) parts.push(`新增 ${stat.create}`);
+    if (stat.change > 0) parts.push(`修改 ${stat.change}`);
+    if (stat.delete > 0) parts.push(`删除 ${stat.delete}`);
+
+    lines.push(`- **${stat.type}**：${parts.join('，')}`);
+  }
+
+  if (summaryData.contributors.length > 0) {
+    lines.push('');
+    lines.push(`### 参与贡献（${summaryData.contributors.length} 位）`);
+    lines.push('');
+    lines.push(summaryData.contributors.join('、'));
+  }
+
+  if (options?.prUrl) {
+    const label = options.prNumber ? `PR #${options.prNumber}` : options.prUrl;
+    lines.push('');
+    lines.push(`- 同步 PR：[${label}](${options.prUrl})`);
+  }
+
+  return lines.join('\n');
+}

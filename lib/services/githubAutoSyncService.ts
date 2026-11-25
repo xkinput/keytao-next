@@ -1,6 +1,7 @@
 import { prisma } from '@/lib/prisma'
 import {
   convertPhrasesToRimeDicts,
+  generateReleaseNotes,
   generateSyncSummary,
   generateSyncSummaryData,
   getAffectedPhraseTypesFromPullRequests,
@@ -339,28 +340,24 @@ export async function runGithubAutoSync(options: GithubAutoSyncOptions = {}): Pr
       trailers ? `${mergeBody}\n\n${trailers}` : mergeBody
     )
     const { latestTag, nextTag } = await githubService.getNextReleaseTag('patch')
-    const releaseBody = [
-      `本次 Release 由喵喵自动同步词库后发布。`,
-      '',
-      `- 同步任务：${task.id}`,
-      `- 合并 PR：${pr.html_url}`,
-      `- 待同步批次：${pendingSyncBatches} 个`,
-      `- 词条修改：${allPullRequests.length} 条`,
-      `- 更新文件：${fileNames.join('、')}`,
-      latestTag ? `- 上一个 Release：${latestTag}` : '- 上一个 Release：无',
-      '',
-      summary,
-    ].join('\n')
+    const releaseBody = generateReleaseNotes(syncSummary, {
+      prUrl: pr.html_url,
+      prNumber: pr.number,
+    })
 
+    // Pre-create a draft release with clean notes before pushing the tag so KeyTao's
+    // release workflow attaches keytao-v*.zip and publishes it atomically without
+    // overwriting the notes or briefly exposing an asset-less latest release.
+    const release = await githubService.createReleaseForTag(
+      nextTag,
+      `KeyTao ${nextTag}`,
+      releaseBody,
+      { draft: true, targetCommitish: merge.mergeCommitSha }
+    )
     await githubService.createAndPushTag(
       nextTag,
       `Release ${nextTag}`,
       merge.mergeCommitSha
-    )
-    const release = await githubService.createReleaseForTag(
-      nextTag,
-      `KeyTao Dictionary ${nextTag}`,
-      releaseBody
     )
 
     await prisma.syncTask.update({
