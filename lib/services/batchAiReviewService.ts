@@ -10,6 +10,7 @@ import type {
   BatchAiReviewStatus,
 } from '@/lib/types/batchAiReview'
 import type { ConflictInfo } from './conflictDetector'
+import { computeReviewDigest } from './batchBotReviewService'
 import { getMiaomiaoEvidenceHighlights, parseMiaomiaoReviewRemark as parseStructuredRemark } from './miaomiaoReviewRemark'
 import {
   buildReferenceEvidence,
@@ -21,7 +22,7 @@ import {
 type PullRequestAction = 'Create' | 'Change' | 'Delete'
 export type BatchReviewTier = 'manual' | 'look' | 'safe'
 
-type ReviewItemWithTier = BatchAiReviewItem & { tier?: BatchReviewTier }
+type ReviewItemWithTier = BatchAiReviewItem & { tier?: BatchReviewTier; reviewDigestMatches?: boolean }
 
 interface ReviewPullRequest {
   id: number
@@ -225,6 +226,14 @@ function parseMiaomiaoReviewStatus(value: string | undefined): BatchAiReviewStat
   if (normalized.includes('不通过') || normalized.includes('人工')) return 'manual_review'
   if (/^(?:可)?通过[。.!！]?$/.test(normalized)) return 'pass'
   return 'attention'
+}
+
+type ReviewDigestRow = Parameters<typeof computeReviewDigest>[0] & { remark: string | null }
+
+export function hasCurrentMiaomiaoPass(row: ReviewDigestRow): boolean {
+  const review = parseStructuredRemark(row.remark).review
+  return !!review?.reviewDigest && parseMiaomiaoReviewStatus(review.status) === 'pass' &&
+    review.reviewDigest === computeReviewDigest(row)
 }
 
 export function deriveBatchReviewTier(
@@ -898,8 +907,28 @@ async function prepareBatchAiReviewItems(pullRequests: ReviewPullRequest[]) {
   return { items, moves, referenceByWord }
 }
 
-export async function buildBatchAiReviewItems(pullRequests: ReviewPullRequest[]): Promise<ReviewItemWithTier[]> {
+export async function buildBatchAiReviewItems(
+  pullRequests: ReviewPullRequest[],
+  includeReviewDigestMatches = true,
+): Promise<ReviewItemWithTier[]> {
   const { items } = await prepareBatchAiReviewItems(pullRequests)
+  if (!includeReviewDigestMatches) return items
+
+  const remarks = new Map(pullRequests.map(pr => [pr.id, pr.remark]))
+  const candidateIds = items.filter(item => item.tier === 'safe' &&
+    parseStructuredRemark(remarks.get(item.prId)).review?.reviewDigest).map(item => item.prId)
+  if (candidateIds.length === 0) return items
+
+  // Admin detail supplies calculated weights, so validate against the stored rows.
+  const rows = await prisma.pullRequest.findMany({
+    where: { id: { in: candidateIds }, status: 'Pending', appliedAt: null },
+    select: { id: true, remark: true, action: true, word: true, oldWord: true, code: true, type: true, weight: true },
+  })
+  const matchingIds = new Set(rows.filter(row => row.remark === remarks.get(row.id) && hasCurrentMiaomiaoPass(row))
+    .map(row => row.id))
+  for (const item of items) {
+    if (matchingIds.has(item.prId)) item.reviewDigestMatches = true
+  }
   return items
 }
 

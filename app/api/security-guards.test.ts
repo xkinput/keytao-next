@@ -571,6 +571,10 @@ describe('API abuse guards', () => {
     expect(mockPrisma.phrase.findMany).not.toHaveBeenCalled()
 
     const { POST } = await import('./admin/batches/[id]/ai-review/route')
+    mockPrisma.pullRequest.findMany.mockResolvedValueOnce([{
+      id: 1, remark: '喵喵审词：读音 an bo；来源 汉典', action: 'Create', word: '安泊',
+      oldWord: null, code: 'xfblo', type: 'Phrase', weight: 100,
+    }])
 
     const res = await POST(
       jsonRequest('http://localhost/api/admin/batches/batch-1/ai-review', { prId: 1 }),
@@ -592,7 +596,7 @@ describe('API abuse guards', () => {
     expect(body.local_review.codeChains[0]).toMatchObject({ code: 'xfblo', type: 'Phrase' })
     expect(body.local_review.codeChains[0]).not.toHaveProperty('recommendations')
     expect(mockPrisma.pullRequest.updateMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: 1, batchId: 'batch-1' },
+      where: { id: 1, batchId: 'batch-1', appliedAt: null },
       data: expect.objectContaining({
         remark: expect.stringContaining('本喵复审：通过'),
       }),

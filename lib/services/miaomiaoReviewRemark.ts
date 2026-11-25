@@ -17,6 +17,7 @@ export interface MiaomiaoReviewRemarkBlock {
   hasSourcesField: boolean
   evidence: string[]
   generatedAt?: string
+  reviewDigest?: string
 }
 
 export interface ParsedMiaomiaoReviewRemark {
@@ -146,6 +147,7 @@ export function parseMiaomiaoReviewRemark(remark?: string | null): ParsedMiaomia
       hasSourcesField: hasLine(latestBlock, '来源'),
       evidence,
       generatedAt: getLineValue(latestBlock, '时间'),
+      reviewDigest: getLineValue(latestBlock, '校验'),
     },
   }
 }

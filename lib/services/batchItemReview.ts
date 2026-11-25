@@ -1,5 +1,6 @@
 import { prisma } from '@/lib/prisma'
-import type { BatchConflictResult } from '@/lib/services/batchConflictService'
+import { buildBatchAiReviewItems, hasCurrentMiaomiaoPass, type BatchReviewTier } from '@/lib/services/batchAiReviewService'
+import { checkBatchConflictsWithWeight, type BatchConflictResult } from '@/lib/services/batchConflictService'
 import { BatchContentLockedError } from '@/lib/services/batchContentGuard'
 
 export const reviewNotesInclude = {
@@ -61,6 +62,7 @@ export function getItemReviewProgress(items: ReviewItem[], conflicts: BatchConfl
     }
   }
   const dependencyPendingIds: number[] = []
+  const rejectedGroupIds: number[] = []
   const visited = new Set<number>()
   let dependencyConflictCount = blocked.size
   for (const entry of current) {
@@ -75,6 +77,7 @@ export function getItemReviewProgress(items: ReviewItem[], conflicts: BatchConfl
       }
     }
     const states = new Set(group.map(id => byId.get(id)!.status))
+    if (states.has('Rejected')) rejectedGroupIds.push(...group)
     const mixed = states.has('Approved') && states.has('Rejected')
     if (mixed) dependencyConflictCount++
     if (mixed || group.some(id => blocked.has(id)) || (group.length > 1 && states.has('Pending'))) {
@@ -86,6 +89,7 @@ export function getItemReviewProgress(items: ReviewItem[], conflicts: BatchConfl
     pendingCount,
     dependencyConflictCount,
     dependencyPendingIds,
+    rejectedGroupIds,
     canFinalize: current.length > 0 && pendingCount === 0 && dependencyConflictCount === 0,
   }
 }
@@ -94,6 +98,89 @@ export class ItemReviewError extends Error {
   constructor(message: string, readonly status: number) {
     super(message)
   }
+}
+
+export function isBulkApprovable(
+  item: Parameters<typeof hasCurrentMiaomiaoPass>[0] & Pick<ReviewItem, 'id' | 'status' | 'appliedAt'> & {
+    reviewNotes: ReadonlyArray<{ decision: ReviewItem['status'] }>
+  },
+  tier: BatchReviewTier | undefined,
+  rejectedGroupIds: ReadonlySet<number>,
+): boolean {
+  return item.status === 'Pending' && !item.appliedAt && tier === 'safe' &&
+    !rejectedGroupIds.has(item.id) && !item.reviewNotes.some(note => note.decision === 'Rejected') &&
+    hasCurrentMiaomiaoPass(item)
+}
+
+export class IneligibleBulkReviewError extends ItemReviewError {
+  constructor(readonly ineligibleIds: number[]) {
+    super('部分词条不满足批量放行条件', 409)
+  }
+}
+
+export async function recordBulkItemApproval(input: {
+  batchId: string
+  itemIds: number[]
+  reviewerId: number
+  expectedContentVersion: number
+}) {
+  const { batchId, itemIds, reviewerId, expectedContentVersion } = input
+  return prisma.$transaction(async tx => {
+    const changed = await tx.batch.updateMany({
+      where: { id: batchId, status: 'Submitted', contentVersion: expectedContentVersion },
+      data: { itemReviewStarted: true, contentVersion: { increment: 1 } },
+    })
+    if (changed.count !== 1) throw new BatchContentLockedError()
+
+    const rows = await tx.pullRequest.findMany({
+      where: { batchId },
+      include: {
+        phrase: true,
+        _count: { select: { likedBy: true, dislikedBy: true } },
+        dependencies: { include: { dependsOn: { select: { appliedAt: true } } } },
+        reviewNotes: { where: { decision: 'Rejected' }, select: { decision: true }, take: 1 },
+      },
+      orderBy: { createAt: 'asc' },
+    })
+    const rowsById = new Map(rows.map(row => [row.id, row]))
+    const conflicts = await checkBatchConflictsWithWeight(rows.filter(row => !row.appliedAt).map(row => ({
+      id: String(row.id),
+      action: row.action,
+      word: row.word || '',
+      oldWord: row.oldWord || undefined,
+      code: row.code || '',
+      weight: row.weight || undefined,
+      type: row.type || 'Phrase',
+    })))
+    const conflictsById = new Map(conflicts.map(result => [Number(result.id), result.conflict]))
+    const aiItems = await buildBatchAiReviewItems(
+      rows.map(row => ({ ...row, conflictInfo: conflictsById.get(row.id) })), false,
+    )
+    const tiersById = new Map(aiItems.map(item => [item.prId, item.tier]))
+    const rejectedGroupIds = new Set(getItemReviewProgress(rows, conflicts).rejectedGroupIds)
+    const ineligibleIds = itemIds.filter(id => {
+      const row = rowsById.get(id)
+      return !row || !isBulkApprovable(row, tiersById.get(id), rejectedGroupIds)
+    })
+    if (ineligibleIds.length) throw new IneligibleBulkReviewError(ineligibleIds)
+
+    const where = { id: { in: itemIds }, batchId }
+    const approved = await tx.pullRequest.updateMany({
+      where: { ...where, status: 'Pending', appliedAt: null },
+      data: { status: 'Approved' },
+    })
+    if (approved.count !== itemIds.length) throw new BatchContentLockedError()
+    await tx.pullRequestReviewNote.createMany({
+      data: itemIds.map(pullRequestId => ({
+        pullRequestId, reviewerId, decision: 'Approved', reason: '喵喵可放行档批量通过',
+      })),
+    })
+    return tx.pullRequest.findMany({
+      where,
+      orderBy: { id: 'asc' },
+      include: { reviewNotes: reviewNotesInclude },
+    })
+  }, { timeout: 30_000 })
 }
 
 export async function recordItemReview(input: {

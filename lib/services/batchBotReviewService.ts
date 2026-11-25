@@ -1,6 +1,13 @@
+import { createHash } from 'node:crypto'
+import type { PullRequest } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import type { BatchAiReviewCodeChain, BatchAiReviewItem, BatchAiReviewResult } from '@/lib/types/batchAiReview'
-import { getMiaomiaoSemanticEvidence, stripMiaomiaoReviewRemark } from './miaomiaoReviewRemark'
+import {
+  getMiaomiaoSemanticEvidence,
+  MIAOMIAO_REVIEW_BLOCK_END,
+  MIAOMIAO_REVIEW_BLOCK_START,
+  stripMiaomiaoReviewRemark,
+} from './miaomiaoReviewRemark'
 import {
   BatchContentLockedError,
   claimBatchContentMutation,
@@ -28,7 +35,7 @@ type BotBatchReviewResponse<T> = {
 }
 
 const MIAOMIAO_REVIEW_TIMEOUT_MS = 290_000
-type ItemReviewResult = Pick<BatchAiReviewResult, 'items' | 'generatedAt'>
+type ItemReviewResult = Pick<BatchAiReviewResult, 'items' | 'generatedAt'> & { auditSealed?: boolean }
 
 interface BotReviewInput {
   batch: ReviewableBatch
@@ -233,19 +240,38 @@ async function fetchMiaomiaoReview<T extends ItemReviewResult>(input: BotReviewI
   return {
     aiReview: data.aiReview,
     warning: data.warning,
+    auditSealed: data.aiReview.auditSealed === true,
   }
 }
 
 export async function requestMiaomiaoBatchReviewDetailed(
   input: BotReviewInput & { localReview: BatchAiReviewResult },
 ): Promise<MiaomiaoBatchReviewResponse> {
-  const result = await fetchMiaomiaoReview<BatchAiReviewResult>(input)
-  return { ...result, aiReview: bindLocalReferenceEvidence(result.aiReview, input.localReview) }
+  const { aiReview, warning } = await fetchMiaomiaoReview<BatchAiReviewResult>(input)
+  return { warning, aiReview: bindLocalReferenceEvidence(aiReview, input.localReview) }
 }
 
 export async function requestMiaomiaoItemReview(input: BotReviewInput): Promise<ItemReviewResult> {
-  const { aiReview } = await fetchMiaomiaoReview<ItemReviewResult>(input, true)
-  return { generatedAt: aiReview.generatedAt, items: bindLocalItemEvidence(aiReview.items, input.localReview.items) }
+  const { aiReview, auditSealed } = await fetchMiaomiaoReview<ItemReviewResult>(input, true)
+  const items = aiReview.items.map(item => guardMiaomiaoItemPass(item, auditSealed))
+  return { generatedAt: aiReview.generatedAt, auditSealed, items: bindLocalItemEvidence(items, input.localReview.items) }
+}
+
+function guardMiaomiaoItemPass(item: BatchAiReviewItem, auditSealed?: boolean, ambiguousDigest = false): BatchAiReviewItem {
+  if (item.status !== 'pass') return item
+  const reason = auditSealed
+    ? '本次复审含需人工确认的审计项，不能批量放行'
+    : String(item.reviewRecord?.source) === 'bot-llm-fallback'
+      ? '本次复审使用备用判断，不能批量放行'
+      : ambiguousDigest ? '词条内容含校验分隔符，不能批量放行' : undefined
+  return reason ? { ...item, status: 'attention', severity: 'warning', reasons: [reason, ...item.reasons] } : item
+}
+
+export function computeReviewDigest(row: Pick<PullRequest, 'action' | 'word' | 'oldWord' | 'code' | 'type' | 'weight'>): string {
+  const { action, word, oldWord, code, type, weight } = row
+  return createHash('sha256')
+    .update(`${action}|${word ?? ''}|${oldWord ?? ''}|${code ?? ''}|${type}|${weight ?? ''}`)
+    .digest('hex').slice(0, 16)
 }
 
 function statusText(item: BatchAiReviewItem): string {
@@ -254,24 +280,33 @@ function statusText(item: BatchAiReviewItem): string {
   return '需复核'
 }
 
-export function formatMiaomiaoReviewRemark(item: BatchAiReviewItem, generatedAt: string): string {
+function replaceReviewBlockMarkers(value: string): string {
+  return value.replaceAll(MIAOMIAO_REVIEW_BLOCK_START, '…').replaceAll(MIAOMIAO_REVIEW_BLOCK_END, '…')
+}
+
+function reviewLineValue(value: string): string {
+  // Bot text belongs in field values, where it cannot introduce another block or status line.
+  return replaceReviewBlockMarkers(value.replace(/[\r\n\u2028\u2029]+/g, ' '))
+}
+
+export function formatMiaomiaoReviewRemark(item: BatchAiReviewItem, generatedAt: string, reviewDigest?: string): string {
   const record = item.reviewRecord
   const lines = [
-    '--- miao-review:start ---',
+    MIAOMIAO_REVIEW_BLOCK_START,
     `本喵复审：${statusText(item)}`,
-    `结论：${item.title}`,
+    `结论：${reviewLineValue(item.title)}`,
   ]
 
   const reasons = item.reasons.slice(0, 3).filter(Boolean).join('；')
   const suggestions = item.suggestions.slice(0, 3).filter(Boolean).join('；')
   if (reasons) {
-    lines.push(`理由：${reasons}`)
+    lines.push(`理由：${reviewLineValue(reasons)}`)
   }
   if (suggestions) {
-    lines.push(`建议：${suggestions}`)
+    lines.push(`建议：${reviewLineValue(suggestions)}`)
   }
   if (record?.pronunciation) {
-    lines.push(`读音：${record.pronunciation}`)
+    lines.push(`读音：${reviewLineValue(record.pronunciation)}`)
   }
   const persistedSources = Array.from(new Set([
     ...(record?.sources ?? []),
@@ -279,12 +314,13 @@ export function formatMiaomiaoReviewRemark(item: BatchAiReviewItem, generatedAt:
   ].map(source => source.trim()).filter(Boolean)))
   // Always persist the field: an empty value is an explicit retraction of
   // legacy sources, while a missing field remains backward-compatible.
-  lines.push(`来源：${persistedSources.join('、')}`)
+  lines.push(`来源：${reviewLineValue(persistedSources.join('、'))}`)
   for (const evidence of record ? getMiaomiaoSemanticEvidence(record).slice(0, 3) : []) {
-    lines.push(`证据：${evidence}`)
+    lines.push(`证据：${reviewLineValue(evidence)}`)
   }
-  lines.push(`时间：${generatedAt}`)
-  lines.push('--- miao-review:end ---')
+  lines.push(`时间：${reviewLineValue(generatedAt)}`)
+  if (reviewDigest) lines.push(`校验：${reviewDigest}`)
+  lines.push(MIAOMIAO_REVIEW_BLOCK_END)
   return lines.join('\n')
 }
 
@@ -303,21 +339,9 @@ export async function writeMiaomiaoBatchReview(input: {
   expectedContentVersion: number
 }): Promise<void> {
   const reviewByPrId = new Map(input.aiReview.items.map(item => [item.prId, item]))
-  const remarkUpdates: Array<{ id: number; remark: string }> = []
-
-  for (const pr of input.batch.pullRequests) {
-    if (pr.appliedAt) continue
-    const item = reviewByPrId.get(pr.id)
-    if (!item) continue
-
-    const baseRemark = stripMiaomiaoReviewRemark(pr.remark)
-    const nextRemark = [
-      baseRemark,
-      formatMiaomiaoReviewRemark(item, input.aiReview.generatedAt),
-    ].filter(Boolean).join('\n\n')
-
-    remarkUpdates.push({ id: pr.id, remark: nextRemark })
-  }
+  const targetIds = input.batch.pullRequests
+    .filter(pr => !pr.appliedAt && reviewByPrId.has(pr.id))
+    .map(pr => pr.id)
 
   await prisma.$transaction(async (tx) => {
     try {
@@ -331,10 +355,23 @@ export async function writeMiaomiaoBatchReview(input: {
       throw error
     }
 
-    for (const update of remarkUpdates) {
+    const rows = await tx.pullRequest.findMany({
+      where: { id: { in: targetIds }, batchId: input.batch.id, appliedAt: null },
+      select: { id: true, remark: true, action: true, word: true, oldWord: true, code: true, type: true, weight: true },
+    })
+    if (rows.length !== targetIds.length) throw new StaleBatchReviewError()
+
+    for (const row of rows) {
+      // The digest's field separator must not be mistaken for part of a different field.
+      const ambiguousDigest = [row.word, row.oldWord, row.code].some(value => value?.includes('|'))
+      const item = guardMiaomiaoItemPass(reviewByPrId.get(row.id)!, input.aiReview.auditSealed, ambiguousDigest)
+      const remark = [
+        replaceReviewBlockMarkers(stripMiaomiaoReviewRemark(row.remark)),
+        formatMiaomiaoReviewRemark(item, input.aiReview.generatedAt, computeReviewDigest(row)),
+      ].filter(Boolean).join('\n\n')
       const updated = await tx.pullRequest.updateMany({
-        where: { id: update.id, batchId: input.batch.id },
-        data: { remark: update.remark },
+        where: { id: row.id, batchId: input.batch.id, appliedAt: null },
+        data: { remark },
       })
       if (updated.count !== 1) throw new StaleBatchReviewError()
     }

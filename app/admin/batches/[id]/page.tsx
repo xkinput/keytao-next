@@ -79,7 +79,7 @@ interface PullRequest {
     word: string
     code: string
   }
-  aiReview?: BatchAiReviewItem & { tier?: BatchReviewTier }
+  aiReview?: BatchAiReviewItem & { tier?: BatchReviewTier; reviewDigestMatches?: boolean }
   conflicts: Array<{
     code: string
     currentWord: string | null
@@ -108,6 +108,7 @@ interface BatchDetail {
     pendingCount: number
     dependencyConflictCount: number
     dependencyPendingIds: number[]
+    rejectedGroupIds: number[]
   }
   creator: {
     id: number
@@ -129,16 +130,22 @@ interface BatchReviewData {
 
 type ReviewBatchList = { batches: Array<Pick<BatchDetail, 'id' | 'createAt'>> }
 
-interface QueuedItemReview extends ItemReviewTarget {
-  word: string
-  reason?: string
+interface BulkReviewTarget {
+  itemIds: number[]
+  expectedContentVersion: number
 }
+
+type QueuedReview =
+  | { itemIds: [number]; decision: ReviewDecision; word: string; reason?: string }
+  | { itemIds: number[]; decision: 'Approved'; bulk: true }
+
+type SavedItemReview = Pick<PullRequest, 'id' | 'status' | 'reviewNotes'>
 
 interface ItemReviewQueue {
   reviewerId: number
   batchId: string
   nextVersion: number
-  entries: Map<number, QueuedItemReview>
+  entries: QueuedReview[]
   stopping?: boolean
 }
 
@@ -276,9 +283,10 @@ function AdminBatchReview({ resolvedParams }: { resolvedParams: { id: string } }
   const [reviewLists, setReviewLists] = useState<ReturnType<typeof snapshotReviewLists> | null>(null)
   const [selectedItemId, setSelectedItemId] = useState<number | null>(null)
   const [reviewTarget, setReviewTarget] = useState<ItemReviewTarget | null>(null)
+  const [bulkReviewTarget, setBulkReviewTarget] = useState<BulkReviewTarget | null>(null)
   const reviewInFlight = useRef(false)
   const reviewQueue = useRef<ItemReviewQueue | null>(null)
-  const [pendingDecisions, setPendingDecisions] = useState<Record<number, ReviewDecision>>({})
+  const [pendingDecisions, setPendingDecisions] = useState<Record<number, ReviewDecision | 'BulkApproved'>>({})
   const [rejectionDrafts, setRejectionDrafts] = useState<Record<number, string>>({})
   const [savingReviews, setSavingReviews] = useState(false)
   const [reviewSyncError, setReviewSyncError] = useState(false)
@@ -357,20 +365,29 @@ function AdminBatchReview({ resolvedParams }: { resolvedParams: { id: string } }
   const drainReviewQueue = async (queue: ItemReviewQueue) => {
     try {
       do {
-        for (const { itemId, decision, reason } of queue.entries.values()) {
+        while (queue.entries.length) {
+          const entry = queue.entries[0]
+          const { itemIds, decision } = entry
           if (useAuthStore.getState().user?.id !== queue.reviewerId) throw new Error('登录账号已变化')
           const expectedContentVersion = queue.nextVersion
-          const saved = await apiRequest<{ item: Pick<PullRequest, 'status' | 'reviewNotes'>; contentVersion: number }>(
-            `/api/admin/batches/${queue.batchId}/items/${itemId}/review`,
-            { method: 'POST', body: { decision, reason, expectedContentVersion } },
-          )
+          const endpoint = `/api/admin/batches/${queue.batchId}/items`
+          const saved = 'bulk' in entry
+            ? await apiRequest<{ items: SavedItemReview[]; contentVersion: number }>(
+              `${endpoint}/review-bulk`, { method: 'POST', body: { itemIds, expectedContentVersion } },
+            )
+            : await apiRequest<{ item: SavedItemReview; contentVersion: number }>(
+              `${endpoint}/${itemIds[0]}/review`,
+              { method: 'POST', body: { decision, reason: entry.reason, expectedContentVersion } },
+            )
           if (useAuthStore.getState().user?.id !== queue.reviewerId) throw new Error('登录账号已变化')
           queue.nextVersion = saved.contentVersion
+          const savedItems = new Map(('items' in saved ? saved.items : [saved.item]).map(item => [item.id, item]))
           await mutate(current => {
             if (!current || current.batch.id !== queue.batchId || current.batch.contentVersion !== expectedContentVersion) return current
-            const pullRequests = current.batch.pullRequests.map(item => item.id === itemId ? {
-              ...item, status: saved.item.status, reviewNotes: saved.item.reviewNotes,
-            } : item)
+            const pullRequests = current.batch.pullRequests.map(item => {
+              const reviewed = savedItems.get(item.id)
+              return reviewed ? { ...item, status: reviewed.status, reviewNotes: reviewed.reviewNotes } : item
+            })
             return {
               reviewedFromContentVersion: current.reviewedFromContentVersion ?? expectedContentVersion,
               batch: {
@@ -385,39 +402,45 @@ function AdminBatchReview({ resolvedParams }: { resolvedParams: { id: string } }
               },
             }
           }, { revalidate: false })
-          queue.entries.delete(itemId)
+          queue.entries.shift()
           setUnconfirmedReviews(current => {
-            if (current?.batchId !== queue.batchId || !current.itemIds.includes(itemId)) return current
-            const itemIds = current.itemIds.filter(id => id !== itemId)
-            return itemIds.length ? { batchId: current.batchId, itemIds } : null
+            if (current?.batchId !== queue.batchId) return current
+            const remaining = current.itemIds.filter(id => !savedItems.has(id))
+            return remaining.length ? { batchId: current.batchId, itemIds: remaining } : null
           })
           setPendingDecisions(current => {
             const next = { ...current }
-            delete next[itemId]
+            for (const id of itemIds) delete next[id]
             return next
           })
-          if (reason !== undefined) setRejectionDrafts(current => {
+          if ('reason' in entry && entry.reason !== undefined) setRejectionDrafts(current => {
             const next = { ...current }
-            delete next[itemId]
+            delete next[itemIds[0]]
             return next
           })
         }
         await syncReviewDetails(queue.reviewerId)
-      } while (queue.entries.size)
+      } while (queue.entries.length)
     } catch (err) {
       queue.stopping = true
-      const failed = queue.entries.values().next().value
+      const failed = queue.entries[0]
       if (failed) {
-        const remaining = queue.entries.size - 1
-        const unsavedItemIds = [...queue.entries.keys()]
-        setUnconfirmedReviews(current => ({
+        const requestError = err as { status?: number; info?: { ineligibleIds?: number[] } } | null
+        const ineligibleIds = 'bulk' in failed && requestError?.status === 409 &&
+          Array.isArray(requestError.info?.ineligibleIds) ? requestError.info.ineligibleIds : null
+        const remaining = queue.entries.slice(1).flatMap(entry => entry.itemIds)
+        const unsavedItemIds = ineligibleIds ? remaining : [...failed.itemIds, ...remaining]
+        if (unsavedItemIds.length) setUnconfirmedReviews(current => ({
           batchId: queue.batchId,
           itemIds: current?.batchId === queue.batchId
             ? [...new Set([...current.itemIds, ...unsavedItemIds])]
             : unsavedItemIds,
         }))
         const message = getReviewErrorMessage(err, '审核结果保存失败')
-        toast.error(`「${failed.word}」${message}${remaining ? `，另有 ${remaining} 条未保存` : ''}`)
+        const label = 'bulk' in failed
+          ? ineligibleIds ? `${ineligibleIds.length} 条词条不满足批量放行条件` : message
+          : `「${failed.word}」${message}`
+        toast.error(`${label}${remaining.length ? `，另有 ${remaining.length} 条未保存` : ''}`)
         await syncReviewDetails(queue.reviewerId).catch(() => setReviewSyncError(true))
       } else {
         setReviewSyncError(true)
@@ -429,29 +452,28 @@ function AdminBatchReview({ resolvedParams }: { resolvedParams: { id: string } }
     }
   }
 
-  const handleItemReview = (target: ItemReviewTarget, reason?: string) => {
+  const enqueueReviews = (batchId: string, expectedContentVersion: number, entry: QueuedReview) => {
     const reviewerId = useAuthStore.getState().user?.id
-    const item = pullRequestById.get(target.itemId)
     const currentQueue = reviewQueue.current
-    if (!item || item.appliedAt || !reviewerId || target.batchId !== batchDataForReview?.id ||
+    if (!reviewerId || batchId !== batchDataForReview?.id ||
       batchDataForReview.status !== 'Submitted' || reviewInFlight.current || currentQueue?.stopping ||
-      target.expectedContentVersion < (batch?.reviewedFromContentVersion ?? batchDataForReview.contentVersion) ||
-      target.expectedContentVersion > batchDataForReview.contentVersion ||
-      (currentQueue && (currentQueue.batchId !== target.batchId || currentQueue.reviewerId !== reviewerId))) {
+      expectedContentVersion < (batch?.reviewedFromContentVersion ?? batchDataForReview.contentVersion) ||
+      expectedContentVersion > batchDataForReview.contentVersion ||
+      (currentQueue && (currentQueue.batchId !== batchId || currentQueue.reviewerId !== reviewerId))) {
       return '批次正在同步或状态已变化，请重试'
     }
-    if (item.status === target.decision || currentQueue?.entries.has(target.itemId)) return '这条词已有相同或待保存的结果'
+    const queuedIds = new Set(currentQueue?.entries.flatMap(queued => queued.itemIds))
+    if (entry.itemIds.some(id => queuedIds.has(id))) return '有词条的审核结果正在保存'
 
-    const queue = currentQueue ?? {
-      reviewerId, batchId: target.batchId, nextVersion: batchDataForReview.contentVersion,
-      entries: new Map<number, QueuedItemReview>(),
+    const queue: ItemReviewQueue = currentQueue ?? {
+      reviewerId, batchId, nextVersion: batchDataForReview.contentVersion, entries: [],
     }
-    queue.entries.set(target.itemId, { ...target, word: item.word ?? item.phrase?.word ?? '词条', reason })
-    setPendingDecisions(current => ({ ...current, [target.itemId]: target.decision }))
-    if (reason !== undefined) {
-      setRejectionDrafts(current => ({ ...current, [target.itemId]: reason }))
-      setReviewTarget(null)
-    }
+    queue.entries.push(entry)
+    setPendingDecisions(current => {
+      const next = { ...current }
+      for (const id of entry.itemIds) next[id] = 'bulk' in entry ? 'BulkApproved' : entry.decision
+      return next
+    })
     if (!currentQueue) {
       reviewQueue.current = queue
       setSavingReviews(true)
@@ -459,10 +481,23 @@ function AdminBatchReview({ resolvedParams }: { resolvedParams: { id: string } }
     }
   }
 
+  const handleItemReview = (target: ItemReviewTarget, reason?: string) => {
+    const item = pullRequestById.get(target.itemId)
+    if (!item || item.appliedAt || item.status === target.decision) return '这条词的审核状态已变化'
+    const failure = enqueueReviews(target.batchId, target.expectedContentVersion, {
+      itemIds: [target.itemId], decision: target.decision, word: item.word ?? item.phrase?.word ?? '词条', reason,
+    })
+    if (!failure && reason !== undefined) {
+      setRejectionDrafts(current => ({ ...current, [target.itemId]: reason }))
+      setReviewTarget(null)
+    }
+    return failure
+  }
+
   const selectReviewDecision = (itemId: number, decision: ReviewDecision) => {
     const item = pullRequestById.get(itemId)
     if (batchDataForReview?.status !== 'Submitted' || !item || item.status === decision || item.appliedAt ||
-      error || reviewSyncError || activeReview || reviewInFlight.current || pendingDecisions[itemId]) return false
+      error || reviewSyncError || activeReview || bulkReviewTarget || reviewInFlight.current || pendingDecisions[itemId]) return false
     setSelectedItemId(itemId)
     const target = {
       batchId: batchDataForReview.id, itemId, decision, expectedContentVersion: batchDataForReview.contentVersion,
@@ -480,9 +515,9 @@ function AdminBatchReview({ resolvedParams }: { resolvedParams: { id: string } }
     const rows = Array.from(pendingReviewList.current?.querySelectorAll<HTMLElement>('[data-review-item]') ?? [])
     if (direction === -1) rows.reverse()
     const currentIndex = rows.findIndex(row => Number(row.dataset.reviewItem) === selectedItemId)
-    const queuedItems = reviewQueue.current?.entries
+    const queuedItems = new Set(reviewQueue.current?.entries.flatMap(entry => entry.itemIds))
     const next = [...rows.slice(currentIndex + 1), ...rows.slice(0, currentIndex + 1)]
-      .find(row => row.dataset.reviewPending === 'true' && !queuedItems?.has(Number(row.dataset.reviewItem)))
+      .find(row => row.dataset.reviewPending === 'true' && !queuedItems.has(Number(row.dataset.reviewItem)))
     if (!next) return
     next.focus({ preventScroll: true })
     next.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' })
@@ -495,7 +530,7 @@ function AdminBatchReview({ resolvedParams }: { resolvedParams: { id: string } }
   }
 
   const onReviewShortcut = useEffectEvent((event: KeyboardEvent) => {
-    if (batchDataForReview?.status !== 'Submitted' || activeReview || event.defaultPrevented ||
+    if (batchDataForReview?.status !== 'Submitted' || activeReview || bulkReviewTarget || event.defaultPrevented ||
       event.isComposing || event.key === 'Process' || event.repeat || !event.altKey ||
       event.ctrlKey || event.metaKey || event.shiftKey ||
       (event.target instanceof HTMLElement && event.target.closest(
@@ -666,6 +701,31 @@ function AdminBatchReview({ resolvedParams }: { resolvedParams: { id: string } }
   const dependencyPendingIds = new Set(batchData.reviewProgress?.dependencyPendingIds)
   const pendingPullRequests = reviewLists.visible
   const approvedPullRequests = reviewLists.approved
+  const showBulkReview = canReview && (reviewLists.filter === 'all' || reviewLists.filter === 'safe')
+  const rejectedGroupIds = new Set(batchData.reviewProgress.rejectedGroupIds)
+  const bulkItemIds = showBulkReview ? pendingPullRequests.filter(snapshot => {
+    const latest = pullRequestById.get(snapshot.id)
+    return latest?.status === 'Pending' && !latest.appliedAt && latest.aiReview?.tier === 'safe' &&
+      latest.aiReview.reviewDigestMatches && !pendingDecisions[latest.id] &&
+      !latest.reviewNotes?.some(note => note.decision === 'Rejected') &&
+      !rejectedGroupIds.has(latest.id) && !changedReviewContent(snapshot, latest)
+  }).slice(0, 500).map(pr => pr.id) : []
+  const queuedBulkCount = Object.values(pendingDecisions).filter(decision => decision === 'BulkApproved').length
+  const canQueueBulkReview = !error && !reviewSyncError && !finalizing && checkingTarget === null && !activeReview && !queuedBulkCount
+  const bulkReviewOutdated = bulkReviewTarget && (
+    !canQueueBulkReview ||
+    bulkReviewTarget.expectedContentVersion < (batch.reviewedFromContentVersion ?? batchData.contentVersion) ||
+    bulkReviewTarget.itemIds.some(id => !bulkItemIds.includes(id))
+  )
+  const confirmBulkReview = () => {
+    if (!bulkReviewTarget || bulkReviewOutdated) return
+    const failure = enqueueReviews(batchData.id, bulkReviewTarget.expectedContentVersion, {
+      itemIds: bulkReviewTarget.itemIds, decision: 'Approved', bulk: true,
+    })
+    if (failure) toast.error(failure)
+    else setBulkReviewTarget(null)
+  }
+
   const awaitingReview = (item: PullRequest) => item.status === 'Pending' ||
     (!!batchData.reviewProgress.dependencyConflictCount && dependencyPendingIds.has(item.id))
   const hasVisibleReviewItem = pendingPullRequests.some(pr => {
@@ -944,9 +1004,18 @@ function AdminBatchReview({ resolvedParams }: { resolvedParams: { id: string } }
             onNewerReviewPreview={refreshReviewDetails}
             lineActionItems={lineActionItems} renderLineActions={renderReviewActions} />
           <section ref={pendingReviewList} aria-labelledby="pending-item-reviews">
-            <h3 id="pending-item-reviews" className="text-xl font-semibold">
-              待审核 <span className="text-default-500">{pendingPullRequests.length}</span>
-            </h3>
+            <div className="flex min-h-8 items-center gap-3">
+              <h3 id="pending-item-reviews" className="text-xl font-semibold">
+                待审核 <span className="text-default-500">{pendingPullRequests.length}</span>
+              </h3>
+              {showBulkReview && (queuedBulkCount > 0 || bulkItemIds.length > 0) && (
+                <Button type="button" size="sm" color="primary" className="h-8 tabular-nums"
+                  isDisabled={!canQueueBulkReview} isLoading={queuedBulkCount > 0}
+                  onPress={() => setBulkReviewTarget({ itemIds: bulkItemIds, expectedContentVersion: batchData.contentVersion })}>
+                  全部通过（{queuedBulkCount || bulkItemIds.length}）
+                </Button>
+              )}
+            </div>
             {reviewLists.reviewing && (
               <div className="mt-2 flex flex-wrap gap-2" role="group" aria-label="待审核筛选">
                 {reviewTierFilters.map(filter => (
@@ -1033,6 +1102,24 @@ function AdminBatchReview({ resolvedParams }: { resolvedParams: { id: string } }
             onSubmit={reason => handleItemReview(activeReview, reason)}
             onClose={() => setReviewTarget(null)}
           />
+        )}
+
+        {bulkReviewTarget && (
+          <Modal isOpen onClose={() => setBulkReviewTarget(null)}>
+            <ModalContent aria-labelledby="bulk-review-dialog-title">
+              <ModalHeader id="bulk-review-dialog-title">确认通过这 {bulkReviewTarget.itemIds.length} 条词条？</ModalHeader>
+              {pendingReviewCount === bulkReviewTarget.itemIds.length +
+                batchData.pullRequests.filter(pr => !pr.appliedAt && pr.status === 'Pending' && pendingDecisions[pr.id]).length && (
+                <ModalBody>将自动提交审核结果并进入下一批</ModalBody>
+              )}
+              <ModalFooter>
+                <Button type="button" variant="light" onPress={() => setBulkReviewTarget(null)}>取消</Button>
+                <Button type="button" color="primary" isDisabled={Boolean(bulkReviewOutdated)} onPress={confirmBulkReview}>
+                  确认通过
+                </Button>
+              </ModalFooter>
+            </ModalContent>
+          </Modal>
         )}
 
         {batchData.reviewNote && (
