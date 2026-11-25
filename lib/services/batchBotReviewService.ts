@@ -45,6 +45,70 @@ export interface MiaomiaoBatchReviewResponse {
   warning?: string
 }
 
+type FocusReviewItem = {
+  id: number
+  action?: string
+  word?: string | null
+  oldWord?: string | null
+  code?: string | null
+  type?: string | null
+  phrase?: { word: string; code: string } | null
+  dependencies?: readonly ({ dependsOnId: number } | { dependsOn: { id: number } })[]
+  dependedBy?: readonly { dependent: { id: number } }[]
+}
+
+export function selectAiReviewFocusContext<T extends FocusReviewItem>(
+  unappliedItems: readonly T[],
+  targetId: number,
+): T[] {
+  const items = unappliedItems.map(pr => {
+    const code = (pr.code ?? pr.phrase?.code ?? '').trim().toLowerCase()
+    return {
+      pr,
+      word: (pr.word ?? pr.phrase?.word ?? '').trim(),
+      oldWord: pr.action === 'Change' ? (pr.oldWord ?? '').trim() : '',
+      type: pr.type || 'Phrase',
+      code,
+      hasPrefixCode: Array.from(code).length >= 3,
+      linkedIds: new Set([
+        ...(pr.dependencies ?? []).map(link => 'dependsOnId' in link ? link.dependsOnId : link.dependsOn.id),
+        ...(pr.dependedBy ?? []).map(link => link.dependent.id),
+      ]),
+    }
+  })
+  const target = items.find(item => item.pr.id === targetId)
+  if (!target) return []
+
+  // ponytail: Cap focus review at 24 items, truncating larger connected components.
+  const limit = 24
+  const queue = [target]
+  const seen = new Set([targetId])
+  for (let index = 0; index < queue.length && queue.length < limit; index++) {
+    const current = queue[index]
+    const explicit = []
+    const related = []
+    for (const candidate of items) {
+      if (seen.has(candidate.pr.id)) continue
+      if (current.linkedIds.has(candidate.pr.id) || candidate.linkedIds.has(current.pr.id)
+        || (current.oldWord && current.oldWord === candidate.word)
+        || (candidate.oldWord && candidate.oldWord === current.word)
+        || (current.oldWord && current.oldWord === candidate.oldWord && current.word === candidate.word)) {
+        explicit.push(candidate)
+      } else if ((current.word && current.word === candidate.word)
+        || (current.type === candidate.type && current.hasPrefixCode && candidate.hasPrefixCode
+          && (current.code.startsWith(candidate.code) || candidate.code.startsWith(current.code)))) {
+        related.push(candidate)
+      }
+    }
+    for (const neighbor of [...explicit, ...related]) {
+      queue.push(neighbor)
+      seen.add(neighbor.pr.id)
+      if (queue.length === limit) break
+    }
+  }
+  return queue.map(item => item.pr)
+}
+
 function bindLocalItemEvidence(
   botItems: BatchAiReviewItem[],
   localItems: BatchAiReviewItem[],

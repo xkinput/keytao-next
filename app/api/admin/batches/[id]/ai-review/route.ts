@@ -4,6 +4,7 @@ import { getAdminBatchReviewDetail } from '@/lib/services/adminBatchReviewDetail
 import { buildMiaomiaoItemReviewContext } from '@/lib/services/batchAiReviewService'
 import {
   requestMiaomiaoItemReview,
+  selectAiReviewFocusContext,
   StaleBatchReviewError,
   writeMiaomiaoBatchReview,
 } from '@/lib/services/batchBotReviewService'
@@ -46,9 +47,10 @@ export async function POST(
     // applying a result to a batch that has moved on.
     const reviewedContentVersion = batch.contentVersion
 
+    const reviewContext = prId === undefined ? pullRequests : selectAiReviewFocusContext(pullRequests, prId)
     const aiReview = await requestMiaomiaoItemReview({
-      batch: { id: batch.id, status: batch.status, description: batch.description, pullRequests },
-      localReview: await buildMiaomiaoItemReviewContext(pullRequests),
+      batch: { id: batch.id, status: batch.status, description: batch.description, pullRequests: reviewContext },
+      localReview: await buildMiaomiaoItemReviewContext(reviewContext),
       focusPrId: prId,
     })
     const reviewedIds = new Set(aiReview.items.map(item => item.prId))
