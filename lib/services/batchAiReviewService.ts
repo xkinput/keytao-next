@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { prisma } from '@/lib/prisma'
 import type { PhraseType } from '@/lib/constants/phraseTypes'
 import type {
@@ -11,7 +12,11 @@ import type {
 } from '@/lib/types/batchAiReview'
 import type { ConflictInfo } from './conflictDetector'
 import { computeReviewDigest } from './batchBotReviewService'
-import { getMiaomiaoEvidenceHighlights, parseMiaomiaoReviewRemark as parseStructuredRemark } from './miaomiaoReviewRemark'
+import {
+  getMiaomiaoEvidenceHighlights,
+  parseMiaomiaoReviewRemark as parseStructuredRemark,
+  type MiaomiaoReviewRemarkBlock,
+} from './miaomiaoReviewRemark'
 import {
   buildReferenceEvidence,
   hasDictionaryReference,
@@ -159,6 +164,30 @@ function formatEntry(entry: BatchAiReviewChainEntry): string {
   return `「${entry.word}」(${weight})`
 }
 
+export function computeChainDigest(
+  entries: readonly { code: string; type?: string | null; word: string; weight: number | null }[],
+): string {
+  const sorted = [...entries].sort((left, right) => {
+    if (left.weight !== right.weight) {
+      if (left.weight === null) return 1
+      if (right.weight === null) return -1
+      return left.weight - right.weight
+    }
+
+    const leftPoints = Array.from(left.word, character => character.codePointAt(0)!)
+    const rightPoints = Array.from(right.word, character => character.codePointAt(0)!)
+    for (let index = 0; index < Math.min(leftPoints.length, rightPoints.length); index++) {
+      const difference = leftPoints[index] - rightPoints[index]
+      if (difference) return difference
+    }
+    return leftPoints.length - rightPoints.length
+  })
+  const payload = sorted.map(({ code, type, word, weight }) =>
+    `${code.toLowerCase()}|${type || 'Phrase'}|${word}|${weight === null ? 'None' : String(weight)}`,
+  ).join('\n')
+  return createHash('sha256').update(payload, 'utf8').digest('hex').slice(0, 16)
+}
+
 function extractReviewRecord(remark: string | null): BatchAiReviewRecord | undefined {
   if (!remark) return undefined
 
@@ -259,9 +288,7 @@ function severityForStatus(status: BatchAiReviewStatus): BatchAiReviewSeverity {
   return 'warning'
 }
 
-function parseMiaomiaoReviewRemark(remark: string | null): ParsedMiaomiaoReview | undefined {
-  const parsed = parseStructuredRemark(remark)
-  const structured = parsed.review
+function buildStructuredReview(structured?: MiaomiaoReviewRemarkBlock): ParsedMiaomiaoReview | undefined {
   if (!structured) return undefined
 
   const status = parseMiaomiaoReviewStatus(structured.status)
@@ -284,6 +311,7 @@ function parseMiaomiaoReviewRemark(remark: string | null): ParsedMiaomiaoReview 
       source: 'bot-llm',
       summary: compactText(title),
       pronunciation: structured.pronunciation,
+      ...(structured.commonness ? { commonness: structured.commonness } : {}),
       sources: structured.sources,
       ...sourceKinds,
       evidence: evidence.length > 0 ? evidence : ['本喵已调用 LLM 完成复审。'],
@@ -414,10 +442,10 @@ function buildReviewItem(
 ): ReviewItemWithTier {
   const word = getWord(pr)
   const code = getCode(pr)
-  const parsedRemark = parseStructuredRemark(pr.remark)
-  const structuredReview = parseMiaomiaoReviewRemark(pr.remark)
-  const legacyReviewRecord = extractReviewRecord(parsedRemark.baseRemark)
-  const reviewRecord = structuredReview?.reviewRecord && parsedRemark.review?.hasSourcesField
+  const { baseRemark, review } = parseStructuredRemark(pr.remark)
+  const structuredReview = buildStructuredReview(review)
+  const legacyReviewRecord = extractReviewRecord(baseRemark)
+  const reviewRecord = structuredReview?.reviewRecord && review?.hasSourcesField
     ? structuredReview.reviewRecord
     : mergeReviewRecords(structuredReview?.reviewRecord, legacyReviewRecord)
   const state = {
@@ -544,6 +572,7 @@ function buildReviewItem(
     reasons: reasons.length > 0 ? reasons : [`「${word}」@${code} 未发现明显冲突。`],
     suggestions: suggestions.length > 0 ? suggestions : ['可结合编码链位置做最终确认。'],
     reviewRecord,
+    ...(review?.suggestedOrder ? { suggestedOrder: review.suggestedOrder } : {}),
     referenceEvidence,
     // Only the admin detail supplies vote counts for the display tier.
     ...(pr._count ? { tier: deriveBatchReviewTier(pr, tierStatus, Boolean(move)) } : {}),

@@ -9,6 +9,7 @@ export interface BatchAiReviewRecord {
   source: 'bot-remark' | 'bot-llm' | 'system'
   summary: string
   pronunciation?: string
+  commonness?: { daily?: string; authority?: string }
   sources: string[]
   /** Explicit dictionary, encyclopedia, or other named reference sources. */
   authoritySources?: string[]
@@ -43,6 +44,7 @@ export interface BatchAiReviewItem {
   reasons: string[]
   suggestions: string[]
   reviewRecord?: BatchAiReviewRecord
+  suggestedOrder?: { code: string; type: string; orderedWords: string[]; chainDigest: string }
   referenceEvidence?: BatchReferenceEvidence
 }
 

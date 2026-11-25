@@ -282,6 +282,8 @@ function MiaomiaoDiffReview({ review }: { review: MiaomiaoReviewRemarkBlock }) {
         { label: '读音', value: review.pronunciation },
         { label: '来源', value: review.sources.join('、') || undefined },
         { label: '证据', value: review.evidence.join('；') || undefined },
+        { label: '常用', value: review.commonness?.daily },
+        { label: '收录', value: review.commonness?.authority },
     ].filter((field): field is { label: string; value: string } => Boolean(field.value))
 
     return (

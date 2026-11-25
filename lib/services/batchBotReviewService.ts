@@ -6,6 +6,7 @@ import {
   getMiaomiaoSemanticEvidence,
   MIAOMIAO_REVIEW_BLOCK_END,
   MIAOMIAO_REVIEW_BLOCK_START,
+  readMiaomiaoSuggestedOrder,
   stripMiaomiaoReviewRemark,
 } from './miaomiaoReviewRemark'
 import {
@@ -324,6 +325,20 @@ export function formatMiaomiaoReviewRemark(item: BatchAiReviewItem, generatedAt:
   lines.push(`来源：${reviewLineValue(persistedSources.join('、'))}`)
   for (const evidence of record ? getMiaomiaoSemanticEvidence(record).slice(0, 3) : []) {
     lines.push(`证据：${reviewLineValue(evidence)}`)
+  }
+  const { daily, authority } = record?.commonness ?? {}
+  if (typeof daily === 'string' && daily) lines.push(`常用：${reviewLineValue(daily)}`)
+  if (typeof authority === 'string' && authority) lines.push(`收录：${reviewLineValue(authority)}`)
+
+  const suggestedOrder = readMiaomiaoSuggestedOrder(item.suggestedOrder)
+  if (suggestedOrder) {
+    // Escape remark delimiters as JSON characters so the values round-trip unchanged.
+    const json = JSON.stringify(suggestedOrder)
+      .replaceAll(MIAOMIAO_REVIEW_BLOCK_START, `\\u002d${MIAOMIAO_REVIEW_BLOCK_START.slice(1)}`)
+      .replaceAll(MIAOMIAO_REVIEW_BLOCK_END, `\\u002d${MIAOMIAO_REVIEW_BLOCK_END.slice(1)}`)
+      .replaceAll('\u2028', '\\u2028')
+      .replaceAll('\u2029', '\\u2029')
+    lines.push(`排序：${json}`)
   }
   lines.push(`时间：${reviewLineValue(generatedAt)}`)
   if (reviewDigest && !isFallbackReviewItem(item)) lines.push(`校验：${reviewDigest}`)
