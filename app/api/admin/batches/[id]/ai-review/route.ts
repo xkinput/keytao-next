@@ -70,18 +70,12 @@ export async function POST(
     // applying a result to a batch that has moved on.
     const reviewedContentVersion = batch.contentVersion
 
-    let reviewContext = pullRequests
-    if (targetIds) {
-      const contextById = new Map(targets.map(pr => [pr.id, pr]))
-      for (const targetId of targetIds) {
-        for (const pr of selectAiReviewFocusContext(pullRequests, targetId)) contextById.set(pr.id, pr)
-      }
-      // shortcut: Cap context at 48 items to bound bot work, revisit if related entries are frequently cut off.
-      reviewContext = Array.from(contextById.values()).slice(0, 48)
-    }
+    const reviewContext = targetIds ? selectAiReviewFocusContext(pullRequests, ...targetIds) : pullRequests
+    const contextIds = new Set(reviewContext.map(pr => pr.id))
     const aiReview = await requestMiaomiaoItemReview({
       batch: { id: batch.id, status: batch.status, description: batch.description, pullRequests: reviewContext },
-      localReview: await buildMiaomiaoItemReviewContext(reviewContext),
+      // Simulate chain edits in the same batch order as the admin detail.
+      localReview: await buildMiaomiaoItemReviewContext(pullRequests.filter(pr => contextIds.has(pr.id))),
       focusPrId: targetIds?.length === 1 ? targetIds[0] : undefined,
     })
     const reviewedIds = new Set(aiReview.items.map(item => item.prId))

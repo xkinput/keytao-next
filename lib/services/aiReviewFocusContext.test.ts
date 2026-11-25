@@ -53,13 +53,17 @@ describe('selectAiReviewFocusContext', () => {
       .toEqual([target, oldWord, samePair, sameWord])
   })
 
-  it('caps the context at 24 with the target first and direct links ahead of rule neighbours', () => {
+  it('includes the entire short-code slot before up to 24 closure neighbours', () => {
     const sameWordItems = Array.from({ length: 25 }, (_, index) => ({ id: index + 1, word: 'shared' }))
-    const target = { id: 26, word: 'shared', dependencies: [{ dependsOnId: 27 }] }
+    const target = { id: 26, word: 'shared', code: 'AB', dependencies: [{ dependsOnId: 27 }] }
     const dependency = { id: 27, word: 'second', dependencies: [{ dependsOnId: 28 }] }
     const nextHop = { id: 28, word: 'third' }
+    const otherType = { id: 29, word: 'other', code: 'ab', type: 'Other' }
+    const implicitCode = { id: 30, code: '', phrase: { word: 'fallback', code: 'ab' } }
+    const sameSlot = Array.from({ length: 25 }, (_, index) => ({ id: index + 31, code: 'ab', type: 'Phrase' }))
 
-    expect(selectAiReviewFocusContext([...sameWordItems, target, dependency, nextHop], 26))
-      .toEqual([target, dependency, ...sameWordItems.slice(0, 22)])
+    expect(selectAiReviewFocusContext([
+      ...sameWordItems, target, dependency, nextHop, otherType, implicitCode, ...sameSlot,
+    ], 26)).toEqual([target, implicitCode, ...sameSlot, dependency, ...sameWordItems.slice(0, 23)])
   })
 })

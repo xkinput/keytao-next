@@ -70,16 +70,19 @@ type FocusReviewItem = {
 
 export function selectAiReviewFocusContext<T extends FocusReviewItem>(
   unappliedItems: readonly T[],
-  targetId: number,
+  ...targetIds: number[]
 ): T[] {
   const items = unappliedItems.map(pr => {
-    const code = (pr.code ?? pr.phrase?.code ?? '').trim().toLowerCase()
+    const slotCode = (pr.code || pr.phrase?.code || '').toLowerCase()
+    const code = slotCode.trim()
+    const type = pr.type || 'Phrase'
     return {
       pr,
       word: (pr.word ?? pr.phrase?.word ?? '').trim(),
       oldWord: pr.action === 'Change' ? (pr.oldWord ?? '').trim() : '',
-      type: pr.type || 'Phrase',
+      type,
       code,
+      slot: slotCode ? `${type}:${slotCode}` : '',
       hasPrefixCode: Array.from(code).length >= 3,
       linkedIds: new Set([
         ...(pr.dependencies ?? []).map(link => 'dependsOnId' in link ? link.dependsOnId : link.dependsOn.id),
@@ -87,37 +90,45 @@ export function selectAiReviewFocusContext<T extends FocusReviewItem>(
       ]),
     }
   })
-  const target = items.find(item => item.pr.id === targetId)
-  if (!target) return []
+  const itemsById = new Map(items.map(item => [item.pr.id, item]))
+  const targets = targetIds.map(id => itemsById.get(id)).filter(item => item !== undefined)
+  const targetSlots = new Set(targets.map(item => item.slot).filter(Boolean))
+  const slotItems = items.filter(item => targetSlots.has(item.slot))
+  const required = new Map([...targets, ...slotItems].map(item => [item.pr.id, item.pr]))
+  const candidates = items.filter(item => !required.has(item.pr.id))
+  const closure = new Map<number, T>()
 
-  // ponytail: Cap focus review at 24 items, truncating larger connected components.
-  const limit = 24
-  const queue = [target]
-  const seen = new Set([targetId])
-  for (let index = 0; index < queue.length && queue.length < limit; index++) {
-    const current = queue[index]
-    const explicit = []
-    const related = []
-    for (const candidate of items) {
-      if (seen.has(candidate.pr.id)) continue
-      if (current.linkedIds.has(candidate.pr.id) || candidate.linkedIds.has(current.pr.id)
-        || (current.oldWord && current.oldWord === candidate.word)
-        || (candidate.oldWord && candidate.oldWord === current.word)
-        || (current.oldWord && current.oldWord === candidate.oldWord && current.word === candidate.word)) {
-        explicit.push(candidate)
-      } else if ((current.word && current.word === candidate.word)
-        || (current.type === candidate.type && current.hasPrefixCode && candidate.hasPrefixCode
-          && (current.code.startsWith(candidate.code) || candidate.code.startsWith(current.code)))) {
-        related.push(candidate)
+  // shortcut: Limit closure fill to 24 per target and 48 overall, revisit if related entries are frequently cut off.
+  for (const target of targets) {
+    const queue = [target, ...slotItems.filter(item => item !== target && item.slot === target.slot)]
+    const limit = queue.length + 24
+    const seen = new Set<number>()
+    for (let index = 0; index < queue.length && queue.length < limit; index++) {
+      const current = queue[index]
+      const explicit = []
+      const related = []
+      for (const candidate of candidates) {
+        if (seen.has(candidate.pr.id)) continue
+        if (current.linkedIds.has(candidate.pr.id) || candidate.linkedIds.has(current.pr.id)
+          || (current.oldWord && current.oldWord === candidate.word)
+          || (candidate.oldWord && candidate.oldWord === current.word)
+          || (current.oldWord && current.oldWord === candidate.oldWord && current.word === candidate.word)) {
+          explicit.push(candidate)
+        } else if ((current.word && current.word === candidate.word)
+          || (current.type === candidate.type && current.hasPrefixCode && candidate.hasPrefixCode
+            && (current.code.startsWith(candidate.code) || candidate.code.startsWith(current.code)))) {
+          related.push(candidate)
+        }
+      }
+      for (const neighbor of [...explicit, ...related]) {
+        queue.push(neighbor)
+        seen.add(neighbor.pr.id)
+        closure.set(neighbor.pr.id, neighbor.pr)
+        if (queue.length === limit) break
       }
     }
-    for (const neighbor of [...explicit, ...related]) {
-      queue.push(neighbor)
-      seen.add(neighbor.pr.id)
-      if (queue.length === limit) break
-    }
   }
-  return queue.map(item => item.pr)
+  return [...required.values(), ...Array.from(closure.values()).slice(0, 48)]
 }
 
 function bindLocalItemEvidence(

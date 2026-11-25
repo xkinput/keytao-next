@@ -122,21 +122,32 @@ describe('admin AI review chunks', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
-  it('sends unique context capped at 48 with all targets first and writes only the targets', async () => {
-    setBatch(Array.from({ length: 75 }, (_, i) => ({
-      ...row(i + 1), word: String(Math.floor(i / 25)), code: ['abc', 'def', 'ghi'][Math.floor(i / 25)],
-    })))
-    const targets = [71, 24, 25, 49]
+  it('sends all target slots before up to 48 closure neighbours and writes only the targets', async () => {
+    const codes = ['abc', 'def', 'ghi']
+    const sameSlot = Array.from({ length: 51 }, (_, i) => ({
+      ...row(i + 1), word: `Slot item ${i}`, code: codes[i % codes.length],
+    }))
+    const neighbours = Array.from({ length: 75 }, (_, i) => ({
+      ...row(i + 52), word: `Neighbour ${i}`, code: `${codes[i % codes.length]}${i}`,
+    }))
+    const applied = { ...sameSlot[0], id: 127, appliedAt: new Date(generatedAt) }
+    const rows = [...neighbours, ...sameSlot, applied]
+    setBatch(rows)
+    const targets = [51, 1, 2, 4]
 
     const response = await post({ prIds: targets })
 
     expect(response?.status).toBe(200)
     const sent = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))
-    const contextIds = sent.batch.pullRequests.map((pr: { id: number }) => pr.id)
-    expect(contextIds).toHaveLength(48)
-    expect(new Set(contextIds).size).toBe(48)
-    expect(contextIds.slice(0, targets.length)).toEqual(targets)
-    expect(buildContext).toHaveBeenCalledWith(sent.batch.pullRequests)
+    const contextIds: number[] = sent.batch.pullRequests.map((pr: { id: number }) => pr.id)
+    expect(contextIds).toHaveLength(sameSlot.length + 48)
+    expect(new Set(contextIds).size).toBe(contextIds.length)
+    expect(contextIds.slice(0, sameSlot.length)).toEqual([
+      ...targets, ...sameSlot.map(pr => pr.id).filter(id => !targets.includes(id)),
+    ])
+    expect(contextIds).not.toContain(applied.id)
+    const builtIds = buildContext.mock.lastCall?.[0].map((pr: { id: number }) => pr.id)
+    expect(builtIds).toEqual(rows.map(pr => pr.id).filter(id => contextIds.includes(id)))
     expect(sent).not.toHaveProperty('focus_pr_id')
     expect(tx.pullRequest.updateMany.mock.calls.map(([arg]) => arg.where.id).sort((a, b) => a - b))
       .toEqual([...targets].sort((a, b) => a - b))
