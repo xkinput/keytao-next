@@ -84,7 +84,7 @@ function TodoTabTitle({ label, count }: { label: string; count: number }) {
     <span className="inline-flex items-start gap-1">
       {label}
       {count > 0 && (
-        <span className="-mt-1 inline-flex min-w-4 items-center justify-center rounded-full bg-danger px-1 text-[10px] leading-4 text-white tabular-nums">
+        <span className="relative -mt-1 inline-flex min-w-4 items-center justify-center rounded-full bg-danger px-1 text-[10px] leading-4 text-white tabular-nums max-sm:text-xs">
           <span className="sr-only">待办 </span>{count}
         </span>
       )}

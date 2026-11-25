@@ -228,6 +228,7 @@ function ItemReviewDialog({
           <ModalBody>
             <Textarea
               ref={reasonInputRef}
+              classNames={{ input: 'max-sm:text-base' }}
               label="拒绝理由"
               name="reason"
               value={reason}
@@ -878,7 +879,7 @@ function AdminBatchReview({ resolvedParams }: { resolvedParams: { id: string } }
     activeReview.expectedContentVersion > batchData.contentVersion || !canReview || !!activeItem?.appliedAt
   )
   const renderReviewActions = (item: PullRequest, stale: boolean) => {
-    if (item.appliedAt || !canAskMiao) return canReview ? <span className="block w-[8.5rem]" aria-hidden="true" /> : null
+    if (item.appliedAt || !canAskMiao) return canReview ? <span className="block w-[8.5rem] max-sm:h-8 max-lg:pointer-coarse:h-11 max-lg:pointer-coarse:w-[11.5rem]" aria-hidden="true" /> : null
     const itemId = item.id
     const word = item.word ?? item.phrase?.word ?? '词条'
     const pendingDecision = pendingDecisions[itemId]
@@ -888,7 +889,7 @@ function AdminBatchReview({ resolvedParams }: { resolvedParams: { id: string } }
     const savingOrder = pendingDecision === 'ApplyOrder'
 
     return (
-      <div className="flex shrink-0 items-center gap-0.5">
+      <div className="flex shrink-0 items-center gap-0.5 max-sm:flex-wrap">
         {canReview && (['Approved', 'Rejected'] as const).map(decision => {
           const selected = item.status === decision
           const saving = pendingDecision === decision
@@ -900,7 +901,7 @@ function AdminBatchReview({ resolvedParams }: { resolvedParams: { id: string } }
               type="button"
               size="sm"
               isIconOnly
-              className={`h-8 w-8 min-w-0 ${decision === 'Approved' ? 'text-success' : 'text-danger'}`}
+              className={`h-8 w-8 min-w-0 max-lg:pointer-coarse:min-h-11 max-lg:pointer-coarse:min-w-11 ${decision === 'Approved' ? 'text-success' : 'text-danger'}`}
               color={decision === 'Rejected' && selected ? 'danger' : undefined}
               variant={selected ? 'flat' : 'light'}
               aria-label={`${label}词条「${word}」${saving ? '（正在保存）' : ''}`}
@@ -925,7 +926,7 @@ function AdminBatchReview({ resolvedParams }: { resolvedParams: { id: string } }
               size="sm"
               isIconOnly
               variant="light"
-              className="h-8 w-8 min-w-0"
+              className="h-8 w-8 min-w-0 max-lg:pointer-coarse:min-h-11 max-lg:pointer-coarse:min-w-11"
               aria-label="采纳喵喵排序"
               aria-busy={savingOrder || undefined}
               aria-disabled={busy || !!bulkReviewTarget || undefined}
@@ -940,13 +941,13 @@ function AdminBatchReview({ resolvedParams }: { resolvedParams: { id: string } }
                 : <ListOrdered className="size-4" aria-hidden="true" />}
             </Button>
           </Tooltip>
-        ) : <span className="size-8 shrink-0" aria-hidden="true" />)}
+        ) : <span className="size-8 shrink-0 max-lg:pointer-coarse:size-11" aria-hidden="true" />)}
         <Button
           type="button"
           size="sm"
           isIconOnly
           variant="light"
-          className="h-8 w-8 min-w-0 text-inherit"
+          className="h-8 w-8 min-w-0 text-inherit max-lg:pointer-coarse:min-h-11 max-lg:pointer-coarse:min-w-11"
           aria-label={`让喵再审词条「${word}」`}
           aria-disabled={stale || reviewBusy || !!activeReview || undefined}
           title="让喵再审"
@@ -988,7 +989,7 @@ function AdminBatchReview({ resolvedParams }: { resolvedParams: { id: string } }
     <div className="min-h-screen">
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="mb-6">
-          <div className="flex items-center gap-2 mb-4">
+          <div className="flex items-center gap-2 mb-4 max-sm:flex-wrap">
             <Button
               variant="light"
               isDisabled={savingReviews || finalizing}
@@ -1023,8 +1024,8 @@ function AdminBatchReview({ resolvedParams }: { resolvedParams: { id: string } }
             <CardHeader>
               <div className="flex w-full flex-wrap items-start justify-between gap-4">
                 <div className="min-w-0 flex-1 basis-60">
-                  <div className="flex items-center gap-2 mb-2">
-                    <h2 className="text-2xl font-bold">
+                  <div className="flex items-center gap-2 mb-2 max-sm:flex-wrap">
+                    <h2 className="text-2xl font-bold max-sm:basis-full max-sm:wrap-anywhere">
                       {batchData.description || '未命名批次'}
                     </h2>
                     <Chip
@@ -1099,8 +1100,8 @@ function AdminBatchReview({ resolvedParams }: { resolvedParams: { id: string } }
         </div>
 
         {canReview && (
-          <div className="sticky top-16 z-20 mb-4 rounded-lg border border-default-200 bg-background px-3 py-2">
-            <Button size="sm" variant="flat" color="primary" aria-keyshortcuts="Alt+J"
+          <div className="sticky top-16 z-20 mb-4 rounded-lg border border-default-200 bg-background px-3 py-2 max-sm:flex max-sm:px-1.5 max-sm:py-0">
+            <Button size="sm" variant="flat" color="primary" className="max-sm:h-[22px] max-sm:min-h-0 max-sm:px-2 max-sm:text-xs" aria-keyshortcuts="Alt+J"
               title="Alt+J / Alt+K" startContent={<ArrowDown className="size-4" aria-hidden="true" />}
               onPress={() => jumpToReviewItem(1)}
               isDisabled={!hasVisibleReviewItem}>
@@ -1124,7 +1125,7 @@ function AdminBatchReview({ resolvedParams }: { resolvedParams: { id: string } }
               <div className="flex min-h-8 flex-wrap items-center gap-2">
                 <div className="flex flex-wrap gap-2" role="group" aria-label="待审核筛选">
                   {reviewTierFilters.map(filter => (
-                    <Button key={filter} type="button" size="sm" variant="flat" className="rounded-full tabular-nums"
+                    <Button key={filter} type="button" size="sm" variant="flat" className="rounded-full tabular-nums max-lg:pointer-coarse:min-h-11 max-lg:pointer-coarse:min-w-11"
                       color={tierFilter === filter ? 'primary' : undefined}
                       data-tier-filter={filter} aria-pressed={tierFilter === filter}
                       aria-keyshortcuts={tierFilter === filter ? 'Alt+T' : undefined}
@@ -1133,7 +1134,7 @@ function AdminBatchReview({ resolvedParams }: { resolvedParams: { id: string } }
                     </Button>
                   ))}
                 </div>
-                <div className="h-8 w-36 shrink-0">
+                <div className="h-8 w-36 shrink-0 max-lg:pointer-coarse:h-11">
                   {showBulkReview && (queuedBulkCount > 0 || bulkItemIds.length > 0) && (
                     <Button type="button" size="sm" color="primary" className="h-full w-full tabular-nums"
                       isDisabled={outdated || !canQueueBulkReview} isLoading={queuedBulkCount > 0}

@@ -125,6 +125,7 @@ export default function BatchActionsDropdown({
           isIconOnly
           size={size}
           variant="light"
+          className="max-lg:pointer-coarse:min-h-11 max-lg:pointer-coarse:min-w-11"
           onClick={(e: React.MouseEvent<HTMLElement>) => {
             e.preventDefault()
             e.stopPropagation()

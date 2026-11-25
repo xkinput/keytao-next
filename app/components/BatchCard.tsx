@@ -87,11 +87,11 @@ function BatchCard({ batch, refresh }: BatchCardProps) {
       <CardHeader className="flex flex-col gap-3 p-4 md:flex-row md:items-start md:justify-between md:p-5">
         <Link href={`/batch/${batch.id}`} className="min-w-0 flex-1 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-primary/30">
           <div className="flex min-w-0 items-center gap-2">
-            <h3 className="truncate text-[15px] font-semibold tracking-normal text-foreground group-hover:underline group-hover:decoration-default-400 group-hover:underline-offset-4" title={batch.description || '未命名批次'}>
+            <h3 className="text-[15px] font-semibold tracking-normal text-foreground group-hover:underline group-hover:decoration-default-400 group-hover:underline-offset-4 max-sm:line-clamp-2 max-sm:wrap-anywhere sm:truncate" title={batch.description || '未命名批次'}>
               {batch.description || '未命名批次'}
             </h3>
             {hasConflicts && (
-              <span title="存在冲突" className="shrink-0 rounded-md bg-warning-50 p-1 text-warning">
+              <span title="存在冲突" role="img" aria-label="存在冲突" className="shrink-0 rounded-md bg-warning-50 p-1 text-warning">
                 <AlertTriangle size={14} />
               </span>
             )}
@@ -151,7 +151,7 @@ function BatchCard({ batch, refresh }: BatchCardProps) {
                   <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md ${getActionStyle(pr.action)}`}>
                     {getActionIcon(pr.action)}
                   </span>
-                  <span className="min-w-15 max-w-20 truncate font-mono text-[13px] text-default-600" title={pr.code || ''}>{pr.code}</span>
+                  <span className="min-w-15 max-w-20 font-mono text-[13px] text-default-600 max-sm:max-w-28 max-sm:wrap-anywhere sm:truncate" title={pr.code || ''}>{pr.code}</span>
                   <div className="flex-1 min-w-0 truncate">
                     {pr.action === 'Delete' ? (
                       <span className="text-danger line-through opacity-70">{pr.word}</span>
@@ -166,7 +166,7 @@ function BatchCard({ batch, refresh }: BatchCardProps) {
                     )}
                   </div>
                   {pr.hasConflict && (
-                    <span title="存在冲突">
+                    <span title="存在冲突" role="img" aria-label="存在冲突">
                       <AlertTriangle className="w-3 h-3 text-warning" />
                     </span>
                   )}

@@ -79,7 +79,7 @@ export default function AdminBatchesPage() {
             value={statusFilter}
             onValueChange={handleStatusChange}
             orientation="horizontal"
-            className="mb-4"
+            className="mb-4 max-sm:flex-wrap max-lg:pointer-coarse:[&_[data-slot=radio]]:relative max-lg:pointer-coarse:[&_[data-slot=radio]]:min-h-11 max-lg:pointer-coarse:[&_[data-slot=radio]]:min-w-11 max-lg:pointer-coarse:[&_[data-slot=radio-content]]:after:absolute max-lg:pointer-coarse:[&_[data-slot=radio-content]]:after:inset-0"
           >
             <Radio value="Submitted">待审核</Radio>
             <Radio value="Approved">已批准</Radio>

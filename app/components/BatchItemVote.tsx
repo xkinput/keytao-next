@@ -12,7 +12,7 @@ export type { BatchItemVoteSummary }
 
 export function BatchItemVoteCounts({ likes, dislikes }: Pick<BatchItemVoteSummary, 'likes' | 'dislikes'>) {
   return (
-    <span className="inline-flex items-center gap-2 whitespace-nowrap text-xs tabular-nums">
+    <span className="relative inline-flex items-center gap-2 whitespace-nowrap text-xs tabular-nums">
       <span className="inline-flex items-center gap-1" title="赞同">
         <ThumbsUp aria-hidden="true" className="size-3.5" />
         <span className="sr-only">赞同 </span>{likes}
@@ -97,7 +97,7 @@ export default function BatchItemVote({
             size="sm"
             variant={selected ? 'flat' : 'light'}
             color={selected ? 'primary' : 'default'}
-            className={`min-w-8 px-1.5 text-xs tabular-nums aria-disabled:opacity-60 ${selected ? '' : 'text-inherit'}`}
+            className={`relative min-w-8 px-1.5 text-xs tabular-nums aria-disabled:opacity-60 max-lg:pointer-coarse:min-h-11 max-lg:pointer-coarse:min-w-11 ${selected ? '' : 'text-inherit'}`}
             aria-label={`${action}「${label}」`}
             aria-describedby={`${descriptionId}-${choice}`}
             aria-pressed={selected}

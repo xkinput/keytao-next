@@ -5,6 +5,7 @@ import { createRoot } from 'react-dom/client'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { expect, it, vi } from 'vitest'
 import BatchPreview, { MiaomiaoDiffReview } from './BatchPreview'
+import BatchItemVote, { BatchItemVoteCounts } from './BatchItemVote'
 import ItemReviewDetail, { type ItemReviewDetailItem } from './ItemReviewDetail'
 import { parseMiaomiaoReviewRemark } from '@/lib/services/miaomiaoReviewRemark'
 
@@ -40,6 +41,21 @@ const reviewedRemark = [
     '时间：2026-11-25T00:00:00Z',
     '--- miao-review:end ---',
 ].join('\n')
+
+it('keeps screen-reader vote labels inside positioned vote controls', () => {
+    const markup = document.createElement('div')
+    markup.innerHTML = renderToStaticMarkup(createElement(BatchItemVoteCounts, { likes: 5, dislikes: 2 }))
+    expect([...markup.querySelectorAll('.sr-only')].map(label => label.closest('.relative')?.textContent))
+        .toEqual(['赞同 5反对 2', '赞同 5反对 2'])
+
+    markup.innerHTML = renderToStaticMarkup(createElement(BatchItemVote, {
+        batchId: 'batch-1', itemId: 1, viewerId: 2, label: '欧标', isOpen: true, contentVersion: 1,
+        vote: { itemId: 1, vote: null, likes: 5, dislikes: 2, canVote: true },
+        onChange: vi.fn(), onStale: vi.fn(),
+    }))
+    expect([...markup.querySelectorAll('.sr-only')].map(label => label.closest('button.relative')?.getAttribute('aria-label')))
+        .toEqual(['赞同「欧标」', '反对「欧标」'])
+})
 
 it('renders priority and deduplicated card fields in display order', () => {
     const review = parseMiaomiaoReviewRemark(reviewedRemark).review!
@@ -96,6 +112,7 @@ it.each([false, true])('keeps a single visible card through review and refresh (
         expect(cards()).toHaveLength(1)
         const card = cards()[0]
         expect(card.closest('[hidden]')).toBeNull()
+        expect(card.nextElementSibling?.textContent).toBe('作者备注')
         const content = card.outerHTML
         await draw('Approved')
         useAPI.mockReturnValue({ data: { ...data }, isValidating: true, mutate })
@@ -105,7 +122,7 @@ it.each([false, true])('keeps a single visible card through review and refresh (
 
         await act(() => container.querySelector<HTMLButtonElement>('button[aria-label="词条详情"]')!.click())
         expect(container.textContent?.match(/词面成立/g)).toHaveLength(1)
-        expect(container.textContent).toContain('作者备注')
+        expect(container.textContent?.match(/作者备注/g)).toHaveLength(1)
         expect(container.textContent).toContain('离线参考读音不一致')
         expect(container.textContent).not.toMatch(/喵喵审词|本喵已按|喵备注/)
 

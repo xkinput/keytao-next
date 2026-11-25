@@ -132,13 +132,14 @@ export default function CodePhrasesPopover({
       onOpenChange={setIsOpen}
       showArrow
     >
-      <PopoverTrigger>
+      <PopoverTrigger className="max-sm:min-w-0 max-sm:max-w-full max-lg:pointer-coarse:grid max-lg:pointer-coarse:min-h-11 max-lg:pointer-coarse:min-w-11 max-lg:pointer-coarse:place-items-center">
         {children}
       </PopoverTrigger>
-      <PopoverContent className="w-125">
+      <PopoverContent className="w-125 max-sm:max-w-[calc(100vw-2rem)]">
         <div className="px-1 py-2 w-full">
           <div className="mb-3">
             <Input
+              classNames={{ input: 'max-sm:text-base' }}
               size="sm"
               value={searchCode}
               onValueChange={setSearchCode}

@@ -64,6 +64,7 @@ export default function ItemReviewDetail({ item, reviewing = false, waitingOnDep
   const aiReview = hideMiaomiaoReview ? undefined : item.aiReview
   const tier = aiReview?.tier ?? 'look'
   const hasConflict = publicView ? conflictInfo?.hasConflict ?? item.hasConflict : conflictInfo?.hasConflict || item.hasConflict
+  const conflictReason = conflictInfo?.impact || item.conflictReason
   const aiNotice = aiReview && aiReview.status !== 'pass' ? aiReview : undefined
   const status = item.status === 'Pending' ? '待审核' : item.status === 'Rejected' ? '已拒绝' :
     waitingOnDependencies ? '已同意，等待依赖处理' : '已同意'
@@ -97,9 +98,9 @@ export default function ItemReviewDetail({ item, reviewing = false, waitingOnDep
 
   return (
     <>
-      <div className="flex min-h-8 min-w-max items-center gap-2 whitespace-nowrap text-xs">
+      <div className="flex min-h-8 min-w-max items-center gap-2 whitespace-nowrap text-xs max-sm:min-w-0 max-sm:flex-wrap max-sm:whitespace-normal">
         <button type="button" aria-expanded={expanded} aria-controls={detailId} aria-label="词条详情"
-          className="grid size-7 shrink-0 cursor-pointer place-items-center rounded-md hover:bg-default-500/20"
+          className="grid size-7 shrink-0 cursor-pointer place-items-center rounded-md hover:bg-default-500/20 max-lg:pointer-coarse:size-11"
           onClick={() => setExpanded(value => !value)}>
           <ChevronRight className={`size-4 ${expanded ? 'rotate-90' : ''}`} aria-hidden="true" />
         </button>
@@ -108,18 +109,18 @@ export default function ItemReviewDetail({ item, reviewing = false, waitingOnDep
         {item.type && <Chip size="sm" variant="flat">{getPhraseTypeLabel(item.type)}</Chip>}
         {item.action === 'Change' && item.oldWord && (
           <>
-            <del className="max-w-32 truncate opacity-75" title={item.oldWord}>{item.oldWord}</del>
+            <del className="max-w-32 truncate opacity-75 max-sm:max-w-full max-sm:whitespace-normal max-sm:wrap-anywhere" title={item.oldWord}>{item.oldWord}</del>
             <span aria-hidden="true">→</span>
           </>
         )}
-        <span className="max-w-40 truncate font-semibold" title={word}>{word}</span>
+        <span className="max-w-40 truncate font-semibold max-sm:max-w-full max-sm:whitespace-normal max-sm:wrap-anywhere" title={word}>{word}</span>
         {code && (
           <CodePhrasesPopover code={code}>
-            <code className="cursor-pointer underline decoration-dotted underline-offset-2">{code}</code>
+            <code className="cursor-pointer underline decoration-dotted underline-offset-2 max-sm:wrap-anywhere">{code}</code>
           </CodePhrasesPopover>
         )}
         <Link href={`/phrases/history?${new URLSearchParams({ word: item.oldWord || word, code })}`}
-          aria-label="词条修改历史" title="词条修改历史" className="rounded-md p-1.5 hover:bg-default-500/20">
+          aria-label="词条修改历史" title="词条修改历史" className="rounded-md p-1.5 hover:bg-default-500/20 max-lg:pointer-coarse:grid max-lg:pointer-coarse:size-11 max-lg:pointer-coarse:shrink-0 max-lg:pointer-coarse:place-items-center">
           <History className="size-4" aria-hidden="true" />
         </Link>
         {publicView ? (
@@ -142,11 +143,16 @@ export default function ItemReviewDetail({ item, reviewing = false, waitingOnDep
               startContent={<Bot className="size-3" aria-hidden="true" />}>喵审</Chip>
           </Tooltip>
         ) : <span className="w-14 shrink-0" aria-hidden="true" />}
-        <Chip size="sm" variant="flat" color="warning" className={hasConflict ? undefined : 'invisible'}
+        <Chip size="sm" variant="flat" color="warning" className={`max-sm:hidden ${hasConflict ? '' : 'invisible'}`}
           startContent={<AlertTriangle className="size-3" aria-hidden="true" />}>冲突</Chip>
+        <button type="button" aria-expanded={expanded} aria-controls={detailId} aria-label="冲突详情"
+          className={`grid h-7 w-14 shrink-0 place-items-center sm:hidden ${hasConflict && conflictReason ? 'cursor-pointer' : hasConflict ? '' : 'invisible'}`}
+          disabled={!conflictReason} onClick={() => setExpanded(value => !value)}>
+          <Chip size="sm" variant="flat" color="warning" startContent={<AlertTriangle className="size-3" aria-hidden="true" />}>冲突</Chip>
+        </button>
         {reviewing && notes.length > 0 ? (
           <Popover placement="top">
-            <PopoverTrigger className="grid size-7 shrink-0 cursor-pointer place-items-center rounded-md hover:bg-default-500/20"
+            <PopoverTrigger className="grid size-7 shrink-0 cursor-pointer place-items-center rounded-md hover:bg-default-500/20 max-lg:pointer-coarse:size-11"
               aria-label="词条审核记录" title="词条审核记录">
               <MessageSquareText className="size-4" aria-hidden="true" />
             </PopoverTrigger>
@@ -154,20 +160,19 @@ export default function ItemReviewDetail({ item, reviewing = false, waitingOnDep
               {noteList}
             </PopoverContent>
           </Popover>
-        ) : !publicView && <span className="size-7 shrink-0" aria-hidden="true" />}
+        ) : !publicView && <span className="size-7 shrink-0 max-lg:pointer-coarse:size-11" aria-hidden="true" />}
         {!publicView && <span className="min-w-[4.5rem] shrink-0">
           {item._count && <BatchItemVoteCounts likes={item._count.likedBy} dislikes={item._count.dislikedBy} />}
         </span>}
-        <div className="ml-auto">{actions}</div>
+        <div className="ml-auto max-sm:ml-0 max-sm:w-full">{actions}</div>
       </div>
       {review && <MiaomiaoDiffReview review={review} />}
-      {publicView && baseRemark && <p className="mt-1 whitespace-pre-wrap break-words text-xs opacity-75">{baseRemark}</p>}
+      {baseRemark && <p className="mt-1 whitespace-pre-wrap break-words text-xs opacity-75">{baseRemark}</p>}
       <div id={detailId} hidden={!expanded}
         className="mt-1 h-48 w-full max-w-xl space-y-2 overflow-auto break-words rounded-md bg-content1 px-3 py-2 text-small text-foreground">
         {expanded && (
           <>
             {item.weight != null && <p>权重：{item.weight}</p>}
-            {!publicView && baseRemark && <p className="whitespace-pre-wrap">备注：{baseRemark}</p>}
             {aiReview?.referenceEvidence && <p className="whitespace-pre-wrap text-default-600">{aiReview.referenceEvidence.line}</p>}
             {(ruleTitle || ruleReasons.length > 0 || ruleSuggestion) && (
               <div className="space-y-1">
@@ -176,7 +181,7 @@ export default function ItemReviewDetail({ item, reviewing = false, waitingOnDep
                 {ruleSuggestion && <p>建议：{ruleSuggestion}</p>}
               </div>
             )}
-            {(conflictInfo?.impact || item.conflictReason) && <p className="text-warning">{conflictInfo?.impact || item.conflictReason}</p>}
+            {conflictReason && <p className="text-warning">{conflictReason}</p>}
             {rejectedReason && <p className="text-warning">拒绝原因：{rejectedReason}</p>}
             {item.dependencies.length > 0 && (
               <div>

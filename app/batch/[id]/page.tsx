@@ -297,7 +297,7 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
     const tally = votes.byItem.get(id)
     if (!pr) return null
     return (
-      <div className="flex h-8 w-24 shrink-0 items-center justify-end">
+      <div className="flex h-8 w-24 shrink-0 items-center justify-end max-sm:justify-start max-lg:pointer-coarse:h-11 max-lg:pointer-coarse:w-32">
         {tally && !stale && (
           <BatchItemVote
             key={`${user?.id ?? 'guest'}:${id}`}
@@ -328,7 +328,7 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
         item={!item.remark && previewRemark ? { ...item, remark: previewRemark } : item} waitingOnDependencies={waitingOnDependencies.has(id)}
         rejectedReason={rejectedReason}
         actions={(
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 max-sm:flex-wrap">
             <div className="flex h-8 w-28 items-center justify-end">
               {canResubmit && (
                 <Button size="sm" variant="flat" isDisabled={stale || resubmittingId !== null} isLoading={resubmittingId === id}
@@ -346,7 +346,7 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
     <div className="min-h-screen">
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="mb-6">
-          <div className="flex items-center gap-2 mb-4">
+          <div className="flex items-center gap-2 mb-4 max-sm:flex-wrap">
             <Button
               variant="light"
               onPress={() => router.push('/')}
@@ -378,11 +378,11 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
 
           <Card>
             <CardHeader>
-              <div className="flex justify-between items-start w-full">
-                <div className="flex-1">
-                  <div className="flex items-center gap-2 mb-2">
+              <div className="flex justify-between items-start w-full max-sm:flex-col max-sm:gap-3">
+                <div className="flex-1 max-sm:w-full max-sm:min-w-0">
+                  <div className="flex items-center gap-2 mb-2 max-sm:flex-wrap">
                     {editingName ? (
-                      <div className="flex items-center gap-2 flex-1">
+                      <div className="flex items-center gap-2 flex-1 max-sm:min-w-0 max-sm:basis-full">
                         <Input
                           value={batchName}
                           onChange={(e: React.ChangeEvent<HTMLInputElement>) => setBatchName(e.target.value)}
@@ -409,7 +409,7 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
                       </div>
                     ) : (
                       <>
-                        <h2 className="text-2xl font-bold">
+                        <h2 className="text-2xl font-bold max-sm:min-w-0 max-sm:wrap-anywhere">
                           {batchData.description || '未命名批次'}
                         </h2>
                         {canEdit && (

@@ -397,9 +397,9 @@ function PhraseLineContent({ phrase, colorClass, actions, reviewDetail, reviewWe
 
     return (
         <div className="min-w-0 flex-1 px-3 py-1.5">
-            <div className="flex flex-wrap items-center gap-x-3">
-                <div className={`whitespace-pre ${colorClass}`}>{formatPhraseLine(phrase, reviewWeight)}</div>
-                {actions && <div className="ml-auto shrink-0 font-sans text-[#c0caf5]">{actions}</div>}
+            <div className="flex flex-wrap items-center gap-x-3 max-sm:gap-y-1">
+                <div className={`whitespace-pre max-sm:min-w-0 max-sm:whitespace-normal max-sm:wrap-anywhere ${colorClass}`}>{formatPhraseLine(phrase, reviewWeight)}</div>
+                {actions && <div className="ml-auto shrink-0 font-sans text-[#c0caf5] max-sm:ml-0 max-sm:w-full">{actions}</div>}
             </div>
             {baseRemark && (
                 <div className="mt-1 whitespace-pre-wrap break-words font-sans text-xs text-[#737aa2]">
@@ -496,9 +496,9 @@ function DiffView({ layout, renderLineActions, renderReviewItem, getReviewWeight
         const disabled = reorder.disabled || reorder.pendingId !== null
         const busy = reorder.pendingId === itemId
         return (
-            <div className="flex items-center gap-1" aria-busy={busy || undefined}>
+            <div className="flex items-center gap-1 max-sm:flex-wrap" aria-busy={busy || undefined}>
                 <span aria-label="拖动调整顺序" role="img" draggable={!disabled}
-                    className={disabled ? undefined : 'cursor-grab'}
+                    className={`max-lg:pointer-coarse:grid max-lg:pointer-coarse:size-11 max-lg:pointer-coarse:shrink-0 max-lg:pointer-coarse:place-items-center ${disabled ? '' : 'cursor-grab'}`}
                     onDragStart={event => {
                         if (disabled) return event.preventDefault()
                         reorder.drag.current = source
@@ -508,11 +508,11 @@ function DiffView({ layout, renderLineActions, renderReviewItem, getReviewWeight
                     {busy ? <RefreshCw className="size-4 motion-safe:animate-spin" aria-hidden="true" /> :
                         <GripVertical className="size-4" aria-hidden="true" />}
                 </span>
-                <Button isIconOnly type="button" size="sm" variant="light" aria-label="上移" aria-disabled={disabled || !up}
+                <Button isIconOnly type="button" size="sm" variant="light" className="max-lg:pointer-coarse:min-h-11 max-lg:pointer-coarse:min-w-11" aria-label="上移" aria-disabled={disabled || !up}
                     onPress={() => { if (!disabled && up) reorder.move(source, up) }}>
                     <ArrowUp className="size-4" aria-hidden="true" />
                 </Button>
-                <Button isIconOnly type="button" size="sm" variant="light" aria-label="下移" aria-disabled={disabled || !down}
+                <Button isIconOnly type="button" size="sm" variant="light" className="max-lg:pointer-coarse:min-h-11 max-lg:pointer-coarse:min-w-11" aria-label="下移" aria-disabled={disabled || !down}
                     onPress={() => { if (!disabled && down) reorder.move(source, down) }}>
                     <ArrowDown className="size-4" aria-hidden="true" />
                 </Button>
@@ -525,7 +525,7 @@ function DiffView({ layout, renderLineActions, renderReviewItem, getReviewWeight
     const weightFor = (itemId?: number) => itemId === undefined ? undefined : getReviewWeight?.(itemId)
 
     return (
-        <div className="font-mono text-sm overflow-x-auto">
+        <div className="font-mono text-sm sm:overflow-x-auto max-sm:[&_.diff-line-number]:hidden max-sm:[&_.diff-marker]:w-4 max-sm:[&_.diff-marker]:px-0 max-sm:[&_.diff-marker]:text-center">
             {hasFull ? (
                 hunks.map(hunk => (
                     <div key={`${hunk.oldStart}:${hunk.newStart}`}>
@@ -539,9 +539,9 @@ function DiffView({ layout, renderLineActions, renderReviewItem, getReviewWeight
                             if (line.kind === 'context') {
                                 return (
                                     <div key={key} {...dropProps(line.phrase)} className="relative flex gap-0 text-[#565f89] hover:bg-[#1e2030]/50">
-                                        <span className="w-12 text-right pr-3 py-1.5 select-none border-r border-[#2a2d3e] shrink-0 text-[#3b4261]">{line.oldLine}</span>
-                                        <span className="w-12 text-right pr-3 py-1.5 select-none border-r border-[#2a2d3e] shrink-0 text-[#3b4261]">{line.newLine}</span>
-                                        <span className="px-3 py-1.5 select-none w-6 shrink-0"> </span>
+                                        <span className="diff-line-number w-12 text-right pr-3 py-1.5 select-none border-r border-[#2a2d3e] shrink-0 text-[#3b4261]">{line.oldLine}</span>
+                                        <span className="diff-line-number w-12 text-right pr-3 py-1.5 select-none border-r border-[#2a2d3e] shrink-0 text-[#3b4261]">{line.newLine}</span>
+                                        <span className="diff-marker px-3 py-1.5 select-none w-6 shrink-0"> </span>
                                         <PhraseLineContent phrase={line.phrase} colorClass="text-[#565f89]" hideMiaomiaoReview={hideMiaomiaoReview} />
                                         {endDropTarget(line.phrase)}
                                     </div>
@@ -550,9 +550,9 @@ function DiffView({ layout, renderLineActions, renderReviewItem, getReviewWeight
                             if (line.kind === 'remove') {
                                 return (
                                     <div key={key} className="flex gap-0 bg-[#3d1515]/40 hover:bg-[#3d1515]/60">
-                                        <span className="w-12 text-right pr-3 py-1.5 select-none border-r border-[#5a2020] shrink-0 text-[#f7768e] font-semibold">{line.oldLine}</span>
-                                        <span className="w-12 text-right pr-3 py-1.5 select-none border-r border-[#5a2020] shrink-0 text-[#3b4261]"> </span>
-                                        <span className="px-3 py-1.5 text-[#f7768e] select-none w-6 shrink-0">-</span>
+                                        <span className="diff-line-number w-12 text-right pr-3 py-1.5 select-none border-r border-[#5a2020] shrink-0 text-[#f7768e] font-semibold">{line.oldLine}</span>
+                                        <span className="diff-line-number w-12 text-right pr-3 py-1.5 select-none border-r border-[#5a2020] shrink-0 text-[#3b4261]"> </span>
+                                        <span className="diff-marker px-3 py-1.5 text-[#f7768e] select-none w-6 shrink-0">-</span>
                                         <PhraseLineContent phrase={line.phrase} colorClass="text-[#f7768e]"
                                             actions={actionsFor(itemId)} reviewDetail={detailFor(itemId, line.phrase)} hideMiaomiaoReview={hideMiaomiaoReview} />
                                     </div>
@@ -561,9 +561,9 @@ function DiffView({ layout, renderLineActions, renderReviewItem, getReviewWeight
                             // add
                             return (
                                 <div key={key} {...dropProps(line.phrase)} className="relative flex gap-0 bg-[#1a3a1a]/40 hover:bg-[#1a3a1a]/60">
-                                    <span className="w-12 text-right pr-3 py-1.5 select-none border-r border-[#2a5a2a] shrink-0 text-[#3b4261]"> </span>
-                                    <span className="w-12 text-right pr-3 py-1.5 select-none border-r border-[#2a5a2a] shrink-0 text-[#9ece6a] font-semibold">{line.newLine}</span>
-                                    <span className="px-3 py-1.5 text-[#9ece6a] select-none w-6 shrink-0">+</span>
+                                    <span className="diff-line-number w-12 text-right pr-3 py-1.5 select-none border-r border-[#2a5a2a] shrink-0 text-[#3b4261]"> </span>
+                                    <span className="diff-line-number w-12 text-right pr-3 py-1.5 select-none border-r border-[#2a5a2a] shrink-0 text-[#9ece6a] font-semibold">{line.newLine}</span>
+                                    <span className="diff-marker px-3 py-1.5 text-[#9ece6a] select-none w-6 shrink-0">+</span>
                                     <PhraseLineContent phrase={line.phrase} colorClass="text-[#9ece6a]"
                                         actions={actionsFor(itemId, line.phrase)} reviewDetail={detailFor(itemId, line.phrase)}
                                         reviewWeight={weightFor(itemId)} hideMiaomiaoReview={hideMiaomiaoReview} />
@@ -583,7 +583,7 @@ function DiffView({ layout, renderLineActions, renderReviewItem, getReviewWeight
                         if (diff.type === 'remove' && diff.phrase) {
                             return (
                                 <div key={diff.itemId ?? `remove:${phraseKey(diff.phrase)}`} className="flex gap-0 bg-[#3d1515]/40">
-                                    <span className="px-3 py-1.5 text-[#f7768e] select-none w-6 shrink-0">-</span>
+                                    <span className="diff-marker px-3 py-1.5 text-[#f7768e] select-none w-6 shrink-0">-</span>
                                     <PhraseLineContent phrase={diff.phrase} colorClass="text-[#f7768e]"
                                         actions={actionsFor(diff.itemId)} reviewDetail={detailFor(diff.itemId, diff.phrase)} hideMiaomiaoReview={hideMiaomiaoReview} />
                                 </div>
@@ -592,7 +592,7 @@ function DiffView({ layout, renderLineActions, renderReviewItem, getReviewWeight
                         if (diff.type === 'add' && diff.phrase) {
                             return (
                                 <div key={diff.itemId ?? `add:${phraseKey(diff.phrase)}`} {...dropProps(diff.phrase)} className="relative flex gap-0 bg-[#1a3a1a]/40">
-                                    <span className="px-3 py-1.5 text-[#9ece6a] select-none w-6 shrink-0">+</span>
+                                    <span className="diff-marker px-3 py-1.5 text-[#9ece6a] select-none w-6 shrink-0">+</span>
                                     <PhraseLineContent phrase={diff.phrase} colorClass="text-[#9ece6a]"
                                         actions={actionsFor(diff.itemId, diff.phrase)} reviewDetail={detailFor(diff.itemId, diff.phrase)}
                                         reviewWeight={weightFor(diff.itemId)} hideMiaomiaoReview={hideMiaomiaoReview} />
@@ -604,11 +604,11 @@ function DiffView({ layout, renderLineActions, renderReviewItem, getReviewWeight
                             return (
                                 <div key={diff.itemId ?? `modify:${phraseKey(diff.after)}`}>
                                     <div className="flex gap-0 bg-[#3d1515]/40">
-                                        <span className="px-3 py-1.5 text-[#f7768e] select-none w-6 shrink-0">-</span>
+                                        <span className="diff-marker px-3 py-1.5 text-[#f7768e] select-none w-6 shrink-0">-</span>
                                         <PhraseLineContent phrase={diff.before} colorClass="text-[#f7768e]" hideMiaomiaoReview={hideMiaomiaoReview} />
                                     </div>
                                     <div {...dropProps(diff.after)} className="relative flex gap-0 bg-[#1a3a1a]/40">
-                                        <span className="px-3 py-1.5 text-[#9ece6a] select-none w-6 shrink-0">+</span>
+                                        <span className="diff-marker px-3 py-1.5 text-[#9ece6a] select-none w-6 shrink-0">+</span>
                                         <PhraseLineContent phrase={diff.after} colorClass="text-[#9ece6a]"
                                             actions={actionsFor(diff.itemId, diff.after)} reviewDetail={detailFor(diff.itemId, diff.after)}
                                             reviewWeight={weightFor(diff.itemId)} hideMiaomiaoReview={hideMiaomiaoReview} />
@@ -764,15 +764,15 @@ function BatchPreviewContent({
     const fallbackRows = reviewDetail && reviewItems ? reviewItems
         .filter(item => !shownIds.has(item.id))
         .map(item => (
-            <li key={item.id} className="overflow-x-auto px-3 py-1.5">{reviewDetail(item.id)}</li>
+            <li key={item.id} className="px-3 py-1.5 sm:overflow-x-auto">{reviewDetail(item.id)}</li>
         )) : lineActions && lineActionItems?.flatMap(item => {
         if (shownIds.has(item.id)) return []
         const actions = lineActions(item.id)
         if (!actions) return []
         return [(
             <li key={item.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-1.5">
-                <span>{item.label} {item.code && <code className="text-default-500">{item.code}</code>}</span>
-                <div className="ml-auto shrink-0">{actions}</div>
+                <span className="max-sm:min-w-0 max-sm:wrap-anywhere">{item.label} {item.code && <code className="text-default-500">{item.code}</code>}</span>
+                <div className="ml-auto shrink-0 max-sm:ml-0 max-sm:w-full">{actions}</div>
             </li>
         )]
     })
@@ -914,7 +914,7 @@ function BatchPreviewContent({
                     </div>
                     <div className="divide-y divide-default-100">
                         {rejected.map(op => reviewDetail ? (
-                            <div key={op.prId} className="overflow-x-auto px-3 py-1.5">
+                            <div key={op.prId} className="px-3 py-1.5 sm:overflow-x-auto">
                                 {reviewDetail(op.prId, publicRejectionReasons ? publicRejectionReasons.get(op.prId) : op.reason)}
                             </div>
                         ) : (
@@ -922,7 +922,7 @@ function BatchPreviewContent({
                                 <div className="w-6 h-6 flex items-center justify-center rounded bg-default-200 text-default-600 shrink-0 mt-0.5">
                                     <X className="w-4 h-4" />
                                 </div>
-                                <div className="flex-1 space-y-1.5">
+                                <div className="flex-1 space-y-1.5 max-sm:min-w-0 max-sm:wrap-anywhere">
                                     <div className="flex flex-wrap items-center gap-2">
                                         <Chip size="sm" variant="flat">
                                             {op.action === 'Create' ? '新增' : op.action === 'Change' ? '修改' : '删除'}
@@ -935,7 +935,7 @@ function BatchPreviewContent({
                                             </>
                                         )}
                                         <code className="bg-default-200 text-default-700 px-2 py-0.5 rounded text-small font-mono">{op.code}</code>
-                                        {lineActions && <div className="ml-auto">{lineActions(op.prId)}</div>}
+                                        {lineActions && <div className="ml-auto max-sm:ml-0 max-sm:w-full">{lineActions(op.prId)}</div>}
                                     </div>
                                     <div className="p-2 bg-warning-50 dark:bg-warning-100/10 rounded border-l-2 border-warning">
                                         <p className="text-small text-warning-700 dark:text-warning-600">

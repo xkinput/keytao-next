@@ -16,7 +16,10 @@ import {
   Chip,
   RadioGroup,
   Radio,
-  Tooltip
+  Tooltip,
+  Popover,
+  PopoverTrigger,
+  PopoverContent
 } from '@/lib/heroui-compat'
 import toast from 'react-hot-toast'
 import { apiRequest } from '@/lib/hooks/useSWR'
@@ -45,6 +48,27 @@ import { resolveDictImportInference } from '@/lib/services/dictImportInference'
 import { stripMiaomiaoReviewRemark } from '@/lib/services/miaomiaoReviewRemark'
 import { buildDraftOrderChains, getDraftCodeFills, groupDraftOrderItems, planDraftOrderWeights, type DraftOrderItem } from '@/lib/services/draftCommonnessOrder'
 import { COMMONNESS_ORDER_LIMITS, draftOrderKey, type CommonnessLines, type CommonnessOrderResponse } from '@/lib/types/commonnessOrder'
+
+const mobileFieldText = 'max-sm:[&_input]:text-base max-sm:[&_textarea]:text-base max-sm:[&_select]:text-base max-sm:[&_[data-slot=select-trigger]]:text-base'
+
+function InferenceHint({ children, content, color }: {
+  children: React.ReactNode
+  content: string
+  color: 'warning' | 'danger' | 'primary'
+}) {
+  const chip = <Chip size="sm" variant="flat" color={color} className="h-5 text-[10px] max-sm:text-xs">{children}</Chip>
+  return (
+    <>
+      <span className="contents max-sm:hidden sm:max-lg:pointer-coarse:hidden">
+        <Tooltip content={content}>{chip}</Tooltip>
+      </span>
+      <Popover>
+        <PopoverTrigger className="hidden cursor-pointer max-sm:inline-flex sm:max-lg:pointer-coarse:inline-flex">{chip}</PopoverTrigger>
+        <PopoverContent className="max-w-xs wrap-anywhere px-3 py-2 text-small">{content}</PopoverContent>
+      </Popover>
+    </>
+  )
+}
 
 interface CreatePRModalProps {
   isOpen: boolean
@@ -1409,7 +1433,7 @@ export default function CreatePRModal({
   return (
     <>
       <Modal isOpen={isOpen} onClose={handleClose} size="4xl" scrollBehavior="inside">
-        <ModalContent className="max-h-[90vh]">
+        <ModalContent className={`max-h-[90vh] max-sm:p-3 ${mobileFieldText}`}>
           {() => (
             <>
               <ModalHeader>
@@ -1494,6 +1518,7 @@ export default function CreatePRModal({
                                     isRequired
                                     size="sm"
                                     classNames={{ wrapper: "gap-1.5" }}
+                                    className="max-sm:flex-wrap max-sm:gap-1.5 max-sm:[&_[data-slot=radio]]:flex-row max-sm:[&_[data-slot=radio]]:items-center max-sm:[&_[data-slot=radio]]:px-2"
                                     onValueChange={async (value) => {
                                       actionField.onChange(value)
                                       updateMeta(field.id, { hasChecked: false, conflict: null })
@@ -1621,9 +1646,9 @@ export default function CreatePRModal({
                                                     onValueChange={(v: string) => { f.onChange(v); updateMeta(field.id, { hasChecked: false, conflict: null }) }}
                                                     endContent={
                                                       <div className="flex items-center gap-1">
-                                                        {inf && inf.wordExists.length > 0 && <Tooltip content={`词条已存在，编码：${inf.wordExists.map(e => e.code).join('、')}`}><Chip size="sm" variant="flat" color="warning" className="h-5 text-[10px] cursor-default">已存在</Chip></Tooltip>}
-                                                        {inf?.suggestionStatus === 'pronunciation-unresolved' && <Tooltip content="没有整词权威读音，语义读音尚未确认"><Chip size="sm" variant="flat" color="warning" className="h-5 text-[10px] cursor-default">读音待审</Chip></Tooltip>}
-                                                        {inf?.suggestionStatus === 'pronunciation-unavailable' && <Tooltip content="权威读音服务暂不可用，请稍后重试"><Chip size="sm" variant="flat" color="danger" className="h-5 text-[10px] cursor-default">读音源异常</Chip></Tooltip>}
+                                                        {inf && inf.wordExists.length > 0 && <InferenceHint content={`词条已存在，编码：${inf.wordExists.map(e => e.code).join('、')}`} color="warning">已存在</InferenceHint>}
+                                                        {inf?.suggestionStatus === 'pronunciation-unresolved' && <InferenceHint content="没有整词权威读音，语义读音尚未确认" color="warning">读音待审</InferenceHint>}
+                                                        {inf?.suggestionStatus === 'pronunciation-unavailable' && <InferenceHint content="权威读音服务暂不可用，请稍后重试" color="danger">读音源异常</InferenceHint>}
                                                         {f.value && <WordCodesPopover word={f.value}><Button size="sm" variant="light" isIconOnly className="min-w-unit-6 w-6 h-6"><Eye className="w-4 h-4" /></Button></WordCodesPopover>}
                                                       </div>
                                                     }
@@ -1727,9 +1752,9 @@ export default function CreatePRModal({
                                                   onValueChange={(v: string) => { f.onChange(v); updateMeta(field.id, { hasChecked: false, conflict: null }) }}
                                                   endContent={
                                                     <div className="flex items-center gap-1">
-                                                      {inf && inf.wordExists.length > 0 && <Tooltip content={`词条已存在，编码：${inf.wordExists.map(e => e.code).join('、')}`}><Chip size="sm" variant="flat" color="warning" className="h-5 text-[10px] cursor-default">已存在</Chip></Tooltip>}
-                                                      {inf?.suggestionStatus === 'pronunciation-unresolved' && <Tooltip content="没有整词权威读音，语义读音尚未确认"><Chip size="sm" variant="flat" color="warning" className="h-5 text-[10px] cursor-default">读音待审</Chip></Tooltip>}
-                                                      {inf?.suggestionStatus === 'pronunciation-unavailable' && <Tooltip content="权威读音服务暂不可用，请稍后重试"><Chip size="sm" variant="flat" color="danger" className="h-5 text-[10px] cursor-default">读音源异常</Chip></Tooltip>}
+                                                      {inf && inf.wordExists.length > 0 && <InferenceHint content={`词条已存在，编码：${inf.wordExists.map(e => e.code).join('、')}`} color="warning">已存在</InferenceHint>}
+                                                      {inf?.suggestionStatus === 'pronunciation-unresolved' && <InferenceHint content="没有整词权威读音，语义读音尚未确认" color="warning">读音待审</InferenceHint>}
+                                                      {inf?.suggestionStatus === 'pronunciation-unavailable' && <InferenceHint content="权威读音服务暂不可用，请稍后重试" color="danger">读音源异常</InferenceHint>}
                                                       {f.value && <WordCodesPopover word={f.value}><Button size="sm" variant="light" isIconOnly className="min-w-unit-6 w-6 h-6"><Eye className="w-4 h-4" /></Button></WordCodesPopover>}
                                                     </div>
                                                   }
@@ -1760,9 +1785,9 @@ export default function CreatePRModal({
                                                         const inf = inferResults.get(field.id)
                                                         const slotIdx = inf?.suggestionIndex ?? 0
                                                         return inf?.isBaseConflict ? (
-                                                          <Tooltip content={`基础码已占用，跳至第 ${slotIdx + 1} 位`}><Chip size="sm" variant="flat" color="warning" className="h-5 text-[10px]">+{slotIdx}</Chip></Tooltip>
+                                                          <InferenceHint content={`基础码已占用，跳至第 ${slotIdx + 1} 位`} color="warning">+{slotIdx}</InferenceHint>
                                                         ) : (
-                                                          <Tooltip content="自动识别编码"><Chip size="sm" variant="flat" color="primary" className="h-5 text-[10px]">自动</Chip></Tooltip>
+                                                          <InferenceHint content="自动识别编码" color="primary">自动</InferenceHint>
                                                         )
                                                       })()}
                                                       <CodePhrasesPopover code={f.value}><Button size="sm" variant="light" isIconOnly className="min-w-unit-6 w-6 h-6"><Eye className="w-4 h-4" /></Button></CodePhrasesPopover>
@@ -2024,8 +2049,8 @@ export default function CreatePRModal({
                             {/* Status chips */}
                             {isIncomplete && <Chip size="sm" variant="flat" color="default" className="h-4 text-[10px] shrink-0">未完成</Chip>}
                             {hasConflict && <Chip size="sm" variant="flat" color="danger" className="h-4 text-[10px] shrink-0">冲突</Chip>}
-                            {hasWarning && <Chip size="sm" variant="flat" color="warning" className="h-4 text-[10px] shrink-0">重码</Chip>}
-                            {infer?.wordExists && infer.wordExists.length > 0 && <Chip size="sm" variant="flat" color="warning" className="h-4 text-[10px] shrink-0">词存在</Chip>}
+                            {hasWarning && <Chip size="sm" variant="flat" color="warning" className="h-4 text-[10px] max-sm:text-xs shrink-0">重码</Chip>}
+                            {infer?.wordExists && infer.wordExists.length > 0 && <Chip size="sm" variant="flat" color="warning" className="h-4 text-[10px] max-sm:text-xs shrink-0">词存在</Chip>}
                             {isResolved && <Chip size="sm" variant="flat" color="success" className="h-4 text-[10px] shrink-0">✓</Chip>}
                             {reviewItem && (
                               <Chip
@@ -2039,8 +2064,8 @@ export default function CreatePRModal({
                             )}
                             {/* Hover actions */}
                             {!isEditMode && fields.length > 1 && (
-                              <div className="flex gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
-                                <Button size="sm" color="danger" variant="light" isIconOnly className="w-6 h-6 min-w-0" onPress={() => handleRemoveItem(index)}><Trash2 className="w-3" /></Button>
+                              <div className="flex gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity max-sm:opacity-100 max-lg:pointer-coarse:opacity-100" onClick={e => e.stopPropagation()}>
+                                <Button size="sm" color="danger" variant="light" isIconOnly aria-label="删除词条" className="w-6 h-6 min-w-0" onPress={() => handleRemoveItem(index)}><Trash2 className="w-3" /></Button>
                               </div>
                             )}
                           </div>
@@ -2065,8 +2090,8 @@ export default function CreatePRModal({
                   </div>
                 )}
               </ModalBody>
-              <ModalFooter className="flex-col gap-2">
-                <div className="flex flex-wrap gap-2 w-full items-center">
+              <ModalFooter className="flex-col gap-2 max-sm:mt-2 max-sm:gap-1 max-sm:[&_button]:h-8 max-sm:[&_button]:px-2 max-sm:[&_button]:text-xs">
+                <div className="flex flex-wrap gap-2 w-full items-center max-sm:gap-1">
                   <Button
                     type="button"
                     color="secondary"
@@ -2163,7 +2188,7 @@ export default function CreatePRModal({
                     </Chip>
                   )}
                 </div>
-                <div className="flex justify-between gap-2 w-full">
+                <div className="flex justify-between gap-2 w-full max-sm:gap-1">
                   {!isEditMode && (
                     <div className="flex gap-2">
                       <Button
@@ -2215,7 +2240,7 @@ export default function CreatePRModal({
         size={dictStep === 'preview' ? '3xl' : '2xl'}
         scrollBehavior="inside"
       >
-        <ModalContent>
+        <ModalContent className={mobileFieldText}>
           {() => (
             <>
               <ModalHeader>
@@ -2306,19 +2331,19 @@ export default function CreatePRModal({
                           />
                           {/* Status badges */}
                           <div className="flex-1 flex items-center gap-1 min-w-0 overflow-hidden">
-                            {item.status === 'inferring' && <Chip size="sm" variant="flat" className="h-4 text-[10px] shrink-0 animate-pulse">推断中</Chip>}
-                            {item.status === 'new' && <Chip size="sm" variant="flat" color="success" className="h-4 text-[10px] shrink-0">✓ 新词条</Chip>}
-                            {item.status === 'shifted' && <Chip size="sm" variant="flat" color="primary" className="h-4 text-[10px] shrink-0">码位跳转</Chip>}
-                            {item.status === 'overflow' && <Chip size="sm" variant="flat" color="danger" className="h-4 text-[10px] shrink-0">重码</Chip>}
-                            {item.status === 'error' && <Chip size="sm" variant="flat" color="danger" className="h-4 text-[10px] shrink-0">{item.infer?.suggestionStatus === 'pronunciation-unresolved' ? '读音待审' : '推断失败'}</Chip>}
+                            {item.status === 'inferring' && <Chip size="sm" variant="flat" className="h-4 text-[10px] max-sm:text-xs shrink-0 animate-pulse">推断中</Chip>}
+                            {item.status === 'new' && <Chip size="sm" variant="flat" color="success" className="h-4 text-[10px] max-sm:text-xs shrink-0">✓ 新词条</Chip>}
+                            {item.status === 'shifted' && <Chip size="sm" variant="flat" color="primary" className="h-4 text-[10px] max-sm:text-xs shrink-0">码位跳转</Chip>}
+                            {item.status === 'overflow' && <Chip size="sm" variant="flat" color="danger" className="h-4 text-[10px] max-sm:text-xs shrink-0">重码</Chip>}
+                            {item.status === 'error' && <Chip size="sm" variant="flat" color="danger" className="h-4 text-[10px] max-sm:text-xs shrink-0">{item.infer?.suggestionStatus === 'pronunciation-unresolved' ? '读音待审' : '推断失败'}</Chip>}
                             {(item.infer?.wordExists?.length ?? 0) > 0 && (
-                              <Chip size="sm" variant="flat" color="warning" className="h-4 text-[10px] shrink-0">词已存在</Chip>
+                              <Chip size="sm" variant="flat" color="warning" className="h-4 text-[10px] max-sm:text-xs shrink-0">词已存在</Chip>
                             )}
                             {item.statusDetail && (
-                              <span className="text-[10px] text-default-500 truncate">{item.statusDetail}</span>
+                              <span className="text-[10px] max-sm:text-xs text-default-500 truncate">{item.statusDetail}</span>
                             )}
                           </div>
-                          <Chip size="sm" variant="flat" className="h-4 text-[10px] shrink-0">{item.type}</Chip>
+                          <Chip size="sm" variant="flat" className="h-4 text-[10px] max-sm:text-xs shrink-0">{item.type}</Chip>
                         </div>
                       ))}
                     </div>

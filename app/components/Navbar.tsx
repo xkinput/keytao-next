@@ -458,6 +458,7 @@ function Navbar() {
                           size="sm"
                           isIconOnly
                           aria-label="User menu"
+                          className="pointer-coarse:min-h-11 pointer-coarse:min-w-11"
                         >
                           <User className="w-5 h-5" />
                         </Button>
