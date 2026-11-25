@@ -1,4 +1,7 @@
-import { createElement } from 'react'
+// @vitest-environment happy-dom
+
+import { act, createElement } from 'react'
+import { createRoot } from 'react-dom/client'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { expect, it, vi } from 'vitest'
 import BatchPreview from './BatchPreview'
@@ -107,4 +110,74 @@ it('keeps each admin item in its diff slot or fallback even without actions', ()
     expect(html).toMatch(/新增词\s+aa\s+240[^<]*<\/div><\/div><div[^>]*><span>detail-1/)
     expect(html.match(/detail-\d/g)).toEqual(['detail-1', 'detail-2', 'detail-3', 'detail-4'])
     expect(html).toMatch(/被拒绝的操作.*detail-3有冲突.*未出现在差异中的词条.*detail-4/)
+})
+
+it('keeps public items and votes in place through refresh and resubmission, then displays an edit', async () => {
+    const first = phrase('现有词条', 'aa')
+    const resubmitted = phrase('重新送审词条', 'bb')
+    const edited = phrase('编辑后的词条', 'cc')
+    const setPreview = (contentVersion: number, phrases: ReturnType<typeof phrase>[]) => {
+        useAPI.mockReturnValue({
+            data: {
+                contentVersion,
+                preview: {
+                    changes: [{
+                        phraseType: 'Phrase', codes: phrases.map(p => p.code),
+                        before: [], after: phrases, beforeStartLine: 1,
+                        diffs: phrases.map((p, index) => ({ type: 'add', itemId: index + 1, phrase: p })),
+                    }],
+                    rejected: [],
+                    summary: { added: phrases.length, modified: 0, deleted: 0, rejected: 0 },
+                },
+            },
+            mutate: vi.fn().mockResolvedValue(undefined),
+        })
+    }
+    const container = document.createElement('div')
+    const root = createRoot(container)
+    let likes = 0
+    let secondStatus = '已拒绝'
+    const draw = (version: number, from?: number) => act(() => root.render(createElement(BatchPreview, {
+        batchId: 'batch-1',
+        expectedContentVersion: version,
+        reviewedFromContentVersion: from,
+        reviewItems: [{ id: 1 }, { id: 2 }],
+        renderLineActions: id => createElement('button', { 'data-line-vote': id }, likes),
+        renderReviewItem: (id, _stale, _reason, inDiff) => createElement('div', { 'data-item': id },
+            id === 2 ? secondStatus : `detail-${id}`, !inDiff && createElement('button', null, `vote-${id}`)),
+    })))
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+    try {
+        setPreview(4, [first])
+        await draw(4)
+        expect(useAPI.mock.lastCall?.[0]).toBe('/api/batches/batch-1/preview')
+        const lineVote = container.querySelector('[data-line-vote="1"]')
+        const fallbackItem = container.querySelector('li [data-item="2"]')
+        expect(lineVote?.textContent).toBe('0')
+        expect(fallbackItem?.textContent).toBe('已拒绝vote-2')
+
+        likes++
+        await draw(4)
+        expect(lineVote?.textContent).toBe('1')
+
+        secondStatus = '待审核'
+        await draw(5, 4)
+        setPreview(5, [first, resubmitted])
+        await draw(5, 4)
+        expect(container.querySelector('[data-line-vote="1"]')).toBe(lineVote)
+        expect(container.querySelector('li [data-item="2"]')).toBe(fallbackItem)
+        expect(fallbackItem?.textContent).toBe('待审核vote-2')
+        expect(container.querySelectorAll('[data-item="2"]')).toHaveLength(1)
+
+        await draw(6)
+        expect(container.querySelector('li [data-item="2"]')).toBe(fallbackItem)
+        setPreview(6, [first, edited])
+        await draw(6)
+        expect(container.textContent).toContain(edited.word)
+        expect(container.querySelector('[data-line-vote="2"]')).not.toBeNull()
+        expect(container.querySelector('li [data-item="2"]')).toBeNull()
+    } finally {
+        await act(() => root.unmount())
+        vi.unstubAllGlobals()
+    }
 })

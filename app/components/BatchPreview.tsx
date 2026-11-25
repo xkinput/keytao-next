@@ -63,9 +63,10 @@ interface BatchPreviewProps {
     renderLineActions?: (itemId: number, stale?: boolean) => ReactNode
     lineActionItems?: readonly { id: number; label: string; code?: string | null }[]
     reviewItems?: readonly { id: number }[]
-    renderReviewItem?: (itemId: number, stale: boolean, rejectedReason?: string) => ReactNode
+    renderReviewItem?: (itemId: number, stale: boolean, rejectedReason?: string, inDiff?: boolean) => ReactNode
     getReviewWeight?: (itemId: number) => number | undefined
     renderReviewControls?: (outdated: boolean) => ReactNode
+    onAddFirst?: () => void
 }
 
 type UnifiedLine =
@@ -319,14 +320,15 @@ export function MiaomiaoDiffReview({ review }: { review: MiaomiaoReviewRemarkBlo
     )
 }
 
-function PhraseLineContent({ phrase, colorClass, actions, reviewDetail, reviewWeight }: {
+function PhraseLineContent({ phrase, colorClass, actions, reviewDetail, reviewWeight, keepPhraseRemark }: {
     phrase: PreviewPhrase
     colorClass: string
     actions?: ReactNode
     reviewDetail?: ReactNode
     reviewWeight?: number
+    keepPhraseRemark?: boolean
 }) {
-    const parsedRemark = !reviewDetail ? parseMiaomiaoReviewRemark(phrase.remark) : undefined
+    const parsedRemark = !reviewDetail || keepPhraseRemark ? parseMiaomiaoReviewRemark(phrase.remark) : undefined
 
     return (
         <div className="min-w-0 flex-1 px-3 py-1.5">
@@ -345,12 +347,13 @@ function PhraseLineContent({ phrase, colorClass, actions, reviewDetail, reviewWe
     )
 }
 
-function DiffView({ group, layout, renderLineActions, renderReviewItem, getReviewWeight }: {
+function DiffView({ group, layout, renderLineActions, renderReviewItem, getReviewWeight, keepPhraseRemark }: {
     group: TypeChangeGroup
     layout: ReturnType<typeof prepareDiff>
     renderLineActions?: BatchPreviewProps['renderLineActions']
     renderReviewItem?: (itemId: number) => ReactNode
     getReviewWeight?: BatchPreviewProps['getReviewWeight']
+    keepPhraseRemark?: boolean
 }) {
     const { hunks, actionRows } = layout
     const hasFull = hunks.length > 0
@@ -387,7 +390,7 @@ function DiffView({ group, layout, renderLineActions, renderReviewItem, getRevie
                                         <span className="w-12 text-right pr-3 py-1.5 select-none border-r border-[#5a2020] shrink-0 text-[#3b4261]"> </span>
                                         <span className="px-3 py-1.5 text-[#f7768e] select-none w-6 shrink-0">-</span>
                                         <PhraseLineContent phrase={line.phrase} colorClass="text-[#f7768e]"
-                                            actions={actionsFor(itemId)} reviewDetail={detailFor(itemId)} />
+                                            actions={actionsFor(itemId)} reviewDetail={detailFor(itemId)} keepPhraseRemark={keepPhraseRemark} />
                                     </div>
                                 )
                             }
@@ -398,7 +401,8 @@ function DiffView({ group, layout, renderLineActions, renderReviewItem, getRevie
                                     <span className="w-12 text-right pr-3 py-1.5 select-none border-r border-[#2a5a2a] shrink-0 text-[#9ece6a] font-semibold">{line.newLine}</span>
                                     <span className="px-3 py-1.5 text-[#9ece6a] select-none w-6 shrink-0">+</span>
                                     <PhraseLineContent phrase={line.phrase} colorClass="text-[#9ece6a]"
-                                        actions={actionsFor(itemId)} reviewDetail={detailFor(itemId)} reviewWeight={weightFor(itemId)} />
+                                        actions={actionsFor(itemId)} reviewDetail={detailFor(itemId)}
+                                        reviewWeight={weightFor(itemId)} keepPhraseRemark={keepPhraseRemark} />
                                 </div>
                             )
                         })}
@@ -416,7 +420,7 @@ function DiffView({ group, layout, renderLineActions, renderReviewItem, getRevie
                                 <div key={diff.itemId ?? `remove:${phraseKey(diff.phrase)}`} className="flex gap-0 bg-[#3d1515]/40">
                                     <span className="px-3 py-1.5 text-[#f7768e] select-none w-6 shrink-0">-</span>
                                     <PhraseLineContent phrase={diff.phrase} colorClass="text-[#f7768e]"
-                                        actions={actionsFor(diff.itemId)} reviewDetail={detailFor(diff.itemId)} />
+                                        actions={actionsFor(diff.itemId)} reviewDetail={detailFor(diff.itemId)} keepPhraseRemark={keepPhraseRemark} />
                                 </div>
                             )
                         }
@@ -425,7 +429,8 @@ function DiffView({ group, layout, renderLineActions, renderReviewItem, getRevie
                                 <div key={diff.itemId ?? `add:${phraseKey(diff.phrase)}`} className="flex gap-0 bg-[#1a3a1a]/40">
                                     <span className="px-3 py-1.5 text-[#9ece6a] select-none w-6 shrink-0">+</span>
                                     <PhraseLineContent phrase={diff.phrase} colorClass="text-[#9ece6a]"
-                                        actions={actionsFor(diff.itemId)} reviewDetail={detailFor(diff.itemId)} reviewWeight={weightFor(diff.itemId)} />
+                                        actions={actionsFor(diff.itemId)} reviewDetail={detailFor(diff.itemId)}
+                                        reviewWeight={weightFor(diff.itemId)} keepPhraseRemark={keepPhraseRemark} />
                                 </div>
                             )
                         }
@@ -439,7 +444,8 @@ function DiffView({ group, layout, renderLineActions, renderReviewItem, getRevie
                                     <div className="flex gap-0 bg-[#1a3a1a]/40">
                                         <span className="px-3 py-1.5 text-[#9ece6a] select-none w-6 shrink-0">+</span>
                                         <PhraseLineContent phrase={diff.after} colorClass="text-[#9ece6a]"
-                                            actions={actionsFor(diff.itemId)} reviewDetail={detailFor(diff.itemId)} reviewWeight={weightFor(diff.itemId)} />
+                                            actions={actionsFor(diff.itemId)} reviewDetail={detailFor(diff.itemId)}
+                                            reviewWeight={weightFor(diff.itemId)} keepPhraseRemark={keepPhraseRemark} />
                                     </div>
                                 </div>
                             )
@@ -452,10 +458,16 @@ function DiffView({ group, layout, renderLineActions, renderReviewItem, getRevie
     )
 }
 
-export default function BatchPreview({ defaultCollapsed = false, ...props }: BatchPreviewProps) {
+export default function BatchPreview({ defaultCollapsed = false, onAddFirst, ...props }: BatchPreviewProps) {
     const [collapsible] = useState(defaultCollapsed)
     const [expanded, setExpanded] = useState(false)
-    if (!collapsible) return <BatchPreviewContent {...props} />
+    if (onAddFirst) return (
+        <div className="space-y-4 py-8 text-center">
+            <p className="text-default-500">还没有添加任何修改</p>
+            <Button color="primary" onPress={onAddFirst}>添加第一个修改</Button>
+        </div>
+    )
+    if (!collapsible) return <BatchPreviewContent key={props.batchId} {...props} />
 
     return (
         <div className="space-y-4">
@@ -463,7 +475,7 @@ export default function BatchPreview({ defaultCollapsed = false, ...props }: Bat
                 onPress={() => setExpanded(value => !value)}>
                 {expanded ? '收起差异' : '展开差异'}
             </Button>
-            {expanded && <BatchPreviewContent {...props} />}
+            {expanded && <BatchPreviewContent key={props.batchId} {...props} />}
         </div>
     )
 }
@@ -473,27 +485,29 @@ function BatchPreviewContent({
     renderLineActions, lineActionItems, reviewCounts, reviewItems, renderReviewItem, getReviewWeight, renderReviewControls,
 }: BatchPreviewProps) {
     const [reviewLayout, setReviewLayout] = useState<PreviewResult>()
+    const [publicLayout, setPublicLayout] = useState<{ contentVersion: number; preview: PreviewResult }>()
     const { data, error, isLoading, isValidating, mutate } = useAPI<{ contentVersion: number; preview: PreviewResult }>(
         `/api/batches/${batchId}/preview${reviewing ? '?review=1' : ''}`,
         { keepPreviousData: false, revalidateOnFocus: !reviewing, revalidateOnReconnect: !reviewing },
     )
     const previewVersion = data?.contentVersion
-    const compatibleReviewedVersion = previewVersion !== undefined && expectedContentVersion !== undefined &&
+    const isReviewedVersion = (version: number) => expectedContentVersion !== undefined &&
         reviewedFromContentVersion !== undefined &&
-        previewVersion >= reviewedFromContentVersion && previewVersion <= expectedContentVersion
+        version >= reviewedFromContentVersion && version <= expectedContentVersion
     const outdated = Boolean(data && expectedContentVersion !== undefined &&
-        previewVersion !== expectedContentVersion && !compatibleReviewedVersion)
-    const newerReviewPreview = reviewing && previewVersion !== undefined && expectedContentVersion !== undefined &&
+        data.contentVersion !== expectedContentVersion && !isReviewedVersion(data.contentVersion))
+    const newerPreview = previewVersion !== undefined && expectedContentVersion !== undefined &&
         previewVersion > expectedContentVersion
 
-    const refresh = useCallback(() => newerReviewPreview && onNewerReviewPreview
+    const refresh = useCallback(() => newerPreview && onNewerReviewPreview
         ? onNewerReviewPreview()
-        : mutate().catch(() => undefined), [newerReviewPreview, onNewerReviewPreview, mutate])
+        : mutate().catch(() => undefined), [newerPreview, onNewerReviewPreview, mutate])
     useEffect(() => {
         if (outdated) void refresh()
     }, [outdated, expectedContentVersion, previewVersion, refresh])
 
-    const adminReview = Boolean(renderReviewItem)
+    const adminReview = reviewing && Boolean(renderReviewItem)
+    const publicDetails = !reviewing && Boolean(renderReviewItem)
     const compatiblePreview = !outdated ? data?.preview : undefined
     // Review metadata can change hunk membership without changing the items under review.
     if (adminReview && !reviewLayout && compatiblePreview) {
@@ -502,13 +516,26 @@ function BatchPreviewContent({
             rejected: [...(compatiblePreview.rejected ?? [])].sort((a, b) => a.code.localeCompare(b.code) || a.prId - b.prId),
         })
     }
+    // Keep displayed rows anchored while data catches up or a resubmission changes only review state.
+    const keepPublicLayout = publicLayout && (
+        outdated || publicLayout.contentVersion === expectedContentVersion || isReviewedVersion(publicLayout.contentVersion)
+    )
+    const displayedPublicLayout = keepPublicLayout || !compatiblePreview ? publicLayout : data
+    if (publicDetails && displayedPublicLayout !== publicLayout) setPublicLayout(displayedPublicLayout)
     const preview = adminReview
         ? reviewLayout ?? compatiblePreview
-        : reviewing || (!error && !outdated) ? data?.preview : undefined
+        : publicDetails ? displayedPublicLayout?.preview
+            : reviewing || (!error && !outdated) ? data?.preview : undefined
+    const stalePublicLines = publicDetails && displayedPublicLayout && expectedContentVersion !== undefined &&
+        displayedPublicLayout.contentVersion !== expectedContentVersion && !isReviewedVersion(displayedPublicLayout.contentVersion)
     const changes = preview?.changes
     const layouts = useMemo(() => new Map(changes?.map(group => [group, prepareDiff(group)])), [changes])
-    const lineActions = renderLineActions && ((id: number) => renderLineActions(id, reviewing && outdated))
-    const reviewDetail = renderReviewItem && ((id: number, reason?: string) => renderReviewItem(id, outdated, reason))
+    const lineActions = renderLineActions && ((id: number) => renderLineActions(id, reviewing ? outdated : Boolean(stalePublicLines)))
+    const reviewDetail = renderReviewItem && ((id: number, reason?: string, inDiff = false) =>
+        renderReviewItem(id, reviewing ? outdated : inDiff && Boolean(stalePublicLines), reason, inDiff))
+    const publicRejectionReasons = publicDetails
+        ? new Map(compatiblePreview?.rejected?.map(op => [op.prId, op.reason]))
+        : undefined
     const reviewControls = renderReviewControls?.(outdated)
 
     const shownIds = new Set([...layouts.values()].flatMap(layout => layout.shownIds))
@@ -548,7 +575,7 @@ function BatchPreviewContent({
         )
     }
 
-    if (adminReview ? !preview : !data || (error && !reviewing)) {
+    if (adminReview ? !preview : !(publicDetails && preview) && (!data || (error && !reviewing))) {
         return (
             <div>
                 {reviewControls}
@@ -562,7 +589,7 @@ function BatchPreviewContent({
         )
     }
 
-    if (!adminReview && outdated && !reviewing) {
+    if (!preview && outdated && !reviewing) {
         return (
             <div className="py-4">
                 <p role="status" className="text-center text-small text-default-500">批次有更新，正在重新加载差异</p>
@@ -583,8 +610,8 @@ function BatchPreviewContent({
 
     if (total === 0 && rejected.length === 0 && !reviewCounts && !adminReview) {
         return (
-            <div className="text-center py-8">
-                <p className="text-default-500">暂无修改预览</p>
+            <div className="py-8">
+                <p className="text-center text-default-500">暂无修改预览</p>
                 {fallback}
                 {reviewPreviewStatus}
             </div>
@@ -643,7 +670,8 @@ function BatchPreviewContent({
                                 </div>
                                 {groups.map((group, i) => (
                                     <DiffView key={group.codes.join(',') || i} group={group} layout={layouts.get(group)!}
-                                        renderLineActions={lineActions} renderReviewItem={reviewDetail} getReviewWeight={getReviewWeight} />
+                                        renderLineActions={lineActions} renderReviewItem={reviewDetail && (id => reviewDetail(id, undefined, true))}
+                                        getReviewWeight={getReviewWeight} keepPhraseRemark={publicDetails} />
                                 ))}
                             </div>
                         ))}
@@ -662,7 +690,9 @@ function BatchPreviewContent({
                     </div>
                     <div className="divide-y divide-default-100">
                         {rejected.map(op => reviewDetail ? (
-                            <div key={op.prId} className="overflow-x-auto px-3 py-1.5">{reviewDetail(op.prId, op.reason)}</div>
+                            <div key={op.prId} className="overflow-x-auto px-3 py-1.5">
+                                {reviewDetail(op.prId, publicRejectionReasons ? publicRejectionReasons.get(op.prId) : op.reason)}
+                            </div>
                         ) : (
                             <div key={op.prId} className="p-3 flex items-start gap-3">
                                 <div className="w-6 h-6 flex items-center justify-center rounded bg-default-200 text-default-600 shrink-0 mt-0.5">
