@@ -35,7 +35,10 @@ type BotBatchReviewResponse<T> = {
 }
 
 const MIAOMIAO_REVIEW_TIMEOUT_MS = 290_000
-type ItemReviewResult = Pick<BatchAiReviewResult, 'items' | 'generatedAt'> & { auditSealed?: boolean }
+type ItemReviewResult = Pick<BatchAiReviewResult, 'items' | 'generatedAt'> & {
+  auditSealed?: boolean
+  warning?: string
+}
 
 interface BotReviewInput {
   batch: ReviewableBatch
@@ -252,16 +255,20 @@ export async function requestMiaomiaoBatchReviewDetailed(
 }
 
 export async function requestMiaomiaoItemReview(input: BotReviewInput): Promise<ItemReviewResult> {
-  const { aiReview, auditSealed } = await fetchMiaomiaoReview<ItemReviewResult>(input, true)
+  const { aiReview, auditSealed, warning } = await fetchMiaomiaoReview<ItemReviewResult>(input, true)
   const items = aiReview.items.map(item => guardMiaomiaoItemPass(item, auditSealed))
-  return { generatedAt: aiReview.generatedAt, auditSealed, items: bindLocalItemEvidence(items, input.localReview.items) }
+  return { generatedAt: aiReview.generatedAt, auditSealed, warning, items: bindLocalItemEvidence(items, input.localReview.items) }
+}
+
+function isFallbackReviewItem(item: BatchAiReviewItem): boolean {
+  return String(item.reviewRecord?.source) === 'bot-llm-fallback'
 }
 
 function guardMiaomiaoItemPass(item: BatchAiReviewItem, auditSealed?: boolean, ambiguousDigest = false): BatchAiReviewItem {
   if (item.status !== 'pass') return item
   const reason = auditSealed
     ? '本次复审含需人工确认的审计项，不能批量放行'
-    : String(item.reviewRecord?.source) === 'bot-llm-fallback'
+    : isFallbackReviewItem(item)
       ? '本次复审使用备用判断，不能批量放行'
       : ambiguousDigest ? '词条内容含校验分隔符，不能批量放行' : undefined
   return reason ? { ...item, status: 'attention', severity: 'warning', reasons: [reason, ...item.reasons] } : item
@@ -319,7 +326,7 @@ export function formatMiaomiaoReviewRemark(item: BatchAiReviewItem, generatedAt:
     lines.push(`证据：${reviewLineValue(evidence)}`)
   }
   lines.push(`时间：${reviewLineValue(generatedAt)}`)
-  if (reviewDigest) lines.push(`校验：${reviewDigest}`)
+  if (reviewDigest && !isFallbackReviewItem(item)) lines.push(`校验：${reviewDigest}`)
   lines.push(MIAOMIAO_REVIEW_BLOCK_END)
   return lines.join('\n')
 }

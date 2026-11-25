@@ -121,7 +121,8 @@ describe('bulk review protection at bot write-back', () => {
     const { data: { remark } } = tx.pullRequest.updateMany.mock.lastCall![0]
     expect(remark.match(/--- miao-review:(?:start|end) ---/g)).toHaveLength(2)
     const review = parseMiaomiaoReviewRemark(remark).review
-    expect(review).toMatchObject({ status: '需复核', reviewDigest: computeReviewDigest(row) })
+    expect(review?.status).toBe('需复核')
+    expect(review?.reviewDigest).toBe(auditSealed ? computeReviewDigest(row) : undefined)
     expect(review?.reason?.startsWith(warning)).toBe(true)
     expect(isBulkApprovable({ ...row, remark }, safeTier, noRejections)).toBe(false)
   })

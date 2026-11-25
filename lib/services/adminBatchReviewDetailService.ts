@@ -1,5 +1,7 @@
 import { prisma } from '@/lib/prisma'
+import { computeReviewDigest } from '@/lib/services/batchBotReviewService'
 import { getItemReviewProgress, reviewNotesInclude } from '@/lib/services/batchItemReview'
+import { parseMiaomiaoReviewRemark } from '@/lib/services/miaomiaoReviewRemark'
 
 export async function getAdminBatchReviewDetail(id: string, includeVoteCounts = false) {
   const batch = await prisma.batch.findUnique({
@@ -112,8 +114,10 @@ export async function getAdminBatchReviewDetail(id: string, includeVoteCounts = 
   const conflictsById = new Map(conflictResults.map(result => [result.id, result]))
   const enrichedPRs = batch.pullRequests.map(pr => {
     const conflictResult = conflictsById.get(String(pr.id))
+    const reviewDigest = parseMiaomiaoReviewRemark(pr.remark).review?.reviewDigest
     return {
       ...pr,
+      reviewFresh: Boolean(reviewDigest && reviewDigest === computeReviewDigest(pr)),
       weight: conflictResult?.calculatedWeight ?? pr.weight,
       conflictInfo: conflictResult?.conflict,
       dependencies: [...pr.dependencies, ...(dynamicDepsOf.get(pr.id) ?? [])

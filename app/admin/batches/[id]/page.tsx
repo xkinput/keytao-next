@@ -63,6 +63,7 @@ interface PullRequest {
   type?: PhraseType | null
   weight: number | null
   remark: string | null
+  readonly reviewFresh?: boolean
   hasConflict: boolean
   conflictReason: string | null
   conflictInfo?: {
@@ -160,6 +161,7 @@ type ReviewTierFilter = typeof reviewTierFilters[number]
 const reviewTierLabels: Record<ReviewTierFilter, string> = {
   all: '全部', manual: '需人工', look: '需查看', safe: '可放行',
 }
+const miaoReviewChunkSize = 12
 
 function snapshotReviewLists(batch: BatchDetail, filter: ReviewTierFilter, previous?: {
   initialApprovedIds: Set<number>; reviewing: boolean
@@ -294,7 +296,8 @@ function AdminBatchReview({ resolvedParams }: { resolvedParams: { id: string } }
   const attemptedFinalization = useRef<string | null>(null)
   const [finalizationError, setFinalizationError] = useState<{ key: string; message: string } | null>(null)
   const [finalizing, setFinalizing] = useState(false)
-  const [checkingTarget, setCheckingTarget] = useState<number | 'all' | null>(null)
+  const [checkingTarget, setCheckingTarget] = useState<number | { current: number; total: number; stopping?: boolean } | null>(null)
+  const stopMiaoReview = useRef(false)
   const { openAlert } = useUIStore()
 
   const detailUrl = `/api/admin/batches/${resolvedParams.id}`
@@ -309,6 +312,7 @@ function AdminBatchReview({ resolvedParams }: { resolvedParams: { id: string } }
     setReviewLists(snapshotReviewLists(batchDataForReview, 'all'))
   }
   const reviewBusy = savingReviews || finalizing || checkingTarget !== null
+  const miaoProgress = typeof checkingTarget === 'object' ? checkingTarget : null
   const activeReview = reviewTarget && reviewTarget.batchId === resolvedParams.id ? reviewTarget : null
   const contentVersion = batchDataForReview?.contentVersion
   const batchCreatedAt = batchDataForReview?.createAt
@@ -611,32 +615,76 @@ function AdminBatchReview({ resolvedParams }: { resolvedParams: { id: string } }
     }
   }, [activeReview, canFinalize, finalizationKey, finalizeReview, isValidating, needsReviewConfirmation, reviewBusy])
 
+  useEffect(() => () => {
+    stopMiaoReview.current = true
+  }, [])
+
   const handleAskMiaoAgain = async (prId?: number) => {
     if (
-      !batchDataForReview || batchDataForReview.status === 'Approved' ||
+      !batchDataForReview || !reviewLists || batchDataForReview.status === 'Approved' ||
       reviewInFlight.current || reviewQueue.current || reviewTarget?.batchId === batchDataForReview.id
     ) return
+
+    let targetIds: number[]
     if (prId !== undefined) {
       const target = pullRequestById.get(prId)
       if (!target || target.appliedAt) return
-    } else if (!batchDataForReview.pullRequests.some(item => !item.appliedAt)) {
-      return
-    }
-    reviewInFlight.current = true
-    setCheckingTarget(prId ?? 'all')
-    try {
-      await apiRequest(`/api/admin/batches/${batchDataForReview.id}/ai-review`, {
-        method: 'POST',
-        body: prId === undefined ? {} : { prId },
-        withAuth: true,
+      targetIds = [prId]
+    } else {
+      if (error || reviewSyncError) return
+      const orderedItems = [
+        ...reviewLists.all,
+        ...reviewLists.approved,
+        ...batchDataForReview.pullRequests.filter(item => !reviewLists.byId.has(item.id)),
+      ]
+      targetIds = orderedItems.flatMap(item => {
+        const latest = pullRequestById.get(item.id)
+        return latest && !latest.appliedAt && latest.reviewFresh !== true ? [item.id] : []
       })
-      await Promise.allSettled([mutate(), refreshPreview()])
-    } catch (err) {
-      if ((err as { status?: number }).status === 409) {
-        await Promise.allSettled([mutate(), refreshPreview()])
+      if (!targetIds.length) {
+        toast('没有需要复审的词条')
+        return
       }
-      openAlert(getReviewErrorMessage(err, '喵喵复查失败'), '操作失败')
+    }
+
+    const reviewerId = useAuthStore.getState().user?.id
+    const total = Math.ceil(targetIds.length / miaoReviewChunkSize)
+    let completed = 0
+    let warned = false
+    let refresh: Promise<unknown> | undefined
+    stopMiaoReview.current = false
+    reviewInFlight.current = true
+    try {
+      for (let offset = 0; offset < targetIds.length; offset += miaoReviewChunkSize) {
+        if (stopMiaoReview.current || useAuthStore.getState().user?.id !== reviewerId) break
+        setCheckingTarget(prId ?? { current: completed + 1, total })
+        const { warning } = await apiRequest<{ warning?: string }>(`/api/admin/batches/${batchDataForReview.id}/ai-review`, {
+          method: 'POST',
+          body: prId === undefined ? { prIds: targetIds.slice(offset, offset + miaoReviewChunkSize) } : { prId },
+          withAuth: true,
+        })
+        completed++
+        if (warning && !warned) {
+          toast(warning)
+          warned = true
+        }
+        refresh = prId === undefined
+          ? mutate().catch(() => undefined)
+          : Promise.allSettled([mutate(), refreshPreview()])
+      }
+    } catch (err) {
+      const message = getReviewErrorMessage(err, '喵喵复查失败')
+      if (prId === undefined) {
+        toast.error(`${message}（已完成 ${completed}/${total} 组）`)
+        refresh = mutate().catch(() => undefined)
+      } else {
+        if ((err as { status?: number }).status === 409) {
+          await Promise.allSettled([mutate(), refreshPreview()])
+        }
+        openAlert(message, '操作失败')
+      }
     } finally {
+      await refresh
       reviewInFlight.current = false
       setCheckingTarget(null)
     }
@@ -950,16 +998,31 @@ function AdminBatchReview({ resolvedParams }: { resolvedParams: { id: string } }
                   </div>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  {canAskMiao && (
+                  {(canAskMiao || miaoProgress) && (
                     <Button
                       size="sm"
                       variant="flat"
                       startContent={<RefreshCw className="size-4" aria-hidden="true" />}
-                      isLoading={checkingTarget === 'all'}
-                      isDisabled={reviewBusy || !!activeReview}
+                      isLoading={!!miaoProgress}
+                      isDisabled={reviewBusy || !!activeReview || !!error || reviewSyncError}
                       onPress={() => void handleAskMiaoAgain()}
                     >
-                      请喵复审
+                      <span aria-live="polite" className="tabular-nums">
+                        {miaoProgress ? `喵复审中 ${miaoProgress.current}/${miaoProgress.total}` : '请喵复审'}
+                      </span>
+                    </Button>
+                  )}
+                  {miaoProgress && (
+                    <Button
+                      size="sm"
+                      variant="light"
+                      isDisabled={miaoProgress.stopping || miaoProgress.current === miaoProgress.total}
+                      onPress={() => {
+                        stopMiaoReview.current = true
+                        setCheckingTarget({ ...miaoProgress, stopping: true })
+                      }}
+                    >
+                      停止复审
                     </Button>
                   )}
                   <Button

@@ -12,6 +12,10 @@ import {
 export const runtime = 'nodejs'
 export const maxDuration = 300
 
+function isPullRequestId(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 2147483647
+}
+
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -23,9 +27,27 @@ export async function POST(
     }
 
     const { id } = await params
-    const body = await request.json().catch(() => ({}))
-    const prId: unknown = body?.prId
-    if (prId !== undefined && (typeof prId !== 'number' || !Number.isInteger(prId) || prId < 1 || prId > 2147483647)) {
+    const payload = await request.text()
+    let body: unknown
+    try {
+      body = payload.trim() ? JSON.parse(payload) : {}
+    } catch {
+      body = null
+    }
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ error: '复审请求格式无效' }, { status: 400 })
+    }
+    const { prId, prIds } = body as { prId?: unknown; prIds?: unknown }
+    let targetIds: number[] | undefined
+    if (prIds !== undefined) {
+      if (prId !== undefined || !Array.isArray(prIds) || prIds.length < 1 || prIds.length > 12 ||
+        !prIds.every(isPullRequestId) || new Set(prIds).size !== prIds.length) {
+        return NextResponse.json({ error: '每组复审须提供 1 至 12 个不重复的有效词条 ID' }, { status: 400 })
+      }
+      targetIds = prIds
+    } else if (isPullRequestId(prId)) {
+      targetIds = [prId]
+    } else if (prId !== undefined) {
       return NextResponse.json({ error: '词条 ID 无效' }, { status: 400 })
     }
     const batch = await getAdminBatchReviewDetail(id)
@@ -37,8 +59,9 @@ export async function POST(
       return NextResponse.json({ error: '已通过的批次不能重新复审' }, { status: 409 })
     }
     const pullRequests = batch.pullRequests.filter(pr => !pr.appliedAt)
-    const targets = prId === undefined ? pullRequests : pullRequests.filter(pr => pr.id === prId)
-    if (!targets.length) {
+    const pullRequestById = new Map(pullRequests.map(pr => [pr.id, pr]))
+    const targets = targetIds?.map(prId => pullRequestById.get(prId)).filter(pr => pr !== undefined) ?? pullRequests
+    if (!targets.length || (targetIds && targets.length !== targetIds.length)) {
       return NextResponse.json({ error: '未找到可复审的词条' }, { status: 404 })
     }
     // Capture the content version the reviewer is about to look at. The remote
@@ -47,11 +70,19 @@ export async function POST(
     // applying a result to a batch that has moved on.
     const reviewedContentVersion = batch.contentVersion
 
-    const reviewContext = prId === undefined ? pullRequests : selectAiReviewFocusContext(pullRequests, prId)
+    let reviewContext = pullRequests
+    if (targetIds) {
+      const contextById = new Map(targets.map(pr => [pr.id, pr]))
+      for (const targetId of targetIds) {
+        for (const pr of selectAiReviewFocusContext(pullRequests, targetId)) contextById.set(pr.id, pr)
+      }
+      // shortcut: Cap context at 48 items to bound bot work, revisit if related entries are frequently cut off.
+      reviewContext = Array.from(contextById.values()).slice(0, 48)
+    }
     const aiReview = await requestMiaomiaoItemReview({
       batch: { id: batch.id, status: batch.status, description: batch.description, pullRequests: reviewContext },
       localReview: await buildMiaomiaoItemReviewContext(reviewContext),
-      focusPrId: prId,
+      focusPrId: targetIds?.length === 1 ? targetIds[0] : undefined,
     })
     const reviewedIds = new Set(aiReview.items.map(item => item.prId))
     if (targets.some(pr => !reviewedIds.has(pr.id))) {
@@ -64,7 +95,7 @@ export async function POST(
       expectedContentVersion: reviewedContentVersion,
     })
 
-    return NextResponse.json({ reviewedAt: aiReview.generatedAt })
+    return NextResponse.json({ reviewedAt: aiReview.generatedAt, warning: aiReview.warning })
   } catch (error) {
     if (error instanceof StaleBatchReviewError) {
       return NextResponse.json({ error: error.message }, { status: error.status })
