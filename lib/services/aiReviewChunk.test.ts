@@ -105,11 +105,11 @@ describe('grouping AI review targets by slot', () => {
 
 describe('Miaomiao review requests', () => {
   it.each([
-    ['admin', '0', 280_000],
-    ['admin', '1', 280_000],
-    ['bot', '0', 170_000],
-    ['bot', '1', 170_000],
-  ])('uses the %s deadline with rollout flag %s', async (caller, flag, deadline) => {
+    ['admin', '0', undefined, 290_000],
+    ['admin', '1', 280_000, 290_000],
+    ['bot', '0', undefined, 290_000],
+    ['bot', '1', 170_000, 180_000],
+  ])('uses the %s review timeout with rollout flag %s', async (caller, flag, deadline, timeout) => {
     vi.stubEnv('MIAOMIAO_REVIEW_TARGET_IDS', flag)
     const setTimer = vi.spyOn(globalThis, 'setTimeout')
     const response = caller === 'admin' ? await post({ prIds: [1] }) : await autoReview(
@@ -123,13 +123,13 @@ describe('Miaomiao review requests', () => {
     const sent = JSON.parse(String(fetchMock.mock.lastCall?.[1]?.body))
     expect(sent.focus_pr_id).toBe(1)
     expect(sent.batch.pullRequests.map((pr: { id: number }) => pr.id)).toEqual([1, 2])
-    if (flag === '1') {
+    if (deadline !== undefined) {
       expect(sent).toMatchObject({ target_pr_ids: [1], deadline_ms: deadline })
     } else {
       expect(sent).not.toHaveProperty('target_pr_ids')
       expect(sent).not.toHaveProperty('deadline_ms')
     }
-    expect(setTimer).toHaveBeenCalledWith(expect.any(Function), deadline + 10_000)
+    expect(setTimer).toHaveBeenCalledWith(expect.any(Function), timeout)
     expect(checkConflicts).toHaveBeenCalledOnce()
   })
 

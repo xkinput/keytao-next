@@ -231,7 +231,10 @@ function botReviewHeaders(): HeadersInit {
 
 async function fetchMiaomiaoReview<T extends ItemReviewResult>(input: BotReviewInput, itemsOnly = false) {
   const controller = new AbortController()
-  const { deadlineMs, targetIds } = input
+  const targetOptions = process.env.MIAOMIAO_REVIEW_TARGET_IDS === '1'
+    ? { target_pr_ids: input.targetIds, deadline_ms: input.deadlineMs }
+    : undefined
+  const deadlineMs = targetOptions?.deadline_ms
   const timeoutMs = deadlineMs === undefined ? MIAOMIAO_REVIEW_TIMEOUT_MS : deadlineMs + 10_000
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
   try {
@@ -244,7 +247,7 @@ async function fetchMiaomiaoReview<T extends ItemReviewResult>(input: BotReviewI
         batch: input.batch,
         local_review: input.localReview,
         focus_pr_id: input.focusPrId,
-        ...(process.env.MIAOMIAO_REVIEW_TARGET_IDS === '1' && { target_pr_ids: targetIds, deadline_ms: deadlineMs }),
+        ...targetOptions,
       }),
       signal: controller.signal,
     })
