@@ -133,4 +133,32 @@ describe('GitHub sync branch handling', () => {
       sha: 'new-commit-sha',
     }));
   });
+
+  it('returns the canonical tag release URL when creating a draft release', async () => {
+    const service = new GithubSyncService({ owner: 'xkinput', repo: 'KeyTao', token: 'token' });
+    const octokit = {
+      repos: {
+        createRelease: vi.fn().mockResolvedValue({
+          data: {
+            id: 42,
+            tag_name: 'v1.3.35',
+            html_url: 'https://github.com/xkinput/KeyTao/releases/tag/untagged-abc123',
+          },
+        }),
+      },
+    };
+    Object.assign(service, { octokit });
+
+    const release = await service.createReleaseForTag('v1.3.35', 'KeyTao v1.3.35', 'notes', {
+      draft: true,
+      targetCommitish: 'abc123',
+    });
+
+    expect(octokit.repos.createRelease).toHaveBeenCalledWith(expect.objectContaining({
+      tag_name: 'v1.3.35',
+      target_commitish: 'abc123',
+      draft: true,
+    }));
+    expect(release.htmlUrl).toBe('https://github.com/xkinput/KeyTao/releases/tag/v1.3.35');
+  });
 });

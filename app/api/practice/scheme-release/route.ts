@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { findUniversalKeytaoAsset } from '@/lib/releaseAssets'
 
 type PracticeSchemeKey = 'keytao' | 'xmjd' | 'xmjd-feiding' | 'txjx' | 'keydo'
 
@@ -62,7 +63,16 @@ function isPracticeSchemeKey(value: string | null): value is PracticeSchemeKey {
   )
 }
 
-function findAsset(assets: { name: string; browser_download_url: string }[], source: ReleaseAssetSchemeSource) {
+function findAsset(
+  scheme: PracticeSchemeKey,
+  assets: { name: string; browser_download_url: string }[],
+  source: ReleaseAssetSchemeSource
+) {
+  if (scheme === 'keytao') {
+    const universal = findUniversalKeytaoAsset(assets)
+    if (universal) return universal
+  }
+
   if (!source.assetName) {
     return assets.find((asset) => asset.name.toLowerCase().endsWith('.zip'))
   }
@@ -95,7 +105,7 @@ async function getReleaseAsset(scheme: PracticeSchemeKey, source: ReleaseAssetSc
     return NextResponse.json({ error: `Failed to fetch ${source.label} release` }, { status: 502 })
   }
 
-  const asset = findAsset(release.assets ?? [], source)
+  const asset = findAsset(scheme, release.assets ?? [], source)
   if (!asset) {
     return NextResponse.json({ error: `${source.label} release does not contain a usable zip asset` }, { status: 404 })
   }

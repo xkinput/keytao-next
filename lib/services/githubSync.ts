@@ -511,21 +511,26 @@ export class GithubSyncService {
   async createReleaseForTag(
     tagName: string,
     name: string,
-    body: string
+    body: string,
+    options?: { draft?: boolean; targetCommitish?: string }
   ): Promise<CreateReleaseResult> {
+    const draft = options?.draft ?? false;
     const { data } = await this.octokit.repos.createRelease({
       owner: this.owner,
       repo: this.repo,
       tag_name: tagName,
+      target_commitish: options?.targetCommitish,
       name,
       body,
-      draft: false,
+      draft,
       prerelease: false,
     });
 
     return {
       tagName: data.tag_name,
-      htmlUrl: data.html_url,
+      htmlUrl: draft
+        ? `https://github.com/${this.owner}/${this.repo}/releases/tag/${tagName}`
+        : data.html_url,
       id: data.id,
     };
   }

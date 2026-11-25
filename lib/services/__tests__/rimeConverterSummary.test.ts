@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { PhraseType, PullRequestType } from '@prisma/client'
-import { generateSyncSummary, generateSyncSummaryData } from '../rimeConverter'
+import { generateReleaseNotes, generateSyncSummary, generateSyncSummaryData } from '../rimeConverter'
 import type { PullRequest } from '@prisma/client'
 
 function pullRequest(type: PhraseType, action: PullRequestType): PullRequest {
@@ -38,5 +38,22 @@ describe('Rime sync summary', () => {
     expect(summary).toContain('- 总计: **3** 条词条')
     expect(summary).toContain('- **词组**: 新增 2, 修改 1')
     expect(summary).toContain('- **单字**: 删除 1')
+  })
+
+  it('renders concise release notes with entry counts, contributors, and PR link', () => {
+    const data = generateSyncSummaryData(pullRequests, batches)
+    const notes = generateReleaseNotes(data, {
+      prUrl: 'https://github.com/xkinput/KeyTao/pull/180',
+      prNumber: 180,
+    })
+
+    expect(notes).toContain('- 总计：**4** 条词条')
+    expect(notes).toContain('- **词组**：新增 2，修改 1')
+    expect(notes).toContain('- **单字**：删除 1')
+    expect(notes).toContain('### 参与贡献（2 位）')
+    expect(notes).toContain('Rea、GarthTB')
+    expect(notes).toContain('[PR #180](https://github.com/xkinput/KeyTao/pull/180)')
+    expect(notes).not.toContain('Co-authored-by:')
+    expect(notes).not.toContain('此PR由KeyTao管理系统自动生成')
   })
 })

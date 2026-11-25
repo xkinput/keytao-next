@@ -1,27 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { extractKeytaoDownloadInfo } from '@/lib/releaseAssets'
 
 interface PlatformRelease {
   version: string
+  downloadUrl: string | null
   downloadUrls: Record<string, string>
-}
-
-function extractDownloadUrls(assets: { name: string; browser_download_url: string }[]): Record<string, string> {
-  const urls: Record<string, string> = {}
-  for (const asset of assets) {
-    const n = asset.name.toLowerCase()
-    if (n.includes('keytao-mac') || n.includes('keytao-macos')) {
-      urls.macos = asset.browser_download_url
-    } else if (n.includes('keytao-win') || n.includes('keytao-windows')) {
-      urls.windows = asset.browser_download_url
-    } else if (n.includes('keytao-linux')) {
-      urls.linux = asset.browser_download_url
-    } else if (n.includes('keytao-android')) {
-      urls.android = asset.browser_download_url
-    } else if (n.includes('keytao-ios')) {
-      urls.ios = asset.browser_download_url
-    }
-  }
-  return urls
 }
 
 async function fetchGithubRelease(): Promise<PlatformRelease & { name: string; publishedAt: string; body: string } | null> {
@@ -35,12 +18,14 @@ async function fetchGithubRelease(): Promise<PlatformRelease & { name: string; p
     )
     if (!res.ok) return null
     const data = await res.json()
+    const { downloadUrl, downloadUrls } = extractKeytaoDownloadInfo(data.assets ?? [])
     return {
       version: data.tag_name ?? '',
       name: data.name ?? '',
       publishedAt: data.published_at ?? '',
       body: data.body ?? '',
-      downloadUrls: extractDownloadUrls(data.assets ?? []),
+      downloadUrl,
+      downloadUrls,
     }
   } catch {
     return null
@@ -58,9 +43,11 @@ async function fetchGiteeRelease(): Promise<PlatformRelease | null> {
     )
     if (!res.ok) return null
     const data = await res.json()
+    const { downloadUrl, downloadUrls } = extractKeytaoDownloadInfo(data.assets ?? [])
     return {
       version: data.tag_name ?? '',
-      downloadUrls: extractDownloadUrls(data.assets ?? []),
+      downloadUrl,
+      downloadUrls,
     }
   } catch {
     return null
@@ -80,6 +67,7 @@ export async function GET(req: NextRequest) {
       name: github.name,
       publishedAt: github.publishedAt,
       body: github.body,
+      downloadUrl: github.downloadUrl,
       downloadUrls: github.downloadUrls,
     })
   }
@@ -91,6 +79,7 @@ export async function GET(req: NextRequest) {
     }
     return NextResponse.json({
       version: gitee.version,
+      downloadUrl: gitee.downloadUrl,
       downloadUrls: gitee.downloadUrls,
     })
   }
@@ -107,7 +96,11 @@ export async function GET(req: NextRequest) {
     name: github?.name ?? '',
     publishedAt: github?.publishedAt ?? '',
     body: github?.body ?? '',
-    github: github ? { version: github.version, downloadUrls: github.downloadUrls } : null,
-    gitee: gitee ? { version: gitee.version, downloadUrls: gitee.downloadUrls } : null,
+    github: github
+      ? { version: github.version, downloadUrl: github.downloadUrl, downloadUrls: github.downloadUrls }
+      : null,
+    gitee: gitee
+      ? { version: gitee.version, downloadUrl: gitee.downloadUrl, downloadUrls: gitee.downloadUrls }
+      : null,
   })
 }
