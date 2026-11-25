@@ -42,6 +42,46 @@ describe('idle drafts for Bot reminders', () => {
     }
   })
 
+  it('requires modifiedAfter when afterId is provided', async () => {
+    expect((await request('?afterId=batch-id')).status).toBe(400)
+  })
+
+  it('returns drafts with the same modification time in ID order across pages', async () => {
+    const now = Date.now()
+    const tied = new Date(now - 60 * 60_000)
+    const later = new Date(now - 30 * 60_000)
+    const prefix = randomUUID()
+    const { id: creatorId } = await prisma.user.create({
+      data: { qqId: `test-${prefix}`, email: `test_${prefix}@example.com` },
+    })
+    for (const suffix of [4, 1, 3, 2]) {
+      const updateAt = suffix === 1 ? later : tied
+      await prisma.batch.create({
+        data: {
+          id: `${prefix}-${suffix}`, creatorId, updateAt,
+          pullRequests: { create: { userId: creatorId, word: 'private draft item', updateAt } },
+        },
+      })
+    }
+
+    const first = await request('?limit=2')
+    expect(first.status).toBe(200)
+    const { drafts: firstPage } = await first.json()
+    expect(firstPage).toMatchObject([
+      { batchId: `${prefix}-2`, lastModifiedAt: tied.toISOString() },
+      { batchId: `${prefix}-3`, lastModifiedAt: tied.toISOString() },
+    ])
+
+    const { batchId: afterId, lastModifiedAt: modifiedAfter } = firstPage[1]
+    const query = new URLSearchParams({ modifiedAfter, afterId, limit: '2' })
+    const second = await request(`?${query}`)
+    expect(second.status).toBe(200)
+    expect((await second.json()).drafts).toMatchObject([
+      { batchId: `${prefix}-4`, lastModifiedAt: tied.toISOString() },
+      { batchId: `${prefix}-1`, lastModifiedAt: later.toISOString() },
+    ])
+  })
+
   it('orders eligible drafts by their latest change and applies filters before the limit', async () => {
     const now = Date.now()
     const minutesAgo = (minutes: number) => new Date(now - minutes * 60_000)

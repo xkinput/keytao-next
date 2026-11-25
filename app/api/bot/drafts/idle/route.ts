@@ -49,14 +49,29 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ success: false, message: 'modifiedAfter 须为带时区的 ISO 时间戳' }, { status: 400 })
     }
 
+    const afterId = params.get('afterId')
+    if (afterId !== null && (!modifiedAfter || !afterId.trim() || /\p{Cc}/u.test(afterId))) {
+      return NextResponse.json(
+        { success: false, message: 'afterId 须为有效的批次 ID，且须与 modifiedAfter 一同提供' },
+        { status: 400 },
+      )
+    }
+
     const excludeIds = params.get('excludeIds')?.split(',', MAX_EXCLUDE_IDS + 1) ?? []
     const validExcludeIds = excludeIds.length > 0 && excludeIds.length <= MAX_EXCLUDE_IDS &&
       excludeIds.every(id => id.trim() && !/\p{Cc}/u.test(id))
 
     const cutoff = new Date(Date.now() - idleMinutes * 60_000)
+    const lastModifiedAt = Prisma.sql`GREATEST(b."updateAt", MAX(pr."updateAt"))`
+    let cursorFilter = Prisma.empty
+    if (modifiedAfter) {
+      cursorFilter = afterId === null
+        ? Prisma.sql`AND ${lastModifiedAt} > ${modifiedAfter}`
+        : Prisma.sql`AND (${lastModifiedAt}, b.id) > (${modifiedAfter}, ${afterId})`
+    }
     const rows = await prisma.$queryRaw<IdleDraft[]>`
       SELECT b.id AS "batchId", u."qqId" AS "creatorQqId", COUNT(*)::int AS "itemCount",
-        GREATEST(b."updateAt", MAX(pr."updateAt")) AS "lastModifiedAt", b."contentVersion"
+        ${lastModifiedAt} AS "lastModifiedAt", b."contentVersion"
       FROM batches b
       JOIN users u ON u.id = b."creatorId"
       JOIN pull_requests pr ON pr."batchId" = b.id
@@ -64,7 +79,7 @@ export async function GET(request: NextRequest) {
         ${validExcludeIds ? Prisma.sql`AND b.id NOT IN (${Prisma.join(excludeIds)})` : Prisma.empty}
       GROUP BY b.id, u."qqId"
       HAVING MAX(pr."updateAt") < ${cutoff}
-        ${modifiedAfter ? Prisma.sql`AND GREATEST(b."updateAt", MAX(pr."updateAt")) > ${modifiedAfter}` : Prisma.empty}
+        ${cursorFilter}
       ORDER BY "lastModifiedAt" ASC, b.id ASC
       LIMIT ${limit}
     `
