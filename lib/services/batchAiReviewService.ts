@@ -316,6 +316,7 @@ function buildStructuredReview(structured?: MiaomiaoReviewRemarkBlock): ParsedMi
       source: 'bot-llm',
       summary: compactText(title),
       pronunciation: structured.pronunciation,
+      ...(structured.priority ? { priority: structured.priority, priorityReason: structured.priorityReason } : {}),
       ...(structured.commonness ? { commonness: structured.commonness } : {}),
       sources: structured.sources,
       ...sourceKinds,
@@ -577,6 +578,7 @@ function buildReviewItem(
     reasons: reasons.length > 0 ? reasons : [`「${word}」@${code} 未发现明显冲突。`],
     suggestions: suggestions.length > 0 ? suggestions : ['可结合编码链位置做最终确认。'],
     reviewRecord,
+    ...(review?.priority ? { priority: review.priority, priorityReason: review.priorityReason } : {}),
     ...(review?.suggestedOrder ? { suggestedOrder: review.suggestedOrder } : {}),
     referenceEvidence,
     // Only the admin detail supplies vote counts for the display tier.

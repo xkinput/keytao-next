@@ -5,6 +5,7 @@ import type { BatchAiReviewCodeChain, BatchAiReviewItem, BatchAiReviewResult } f
 import {
   getMiaomiaoSemanticEvidence,
   extractMiaomiaoReviewBlocks,
+  MIAOMIAO_PRIORITY_LABELS,
   MIAOMIAO_REVIEW_BLOCK_END,
   MIAOMIAO_REVIEW_BLOCK_START,
   parseMiaomiaoReviewRemark,
@@ -399,11 +400,14 @@ function reviewLineValue(value: string): string {
 
 export function formatMiaomiaoReviewRemark(item: BatchAiReviewItem, generatedAt: string, reviewDigest?: string): string {
   const record = item.reviewRecord
-  const lines = [
-    MIAOMIAO_REVIEW_BLOCK_START,
-    `本喵复审：${statusText(item)}`,
-    `结论：${reviewLineValue(item.title)}`,
-  ]
+  const lines = [MIAOMIAO_REVIEW_BLOCK_START, `本喵复审：${statusText(item)}`]
+  const { priority, priorityReason } = item
+  if (priority === 'high' || priority === 'medium' || priority === 'low') {
+    const reason = typeof priorityReason === 'string'
+      ? Array.from(reviewLineValue(priorityReason).trim()).slice(0, 40).join('').trimEnd() : ''
+    lines.push(`优先级：${MIAOMIAO_PRIORITY_LABELS[priority]}${reason ? `（${reason}）` : ''}`)
+  }
+  lines.push(`结论：${reviewLineValue(item.title)}`)
 
   const reasons = item.reasons.slice(0, 3).filter(Boolean).join('；')
   const suggestions = item.suggestions.slice(0, 3).filter(Boolean).join('；')

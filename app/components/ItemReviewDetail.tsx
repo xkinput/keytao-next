@@ -7,7 +7,7 @@ import { AlertTriangle, Bot, ChevronRight, History, MessageSquareText } from 'lu
 import { getPhraseTypeLabel, type PhraseType } from '@/lib/constants/phraseTypes'
 import type { BatchAiReviewItem } from '@/lib/types/batchAiReview'
 import type { BatchReviewTier } from '@/lib/services/batchAiReviewService'
-import { getMiaomiaoEvidenceHighlights, parseMiaomiaoReviewRemark } from '@/lib/services/miaomiaoReviewRemark'
+import { parseMiaomiaoReviewRemark, stripLegacyBotReviewText } from '@/lib/services/miaomiaoReviewRemark'
 import { BatchItemVoteCounts } from './BatchItemVote'
 import { MiaomiaoDiffReview } from './BatchPreview'
 import CodePhrasesPopover from './CodePhrasesPopover'
@@ -48,17 +48,20 @@ const reviewItemActions = {
   Delete: { label: '删除', color: 'danger' },
 } as const
 
-export default function ItemReviewDetail({ item, reviewing = false, waitingOnDependencies, actions, rejectedReason, publicView = false }: {
+export default function ItemReviewDetail({ item, reviewing = false, waitingOnDependencies, actions, rejectedReason,
+  publicView = false, hideMiaomiaoReview = false }: {
   item: ItemReviewDetailItem
   reviewing?: boolean
   publicView?: boolean
+  hideMiaomiaoReview?: boolean
   waitingOnDependencies: boolean
   actions: ReactNode
   rejectedReason?: string
 }) {
   const [expanded, setExpanded] = useState(false)
   const detailId = useId()
-  const { aiReview, conflictInfo } = item
+  const { conflictInfo } = item
+  const aiReview = hideMiaomiaoReview ? undefined : item.aiReview
   const tier = aiReview?.tier ?? 'look'
   const hasConflict = publicView ? conflictInfo?.hasConflict ?? item.hasConflict : conflictInfo?.hasConflict || item.hasConflict
   const aiNotice = aiReview && aiReview.status !== 'pass' ? aiReview : undefined
@@ -68,8 +71,14 @@ export default function ItemReviewDetail({ item, reviewing = false, waitingOnDep
     waitingOnDependencies ? 'warning' : 'success'
   const word = item.word || item.phrase?.word || ''
   const code = item.code || item.phrase?.code || ''
-  const remark = expanded && !publicView ? parseMiaomiaoReviewRemark(item.remark) : undefined
-  const baseRemark = publicView && !aiReview?.reviewRecord ? item.remark : remark?.baseRemark
+  const remark = parseMiaomiaoReviewRemark(item.remark)
+  const baseRemark = stripLegacyBotReviewText(remark)
+  const review = hideMiaomiaoReview ? undefined : remark.review
+  const showReviewBadge = !review && Boolean(aiReview?.reviewRecord)
+  const reviewText = new Set([review?.conclusion, review?.reason, review?.suggestion])
+  const ruleTitle = aiNotice && !reviewText.has(aiNotice.title) ? aiNotice.title : undefined
+  const ruleReasons = aiNotice?.reasons.filter(reason => !reviewText.has(reason)).slice(0, 2) ?? []
+  const ruleSuggestion = aiNotice?.suggestions.find(suggestion => !reviewText.has(suggestion))
   const action = reviewItemActions[item.action]
   const notes = item.reviewNotes ?? []
   const noteList = notes.length > 0 && (
@@ -128,8 +137,8 @@ export default function ItemReviewDetail({ item, reviewing = false, waitingOnDep
           <Chip size="sm" variant="flat" color={statusColor}>{status}</Chip>
         </span>
         {!publicView || aiReview?.reviewRecord ? (
-          <Tooltip content={aiReview?.reviewRecord?.summary}>
-            <Chip size="sm" variant="flat" color="primary" className={aiReview?.reviewRecord ? undefined : 'invisible'}
+          <Tooltip content={showReviewBadge ? aiReview?.reviewRecord?.summary : undefined}>
+            <Chip size="sm" variant="flat" color="primary" className={showReviewBadge ? undefined : 'invisible'}
               startContent={<Bot className="size-3" aria-hidden="true" />}>喵审</Chip>
           </Tooltip>
         ) : <span className="w-14 shrink-0" aria-hidden="true" />}
@@ -151,26 +160,20 @@ export default function ItemReviewDetail({ item, reviewing = false, waitingOnDep
         </span>}
         <div className="ml-auto">{actions}</div>
       </div>
+      {review && <MiaomiaoDiffReview review={review} />}
+      {publicView && baseRemark && <p className="mt-1 whitespace-pre-wrap break-words text-xs opacity-75">{baseRemark}</p>}
       <div id={detailId} hidden={!expanded}
         className="mt-1 h-48 w-full max-w-xl space-y-2 overflow-auto break-words rounded-md bg-content1 px-3 py-2 text-small text-foreground">
         {expanded && (
           <>
             {item.weight != null && <p>权重：{item.weight}</p>}
-            {baseRemark && <p className="whitespace-pre-wrap">备注：{baseRemark}</p>}
+            {!publicView && baseRemark && <p className="whitespace-pre-wrap">备注：{baseRemark}</p>}
             {aiReview?.referenceEvidence && <p className="whitespace-pre-wrap text-default-600">{aiReview.referenceEvidence.line}</p>}
-            {aiReview?.reviewRecord && (
-              <div className="flex flex-wrap items-center gap-1">
-                <span className="text-primary">喵备注</span>
-                {getMiaomiaoEvidenceHighlights(aiReview.reviewRecord).slice(0, 2).map(evidence => (
-                  <span key={evidence} className="rounded-md bg-default-100 px-2 py-1">{evidence}</span>
-                ))}
-              </div>
-            )}
-            {aiNotice && (
+            {(ruleTitle || ruleReasons.length > 0 || ruleSuggestion) && (
               <div className="space-y-1">
-                <p className="font-medium">{aiNotice.title}</p>
-                {aiNotice.reasons.slice(0, 2).map((reason, index) => <p key={index}>{reason}</p>)}
-                {aiNotice.suggestions[0] && <p>建议：{aiNotice.suggestions[0]}</p>}
+                {ruleTitle && <p className="font-medium">{ruleTitle}</p>}
+                {ruleReasons.map((reason, index) => <p key={index}>{reason}</p>)}
+                {ruleSuggestion && <p>建议：{ruleSuggestion}</p>}
               </div>
             )}
             {(conflictInfo?.impact || item.conflictReason) && <p className="text-warning">{conflictInfo?.impact || item.conflictReason}</p>}
@@ -193,7 +196,6 @@ export default function ItemReviewDetail({ item, reviewing = false, waitingOnDep
             )}
             {publicView && waitingOnDependencies && <p className="text-warning-700">关联词条尚未完成审核</p>}
             {!reviewing && noteList}
-            {remark?.review && <MiaomiaoDiffReview review={remark.review} />}
           </>
         )}
       </div>

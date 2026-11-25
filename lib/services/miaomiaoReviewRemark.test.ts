@@ -3,9 +3,33 @@ import {
   getMiaomiaoEvidenceHighlights,
   getMiaomiaoSemanticEvidence,
   parseMiaomiaoReviewRemark,
+  stripLegacyBotReviewText,
 } from './miaomiaoReviewRemark'
 
 describe('miaomiaoReviewRemark', () => {
+  it('removes recognised bot lines only from the display of a structured review', () => {
+    const author = ['投稿说明：补充标准简称', '来源：作者实地记录', '末尾补充：保留两个词条']
+    const legacy = [
+      author[0],
+      '喵喵审词：读音 ōu biāo；来源 暂无；',
+      '本喵已按现代汉语常识复核。',
+      '存在不确定项，建议复核。',
+      '「欧标」读音由普通话拼音确认。',
+      '「欧标」较「欧式标准」更常用。',
+      author[1],
+      '喵喵审词：',
+      '读音 ōu biāo',
+      author[2],
+    ].join('\n')
+    const incomplete = `${legacy}\n--- miao-review:start ---\n本喵复审：通过`
+    expect(stripLegacyBotReviewText(parseMiaomiaoReviewRemark(legacy))).toBe(legacy)
+    expect(stripLegacyBotReviewText(parseMiaomiaoReviewRemark(incomplete))).toBe(incomplete)
+
+    const parsed = parseMiaomiaoReviewRemark(`${incomplete}\n--- miao-review:end ---`)
+    expect(stripLegacyBotReviewText(parsed)).toBe(author.join('\n'))
+    expect(parsed.baseRemark).toBe(legacy)
+  })
+
   it('removes pronunciation duplicated as evidence from persisted reviews', () => {
     const parsed = parseMiaomiaoReviewRemark([
       '--- miao-review:start ---',

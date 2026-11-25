@@ -1,7 +1,8 @@
-import type { BatchAiReviewItem, BatchAiReviewRecord } from '@/lib/types/batchAiReview'
+import type { BatchAiReviewItem, BatchAiReviewPriority, BatchAiReviewRecord } from '@/lib/types/batchAiReview'
 
 export const MIAOMIAO_REVIEW_BLOCK_START = '--- miao-review:start ---'
 export const MIAOMIAO_REVIEW_BLOCK_END = '--- miao-review:end ---'
+export const MIAOMIAO_PRIORITY_LABELS = { high: '高', medium: '中', low: '低' } as const
 
 const MIAOMIAO_REVIEW_BLOCK_SOURCE = `${MIAOMIAO_REVIEW_BLOCK_START}([\\s\\S]*?)${MIAOMIAO_REVIEW_BLOCK_END}`
 const MIAOMIAO_REVIEW_BLOCK_PATTERN = new RegExp(`\\n?${MIAOMIAO_REVIEW_BLOCK_SOURCE}`, 'g')
@@ -9,6 +10,8 @@ const MIAOMIAO_REVIEW_BLOCK_EXACT_PATTERN = new RegExp(MIAOMIAO_REVIEW_BLOCK_SOU
 
 export interface MiaomiaoReviewRemarkBlock {
   status?: string
+  priority?: BatchAiReviewPriority
+  priorityReason?: string
   conclusion?: string
   reason?: string
   suggestion?: string
@@ -141,6 +144,28 @@ export function getMiaomiaoEvidenceHighlights(
   ])
 }
 
+function cardEvidenceKey(value: string): string {
+  return metadataKey(value)
+    .replace(/^(?:本喵)?语言常识：\s*/, '')
+    .replace(/[。.!！；;]+$/, '')
+}
+
+export function getMiaomiaoCardEvidence(review: MiaomiaoReviewRemarkBlock) {
+  const displayed = [review.conclusion, review.reason, review.suggestion, review.pronunciation,
+    review.commonness?.daily, review.commonness?.authority].flatMap(value => value ? [value] : [])
+  const seen = new Set(displayed.flatMap(value => [value, ...value.split(/[；;]/)]).map(cardEvidenceKey))
+  const sourceFields = new Set(review.sources.map(source => metadataKey(`来源：${source}`)))
+  const evidence = review.evidence.filter(line => {
+    const key = cardEvidenceKey(line)
+    if (!key || seen.has(key) || sourceFields.has(metadataKey(line))) return false
+    seen.add(key)
+    return true
+  })
+  const text = [...displayed, ...evidence].map(metadataKey)
+  const sources = review.sources.filter(source => !text.some(line => line.includes(metadataKey(source))))
+  return { evidence, sources }
+}
+
 export function parseMiaomiaoReviewRemark(remark?: string | null): ParsedMiaomiaoReviewRemark {
   if (!remark) return { baseRemark: '' }
 
@@ -161,11 +186,15 @@ export function parseMiaomiaoReviewRemark(remark?: string | null): ParsedMiaomia
   const daily = getLineValue(latestBlock, '常用')
   const authority = getLineValue(latestBlock, '收录')
   const suggestedOrder = parseSuggestedOrder(getLineValue(latestBlock, '排序'))
+  const priorityLine = getLineValue(latestBlock, '优先级')?.match(/^([高中低])(?:（(.*)）|\((.*)\))?$/)
+  const priority = (['high', 'medium', 'low'] as const).find(value => MIAOMIAO_PRIORITY_LABELS[value] === priorityLine?.[1])
+  const priorityReason = (priorityLine?.[2] ?? priorityLine?.[3])?.trim()
 
   return {
     baseRemark,
     review: {
       status: getLineValue(latestBlock, '本喵复审'),
+      ...(priority ? { priority, priorityReason: priorityReason || undefined } : {}),
       conclusion: getLineValue(latestBlock, '结论'),
       reason: getLineValue(latestBlock, '理由'),
       suggestion: getLineValue(latestBlock, '建议'),
@@ -179,6 +208,26 @@ export function parseMiaomiaoReviewRemark(remark?: string | null): ParsedMiaomia
       reviewDigest: getLineValue(latestBlock, '校验'),
     },
   }
+}
+
+export function stripLegacyBotReviewText({ baseRemark, review }: ParsedMiaomiaoReviewRemark): string {
+  if (!review) return baseRemark
+
+  let afterBotHeader = false
+  let continuedFields = false
+  return baseRemark.split(/\r\n|[\r\n\u2028\u2029]/).filter(line => {
+    const text = line.trim()
+    const header = text.match(/^喵喵审词[：:](.*)$/)
+    if (header) {
+      afterBotHeader = true
+      continuedFields = !header[1].trim()
+      return false
+    }
+    if (continuedFields && /^(?:读音|拼音|来源|证据|自动审核)[：:\s]/.test(text)) return false
+    if (text) continuedFields = false
+    // shortcut: Unrecognised lines may be author text; add patterns when the bot's format is known.
+    return !afterBotHeader || !/^(?:本喵(?:已|认为|建议|判断)|存在不确定项|「[^」]+」\s*(?:读音由|较\s*「[^」]+」\s*更常用))/.test(text)
+  }).join('\n').trim()
 }
 
 export function stripMiaomiaoReviewRemark(remark?: string | null): string {

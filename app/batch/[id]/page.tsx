@@ -315,7 +315,8 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
       </div>
     )
   }
-  const renderItem = (id: number, stale: boolean, previewRejection?: string, inDiff = false) => {
+  const hideMiaomiaoReview = batchData.status === 'Draft'
+  const renderItem = (id: number, stale: boolean, previewRejection?: string, inDiff = false, previewRemark?: string) => {
     const item = pullRequestById.get(id)
     if (!item) return null
     const canResubmit = isOwner && batchData.status !== 'Draft' && item.status === 'Rejected' && !item.appliedAt
@@ -323,7 +324,8 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
       ? item.reviewNotes?.find(note => note.decision === 'Rejected')?.reason || previewRejection
       : previewRejection
     return (
-      <ItemReviewDetail publicView item={item} waitingOnDependencies={waitingOnDependencies.has(id)}
+      <ItemReviewDetail publicView hideMiaomiaoReview={hideMiaomiaoReview}
+        item={!item.remark && previewRemark ? { ...item, remark: previewRemark } : item} waitingOnDependencies={waitingOnDependencies.has(id)}
         rejectedReason={rejectedReason}
         actions={(
           <div className="flex items-center gap-2">
@@ -529,6 +531,7 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
 
         <div className="space-y-6">
           <BatchPreview batchId={resolvedParams.id} expectedContentVersion={batchData.contentVersion}
+            hideMiaomiaoReview={hideMiaomiaoReview}
             reviewedFromContentVersion={reviewedFromContentVersion} onNewerReviewPreview={refreshBatchDetails}
             reviewItems={batchData.pullRequests} renderReviewItem={renderItem} renderLineActions={renderVote}
             onReorder={canEdit && isPrivateStatus ? handleReorder : undefined}

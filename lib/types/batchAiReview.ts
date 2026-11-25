@@ -3,12 +3,15 @@ import type { PhraseType } from '@/lib/constants/phraseTypes'
 export type BatchAiReviewVerdict = 'pass' | 'needs_attention' | 'manual_review'
 export type BatchAiReviewStatus = 'pass' | 'attention' | 'manual_review'
 export type BatchAiReviewSeverity = 'success' | 'warning' | 'danger' | 'default'
+export type BatchAiReviewPriority = 'high' | 'medium' | 'low'
 
 export interface BatchAiReviewRecord {
   reviewedBy: 'Miaomiao'
   source: 'bot-remark' | 'bot-llm' | 'system'
   summary: string
   pronunciation?: string
+  priority?: BatchAiReviewPriority
+  priorityReason?: string
   commonness?: { daily?: string; authority?: string }
   sources: string[]
   /** Explicit dictionary, encyclopedia, or other named reference sources. */
@@ -43,6 +46,8 @@ export interface BatchAiReviewItem {
   title: string
   reasons: string[]
   suggestions: string[]
+  priority?: BatchAiReviewPriority
+  priorityReason?: string
   reviewRecord?: BatchAiReviewRecord
   suggestedOrder?: { code: string; type: string; orderedWords: string[]; chainDigest: string }
   referenceEvidence?: BatchReferenceEvidence

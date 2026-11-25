@@ -4,7 +4,9 @@ import { act, createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { expect, it, vi } from 'vitest'
-import BatchPreview from './BatchPreview'
+import BatchPreview, { MiaomiaoDiffReview } from './BatchPreview'
+import ItemReviewDetail, { type ItemReviewDetailItem } from './ItemReviewDetail'
+import { parseMiaomiaoReviewRemark } from '@/lib/services/miaomiaoReviewRemark'
 
 const useAPI = vi.hoisted(() => vi.fn())
 vi.mock('@/lib/hooks/useSWR', () => ({ useAPI }))
@@ -16,6 +18,108 @@ const render = (lineActionItems: { id: number; label: string }[], expectedConten
     lineActionItems,
     renderLineActions: id => createElement('button', null, 'action-' + id),
 }))
+
+const reviewedRemark = [
+    '作者备注',
+    '喵喵审词：读音 ōu biāo；来源 暂无；',
+    '本喵已按语言常识审过。',
+    '--- miao-review:start ---',
+    '本喵复审：需复核',
+    '优先级：高（检查编码）',
+    '结论：词面成立',
+    '理由：大众通行；候选待查',
+    '建议：核对候选',
+    '读音：ōu biāo',
+    '证据：读音：ōu biāo',
+    '证据：本喵语言常识：大众通行。',
+    '证据：汉典有例句。',
+    '证据：汉典有例句',
+    '常用：日常高频',
+    '收录：离线词典已收录',
+    '来源：汉典、规范词典',
+    '时间：2026-11-25T00:00:00Z',
+    '--- miao-review:end ---',
+].join('\n')
+
+it('renders priority and deduplicated card fields in display order', () => {
+    const review = parseMiaomiaoReviewRemark(reviewedRemark).review!
+    const card = document.createElement('div')
+    card.innerHTML = renderToStaticMarkup(createElement(MiaomiaoDiffReview, { review }))
+    expect(card.querySelector('section > div')?.textContent).toBe('本喵复审需复核高优先级检查编码2026-11-25 00:00:00 UTC')
+    expect([...card.querySelectorAll('dt, dd')].map(node => node.textContent)).toEqual([
+        '结论', '词面成立', '理由', '大众通行；候选待查', '建议', '核对候选',
+        '读音', 'ōu biāo', '证据', '汉典有例句。', '常用', '日常高频', '收录', '离线词典已收录', '来源', '规范词典',
+    ])
+})
+
+it('hides a structured card in a draft preview without hiding legacy-only text', () => {
+    const reviewed = { ...phrase('欧标', 'aa'), remark: reviewedRemark }
+    const legacy = { ...phrase('美标', 'bb'), remark: '喵喵审词：读音 měi biāo；来源 暂无；' }
+    useAPI.mockReturnValue({ data: { contentVersion: 1, preview: {
+        changes: [{ phraseType: 'Phrase', codes: ['aa', 'bb'], before: [], after: [reviewed, legacy], beforeStartLine: 1,
+            diffs: [{ type: 'add', itemId: 1, phrase: reviewed }, { type: 'add', itemId: 2, phrase: legacy }] }],
+        rejected: [], summary: { added: 2, modified: 0, deleted: 0, rejected: 0 },
+    } } })
+    const html = renderToStaticMarkup(createElement(BatchPreview, { batchId: 'draft', hideMiaomiaoReview: true }))
+    expect(html).not.toMatch(/本喵复审|本喵已按|ōu biāo/)
+    expect(html).toContain('作者备注')
+    expect(html).toContain(legacy.remark)
+})
+
+it.each([false, true])('keeps a single visible card through review and refresh (public: %s)', async publicView => {
+    const added = { ...phrase('欧标', 'aa'), remark: reviewedRemark }
+    const data = { contentVersion: 1, preview: {
+        changes: [{ phraseType: 'Phrase', codes: ['aa'], before: [], after: [added], beforeStartLine: 1,
+            diffs: [{ type: 'add', itemId: 1, phrase: added }] }],
+        rejected: [], summary: { added: 1, modified: 0, deleted: 0, rejected: 0 },
+    } }
+    const item: ItemReviewDetailItem = {
+        id: 1, word: added.word, code: null, weight: 100, status: 'Pending', action: 'Create',
+        remark: reviewedRemark, hasConflict: false, conflictReason: null, dependencies: [],
+        aiReview: { prId: 1, status: 'attention', severity: 'warning', title: '词面成立',
+            reasons: ['大众通行；候选待查', '离线参考读音不一致'], suggestions: ['核对候选'] },
+    }
+    const mutate = vi.fn().mockResolvedValue(undefined)
+    useAPI.mockReturnValue({ data, mutate })
+    const container = document.createElement('div')
+    const root = createRoot(container)
+    const draw = (status: ItemReviewDetailItem['status'], hideMiaomiaoReview = false) => act(() => root.render(createElement(BatchPreview, {
+        batchId: 'miao', expectedContentVersion: 1, reviewing: !publicView, hideMiaomiaoReview,
+        reviewItems: [item], renderReviewItem: () => createElement(ItemReviewDetail, {
+            item: { ...item, status }, publicView, hideMiaomiaoReview, waitingOnDependencies: false, actions: null,
+        }),
+    })))
+    const cards = () => container.querySelectorAll('section[aria-label="本喵复审"]')
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+    try {
+        await draw('Pending')
+        expect(cards()).toHaveLength(1)
+        const card = cards()[0]
+        expect(card.closest('[hidden]')).toBeNull()
+        const content = card.outerHTML
+        await draw('Approved')
+        useAPI.mockReturnValue({ data: { ...data }, isValidating: true, mutate })
+        await draw('Rejected')
+        expect(cards()[0]).toBe(card)
+        expect(card.outerHTML).toBe(content)
+
+        await act(() => container.querySelector<HTMLButtonElement>('button[aria-label="词条详情"]')!.click())
+        expect(container.textContent?.match(/词面成立/g)).toHaveLength(1)
+        expect(container.textContent).toContain('作者备注')
+        expect(container.textContent).toContain('离线参考读音不一致')
+        expect(container.textContent).not.toMatch(/喵喵审词|本喵已按|喵备注/)
+
+        if (publicView) {
+            await draw('Pending', true)
+            expect(cards()).toHaveLength(0)
+            expect(container.textContent).not.toMatch(/词面成立|离线参考读音不一致|喵喵审词/)
+            expect(container.textContent).toContain('作者备注')
+        }
+    } finally {
+        await act(() => root.unmount())
+        vi.unstubAllGlobals()
+    }
+})
 
 it('matches actions to the operation behind each changed line and keeps an unmapped operation available', () => {
     const before = [phrase('删除词', 'aa'), phrase('修改前', 'bb'), phrase('原候选', 'cc')]

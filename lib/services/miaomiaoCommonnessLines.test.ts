@@ -41,6 +41,30 @@ function reviewBlock(...lines: string[]): string {
 }
 
 describe('persisted Miaomiao commonness and order', () => {
+  it.each([['high', '高'], ['medium', '中'], ['low', '低']] as const)(
+    'round-trips %s priority on the parsed block, review record and item', async (priority, label) => {
+      const digest = '0123456789abcdef'
+      const reason = '需看（编码）\n第二行\u2028' + MIAOMIAO_REVIEW_BLOCK_END + '𠀀'.repeat(50)
+      const cleanReason = '需看（编码） 第二行 …' + '𠀀'.repeat(28)
+      const remark = formatMiaomiaoReviewRemark({ ...item, priority, priorityReason: reason }, generatedAt, digest)
+      expect(remark.split('\n')).toContain(`优先级：${label}（${cleanReason}）`)
+      expect(parseMiaomiaoReviewRemark(remark).review).toMatchObject({ priority, priorityReason: cleanReason, reviewDigest: digest })
+
+      const [result] = await buildBatchAiReviewItems([{ ...row, remark }], false)
+      expect(result).toMatchObject({
+        priority, priorityReason: cleanReason, status: 'attention', tier: 'look',
+        reviewRecord: { priority, priorityReason: cleanReason },
+      })
+    },
+  )
+
+  it('handles optional and unrecognised priority values', () => {
+    expect(parseMiaomiaoReviewRemark(formatMiaomiaoReviewRemark({ ...item, priority: 'low' }, generatedAt)).review)
+      .toMatchObject({ priority: 'low', priorityReason: undefined })
+    expect(formatMiaomiaoReviewRemark({ ...item, priorityReason: '省略优先级' }, generatedAt)).not.toContain('优先级：')
+    expect(parseMiaomiaoReviewRemark(reviewBlock('优先级：错误（测试）')).review?.priority).toBeUndefined()
+  })
+
   it('round-trips commonness and suggested order in their own fields', async () => {
     const reviewDigest = '0123456789abcdef'
     const remark = formatMiaomiaoReviewRemark(item, generatedAt, reviewDigest)

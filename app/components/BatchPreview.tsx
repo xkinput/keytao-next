@@ -3,7 +3,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type
 import { Button, Chip, Spinner } from '@/lib/heroui-compat'
 import { AlertTriangle, ArrowDown, ArrowUp, Bot, CheckCircle2, GripVertical, RefreshCw, X } from 'lucide-react'
 import { useAPI } from '@/lib/hooks/useSWR'
-import { parseMiaomiaoReviewRemark, type MiaomiaoReviewRemarkBlock } from '@/lib/services/miaomiaoReviewRemark'
+import { getMiaomiaoCardEvidence, MIAOMIAO_PRIORITY_LABELS, parseMiaomiaoReviewRemark, stripLegacyBotReviewText,
+    type MiaomiaoReviewRemarkBlock } from '@/lib/services/miaomiaoReviewRemark'
 import type { ChainReorderTarget } from '@/lib/services/suggestedOrderService'
 
 interface PreviewPhrase {
@@ -56,6 +57,7 @@ interface PreviewResult {
 interface BatchPreviewProps {
     batchId: string
     defaultCollapsed?: boolean
+    hideMiaomiaoReview?: boolean
     reviewing?: boolean
     expectedContentVersion?: number
     reviewedFromContentVersion?: number
@@ -64,7 +66,7 @@ interface BatchPreviewProps {
     renderLineActions?: (itemId: number, stale?: boolean) => ReactNode
     lineActionItems?: readonly { id: number; label: string; code?: string | null }[]
     reviewItems?: readonly { id: number }[]
-    renderReviewItem?: (itemId: number, stale: boolean, rejectedReason?: string, inDiff?: boolean) => ReactNode
+    renderReviewItem?: (itemId: number, stale: boolean, rejectedReason?: string, inDiff?: boolean, previewRemark?: string) => ReactNode
     getReviewWeight?: (itemId: number) => number | undefined
     renderReviewControls?: (outdated: boolean) => ReactNode
     onReorder?: (code: string, type: string, movedPrId: number, target: ChainReorderTarget) => Promise<{
@@ -333,55 +335,65 @@ function formatReviewTime(value: string): string {
 
 export function MiaomiaoDiffReview({ review }: { review: MiaomiaoReviewRemarkBlock }) {
     const passed = Boolean(review.status?.includes('通过') && !review.status.includes('不通过'))
+    const { priority, priorityReason } = review
+    const { evidence, sources } = getMiaomiaoCardEvidence(review)
     const fields = [
         { label: '结论', value: review.conclusion },
         { label: '理由', value: review.reason },
         { label: '建议', value: review.suggestion },
         { label: '读音', value: review.pronunciation },
-        { label: '来源', value: review.sources.join('、') || undefined },
-        { label: '证据', value: review.evidence.join('；') || undefined },
+        { label: '证据', value: evidence.join('；') },
         { label: '常用', value: review.commonness?.daily },
         { label: '收录', value: review.commonness?.authority },
+        { label: '来源', value: sources.join('、') },
     ].filter((field): field is { label: string; value: string } => Boolean(field.value))
 
     return (
-        <div className="mt-2 max-w-5xl border-l-2 border-[#7aa2f7] bg-[#16192a] px-3 py-2 font-sans text-xs text-[#a9b1d6]">
-            <div className="mb-1.5 flex flex-wrap items-center gap-2">
-                <Bot className="h-3.5 w-3.5 text-[#7dcfff]" />
+        <section aria-label="本喵复审" className="mt-1 max-w-5xl rounded bg-[#16192a] px-2 py-1 font-sans text-xs text-[#a9b1d6]">
+            <div className="flex min-h-5 flex-wrap items-center gap-x-2 gap-y-0.5">
+                <Bot className="size-3.5 text-[#7dcfff]" aria-hidden="true" />
                 <span className="font-medium text-[#c0caf5]">本喵复审</span>
                 {review.status && (
-                    <span className={`inline-flex items-center gap-1 ${passed ? 'text-[#9ece6a]' : 'text-[#e0af68]'}`}>
-                        {passed ? <CheckCircle2 className="h-3 w-3" /> : <AlertTriangle className="h-3 w-3" />}
+                    <span className={`inline-flex items-center gap-1 ${passed ? 'text-[#9ece6a]' :
+                        review.status === '需人工确认' ? 'text-[#f7768e]' : 'text-[#e0af68]'}`}>
+                        {passed ? <CheckCircle2 className="size-3" aria-hidden="true" /> : <AlertTriangle className="size-3" aria-hidden="true" />}
                         {review.status}
                     </span>
                 )}
+                {priority && (
+                    <Chip size="sm" variant="flat" color={priority === 'high' ? 'danger' : priority === 'medium' ? 'warning' : 'default'}>
+                        {MIAOMIAO_PRIORITY_LABELS[priority]}优先级
+                    </Chip>
+                )}
+                {priorityReason && <span className="min-w-0 break-words">{priorityReason}</span>}
                 {review.generatedAt && (
-                    <span className="ml-auto text-[#565f89]">{formatReviewTime(review.generatedAt)}</span>
+                    <time className="ml-auto text-[#858db4]" dateTime={review.generatedAt}>{formatReviewTime(review.generatedAt)}</time>
                 )}
             </div>
             {fields.length > 0 && (
-                <div className="grid grid-cols-[2.5rem_minmax(0,1fr)] gap-x-2 gap-y-1 leading-5">
+                <dl className="mt-0.5 grid grid-cols-[auto_minmax(0,1fr)] gap-x-2 leading-4">
                     {fields.map(field => (
                         <div key={field.label} className="contents">
-                            <span className="text-[#7dcfff]">{field.label}</span>
-                            <span className="min-w-0 whitespace-normal break-words text-[#a9b1d6]">{field.value}</span>
+                            <dt className="text-[#7dcfff]">{field.label}</dt>
+                            <dd className="min-w-0 break-words">{field.value}</dd>
                         </div>
                     ))}
-                </div>
+                </dl>
             )}
-        </div>
+        </section>
     )
 }
 
-function PhraseLineContent({ phrase, colorClass, actions, reviewDetail, reviewWeight, keepPhraseRemark }: {
+function PhraseLineContent({ phrase, colorClass, actions, reviewDetail, reviewWeight, hideMiaomiaoReview }: {
     phrase: PreviewPhrase
     colorClass: string
     actions?: ReactNode
     reviewDetail?: ReactNode
     reviewWeight?: number
-    keepPhraseRemark?: boolean
+    hideMiaomiaoReview?: boolean
 }) {
-    const parsedRemark = !reviewDetail || keepPhraseRemark ? parseMiaomiaoReviewRemark(phrase.remark) : undefined
+    const parsedRemark = reviewDetail ? undefined : parseMiaomiaoReviewRemark(phrase.remark)
+    const baseRemark = parsedRemark && stripLegacyBotReviewText(parsedRemark)
 
     return (
         <div className="min-w-0 flex-1 px-3 py-1.5">
@@ -389,23 +401,23 @@ function PhraseLineContent({ phrase, colorClass, actions, reviewDetail, reviewWe
                 <div className={`whitespace-pre ${colorClass}`}>{formatPhraseLine(phrase, reviewWeight)}</div>
                 {actions && <div className="ml-auto shrink-0 font-sans text-[#c0caf5]">{actions}</div>}
             </div>
-            {parsedRemark?.baseRemark && (
+            {baseRemark && (
                 <div className="mt-1 whitespace-pre-wrap break-words font-sans text-xs text-[#737aa2]">
-                    {parsedRemark.baseRemark}
+                    {baseRemark}
                 </div>
             )}
-            {parsedRemark?.review && <MiaomiaoDiffReview review={parsedRemark.review} />}
+            {!hideMiaomiaoReview && parsedRemark?.review && <MiaomiaoDiffReview review={parsedRemark.review} />}
             {reviewDetail && <div className="font-sans text-[#c0caf5]">{reviewDetail}</div>}
         </div>
     )
 }
 
-function DiffView({ layout, renderLineActions, renderReviewItem, getReviewWeight, keepPhraseRemark, reorder }: {
+function DiffView({ layout, renderLineActions, renderReviewItem, getReviewWeight, hideMiaomiaoReview, reorder }: {
     layout: ReturnType<typeof prepareDiff>
     renderLineActions?: BatchPreviewProps['renderLineActions']
-    renderReviewItem?: (itemId: number) => ReactNode
+    renderReviewItem?: (itemId: number, previewRemark?: string) => ReactNode
     getReviewWeight?: BatchPreviewProps['getReviewWeight']
-    keepPhraseRemark?: boolean
+    hideMiaomiaoReview?: boolean
     reorder?: DiffReorder
 }) {
     const { hunks, actionRows } = layout
@@ -508,7 +520,8 @@ function DiffView({ layout, renderLineActions, renderReviewItem, getReviewWeight
             </div>
         )
     }
-    const detailFor = (itemId?: number) => itemId === undefined ? undefined : renderReviewItem?.(itemId)
+    const detailFor = (itemId: number | undefined, phrase: PreviewPhrase) =>
+        itemId === undefined ? undefined : renderReviewItem?.(itemId, phrase.remark)
     const weightFor = (itemId?: number) => itemId === undefined ? undefined : getReviewWeight?.(itemId)
 
     return (
@@ -529,7 +542,7 @@ function DiffView({ layout, renderLineActions, renderReviewItem, getReviewWeight
                                         <span className="w-12 text-right pr-3 py-1.5 select-none border-r border-[#2a2d3e] shrink-0 text-[#3b4261]">{line.oldLine}</span>
                                         <span className="w-12 text-right pr-3 py-1.5 select-none border-r border-[#2a2d3e] shrink-0 text-[#3b4261]">{line.newLine}</span>
                                         <span className="px-3 py-1.5 select-none w-6 shrink-0"> </span>
-                                        <PhraseLineContent phrase={line.phrase} colorClass="text-[#565f89]" />
+                                        <PhraseLineContent phrase={line.phrase} colorClass="text-[#565f89]" hideMiaomiaoReview={hideMiaomiaoReview} />
                                         {endDropTarget(line.phrase)}
                                     </div>
                                 )
@@ -541,7 +554,7 @@ function DiffView({ layout, renderLineActions, renderReviewItem, getReviewWeight
                                         <span className="w-12 text-right pr-3 py-1.5 select-none border-r border-[#5a2020] shrink-0 text-[#3b4261]"> </span>
                                         <span className="px-3 py-1.5 text-[#f7768e] select-none w-6 shrink-0">-</span>
                                         <PhraseLineContent phrase={line.phrase} colorClass="text-[#f7768e]"
-                                            actions={actionsFor(itemId)} reviewDetail={detailFor(itemId)} keepPhraseRemark={keepPhraseRemark} />
+                                            actions={actionsFor(itemId)} reviewDetail={detailFor(itemId, line.phrase)} hideMiaomiaoReview={hideMiaomiaoReview} />
                                     </div>
                                 )
                             }
@@ -552,8 +565,8 @@ function DiffView({ layout, renderLineActions, renderReviewItem, getReviewWeight
                                     <span className="w-12 text-right pr-3 py-1.5 select-none border-r border-[#2a5a2a] shrink-0 text-[#9ece6a] font-semibold">{line.newLine}</span>
                                     <span className="px-3 py-1.5 text-[#9ece6a] select-none w-6 shrink-0">+</span>
                                     <PhraseLineContent phrase={line.phrase} colorClass="text-[#9ece6a]"
-                                        actions={actionsFor(itemId, line.phrase)} reviewDetail={detailFor(itemId)}
-                                        reviewWeight={weightFor(itemId)} keepPhraseRemark={keepPhraseRemark} />
+                                        actions={actionsFor(itemId, line.phrase)} reviewDetail={detailFor(itemId, line.phrase)}
+                                        reviewWeight={weightFor(itemId)} hideMiaomiaoReview={hideMiaomiaoReview} />
                                     {endDropTarget(line.phrase)}
                                 </div>
                             )
@@ -572,7 +585,7 @@ function DiffView({ layout, renderLineActions, renderReviewItem, getReviewWeight
                                 <div key={diff.itemId ?? `remove:${phraseKey(diff.phrase)}`} className="flex gap-0 bg-[#3d1515]/40">
                                     <span className="px-3 py-1.5 text-[#f7768e] select-none w-6 shrink-0">-</span>
                                     <PhraseLineContent phrase={diff.phrase} colorClass="text-[#f7768e]"
-                                        actions={actionsFor(diff.itemId)} reviewDetail={detailFor(diff.itemId)} keepPhraseRemark={keepPhraseRemark} />
+                                        actions={actionsFor(diff.itemId)} reviewDetail={detailFor(diff.itemId, diff.phrase)} hideMiaomiaoReview={hideMiaomiaoReview} />
                                 </div>
                             )
                         }
@@ -581,8 +594,8 @@ function DiffView({ layout, renderLineActions, renderReviewItem, getReviewWeight
                                 <div key={diff.itemId ?? `add:${phraseKey(diff.phrase)}`} {...dropProps(diff.phrase)} className="relative flex gap-0 bg-[#1a3a1a]/40">
                                     <span className="px-3 py-1.5 text-[#9ece6a] select-none w-6 shrink-0">+</span>
                                     <PhraseLineContent phrase={diff.phrase} colorClass="text-[#9ece6a]"
-                                        actions={actionsFor(diff.itemId, diff.phrase)} reviewDetail={detailFor(diff.itemId)}
-                                        reviewWeight={weightFor(diff.itemId)} keepPhraseRemark={keepPhraseRemark} />
+                                        actions={actionsFor(diff.itemId, diff.phrase)} reviewDetail={detailFor(diff.itemId, diff.phrase)}
+                                        reviewWeight={weightFor(diff.itemId)} hideMiaomiaoReview={hideMiaomiaoReview} />
                                     {endDropTarget(diff.phrase)}
                                 </div>
                             )
@@ -592,13 +605,13 @@ function DiffView({ layout, renderLineActions, renderReviewItem, getReviewWeight
                                 <div key={diff.itemId ?? `modify:${phraseKey(diff.after)}`}>
                                     <div className="flex gap-0 bg-[#3d1515]/40">
                                         <span className="px-3 py-1.5 text-[#f7768e] select-none w-6 shrink-0">-</span>
-                                        <PhraseLineContent phrase={diff.before} colorClass="text-[#f7768e]" />
+                                        <PhraseLineContent phrase={diff.before} colorClass="text-[#f7768e]" hideMiaomiaoReview={hideMiaomiaoReview} />
                                     </div>
                                     <div {...dropProps(diff.after)} className="relative flex gap-0 bg-[#1a3a1a]/40">
                                         <span className="px-3 py-1.5 text-[#9ece6a] select-none w-6 shrink-0">+</span>
                                         <PhraseLineContent phrase={diff.after} colorClass="text-[#9ece6a]"
-                                            actions={actionsFor(diff.itemId, diff.after)} reviewDetail={detailFor(diff.itemId)}
-                                            reviewWeight={weightFor(diff.itemId)} keepPhraseRemark={keepPhraseRemark} />
+                                            actions={actionsFor(diff.itemId, diff.after)} reviewDetail={detailFor(diff.itemId, diff.after)}
+                                            reviewWeight={weightFor(diff.itemId)} hideMiaomiaoReview={hideMiaomiaoReview} />
                                         {endDropTarget(diff.after)}
                                     </div>
                                 </div>
@@ -637,7 +650,7 @@ export default function BatchPreview({ defaultCollapsed = false, onAddFirst, ...
 function BatchPreviewContent({
     batchId, reviewing = false, expectedContentVersion, reviewedFromContentVersion, onNewerReviewPreview,
     renderLineActions, lineActionItems, reviewCounts, reviewItems, renderReviewItem, getReviewWeight, renderReviewControls,
-    onReorder, canReorderItem,
+    onReorder, canReorderItem, hideMiaomiaoReview,
 }: BatchPreviewProps) {
     const [reviewLayout, setReviewLayout] = useState<PreviewResult>()
     const [publicLayout, setPublicLayout] = useState<{ contentVersion: number; preview: PreviewResult }>()
@@ -737,8 +750,8 @@ function BatchPreviewContent({
         }
     }
     const lineActions = renderLineActions && ((id: number) => renderLineActions(id, reviewing ? outdated : Boolean(stalePublicLines)))
-    const reviewDetail = renderReviewItem && ((id: number, reason?: string, inDiff = false) =>
-        renderReviewItem(id, reviewing ? outdated : inDiff && Boolean(stalePublicLines), reason, inDiff))
+    const reviewDetail = renderReviewItem && ((id: number, reason?: string, inDiff = false, previewRemark?: string) =>
+        renderReviewItem(id, reviewing ? outdated : inDiff && Boolean(stalePublicLines), reason, inDiff, previewRemark))
     const publicRejectionReasons = publicDetails
         ? new Map(compatiblePreview?.rejected?.map(op => [op.prId, op.reason]))
         : undefined
@@ -876,8 +889,9 @@ function BatchPreviewContent({
                                 </div>
                                 {groups.map((group, i) => (
                                     <DiffView key={group.codes.join(',') || i} layout={layouts.get(group)!}
-                                        renderLineActions={lineActions} renderReviewItem={reviewDetail && (id => reviewDetail(id, undefined, true))}
-                                        getReviewWeight={getReviewWeight} keepPhraseRemark={publicDetails}
+                                        renderLineActions={lineActions}
+                                        renderReviewItem={reviewDetail && ((id, remark) => reviewDetail(id, undefined, true, remark))}
+                                        getReviewWeight={getReviewWeight} hideMiaomiaoReview={hideMiaomiaoReview}
                                         reorder={onReorder && canReorderItem ? {
                                             drag, pendingId: reorderingId, disabled: outdated || Boolean(stalePublicLines), canMove: canReorderItem,
                                             move: (source, target) => void move(group, source, target),
