@@ -15,8 +15,11 @@ import {
   ModalHeader,
   ModalBody,
   ModalFooter,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
 } from '@/lib/heroui-compat'
-import { AlertTriangle, ArrowDown, Check, RefreshCw, X } from 'lucide-react'
+import { AlertTriangle, ArrowDown, Check, MessageSquareText, RefreshCw, X } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { mutate as globalMutate } from 'swr'
 import { BatchItemVoteCounts } from '@/app/components/BatchItemVote'
@@ -28,6 +31,7 @@ import { useAuthStore } from '@/lib/store/auth'
 import { usePageFilterStore } from '@/lib/store/pageFilter'
 import type { PhraseType } from '@/lib/constants/phraseTypes'
 import type { BatchAiReviewItem } from '@/lib/types/batchAiReview'
+import type { BatchReviewTier } from '@/lib/services/batchAiReviewService'
 
 type ReviewDecision = 'Approved' | 'Rejected'
 
@@ -41,8 +45,11 @@ interface ItemReviewTarget {
 interface PullRequest {
   id: number
   word: string | null
+  oldWord?: string | null
   code: string | null
   action: 'Create' | 'Change' | 'Delete'
+  targetPhraseId?: number | null
+  targetFingerprint?: string | null
   status: 'Pending' | ReviewDecision
   appliedAt?: string | null
   _count: { likedBy: number; dislikedBy: number }
@@ -72,7 +79,7 @@ interface PullRequest {
     word: string
     code: string
   }
-  aiReview?: BatchAiReviewItem
+  aiReview?: BatchAiReviewItem & { tier?: BatchReviewTier }
   conflicts: Array<{
     code: string
     currentWord: string | null
@@ -138,6 +145,42 @@ interface ItemReviewQueue {
 const decisionLabels: Record<ReviewDecision, string> = {
   Approved: '同意',
   Rejected: '拒绝',
+}
+
+const reviewTierFilters = ['all', 'manual', 'look', 'safe'] as const
+type ReviewTierFilter = typeof reviewTierFilters[number]
+
+const reviewTierLabels: Record<ReviewTierFilter, string> = {
+  all: '全部', manual: '需人工', look: '需查看', safe: '可放行',
+}
+
+function snapshotReviewLists(batch: BatchDetail, filter: ReviewTierFilter, previous?: {
+  initialApprovedIds: Set<number>; reviewing: boolean
+}) {
+  const dependencyPendingIds = new Set(batch.reviewProgress.dependencyPendingIds)
+  const initialApprovedIds = previous?.initialApprovedIds ?? new Set(batch.pullRequests
+    .filter(pr => pr.status === 'Approved' && (pr.appliedAt || !dependencyPendingIds.has(pr.id)))
+    .map(pr => pr.id))
+  const approved: PullRequest[] = []
+  const byTier: Record<BatchReviewTier, PullRequest[]> = { manual: [], look: [], safe: [] }
+  for (const pr of batch.pullRequests) {
+    if (initialApprovedIds.has(pr.id)) approved.push(pr)
+    else byTier[pr.aiReview?.tier ?? 'look'].push(pr)
+  }
+  const all = [...byTier.manual, ...byTier.look, ...byTier.safe]
+  const visible = filter === 'all' ? all : byTier[filter]
+  return {
+    filter, initialApprovedIds, approved, all, byTier, visible,
+    reviewing: previous?.reviewing ?? batch.status === 'Submitted',
+    byId: new Map(batch.pullRequests.map(pr => [pr.id, pr])),
+  }
+}
+
+function changedReviewContent(pr: PullRequest, latest: PullRequest) {
+  return pr.action !== latest.action || pr.type !== latest.type || pr.weight !== latest.weight ||
+    pr.oldWord !== latest.oldWord || (pr.word ?? pr.phrase?.word) !== (latest.word ?? latest.phrase?.word) ||
+    (pr.code ?? pr.phrase?.code) !== (latest.code ?? latest.phrase?.code) || pr.phrase?.id !== latest.phrase?.id ||
+    pr.targetPhraseId !== latest.targetPhraseId || pr.targetFingerprint !== latest.targetFingerprint
 }
 
 function getReviewErrorMessage(error: unknown, fallback: string) {
@@ -223,8 +266,14 @@ function ItemReviewDialog({
 
 export default function AdminBatchDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const resolvedParams = use(params)
+  const reviewerId = useAuthStore(state => state.user?.id)
+  return <AdminBatchReview key={`${resolvedParams.id}:${reviewerId ?? ''}`} resolvedParams={resolvedParams} />
+}
+
+function AdminBatchReview({ resolvedParams }: { resolvedParams: { id: string } }) {
   const router = useRouter()
-  const reviewPage = useRef<HTMLElement>(null)
+  const pendingReviewList = useRef<HTMLElement>(null)
+  const [reviewLists, setReviewLists] = useState<ReturnType<typeof snapshotReviewLists> | null>(null)
   const [selectedItemId, setSelectedItemId] = useState<number | null>(null)
   const [reviewTarget, setReviewTarget] = useState<ItemReviewTarget | null>(null)
   const reviewInFlight = useRef(false)
@@ -243,10 +292,14 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
   const detailUrl = `/api/admin/batches/${resolvedParams.id}`
   const { data: batch, error, isLoading, isValidating, mutate } = useAPI<BatchReviewData>(
     detailUrl,
-    { withAuth: true, keepPreviousData: false, revalidateOnFocus: false, revalidateOnReconnect: false }
+    { withAuth: true, keepPreviousData: true, revalidateOnFocus: false, revalidateOnReconnect: false }
   )
 
   const batchDataForReview = batch?.batch
+  // Freeze the lists for the review session while the SWR payload keeps updating.
+  if (batchDataForReview && !reviewLists) {
+    setReviewLists(snapshotReviewLists(batchDataForReview, 'all'))
+  }
   const reviewBusy = savingReviews || finalizing || checkingTarget !== null
   const activeReview = reviewTarget && reviewTarget.batchId === resolvedParams.id ? reviewTarget : null
   const contentVersion = batchDataForReview?.contentVersion
@@ -424,7 +477,7 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
   }
 
   const jumpToReviewItem = (direction: 1 | -1) => {
-    const rows = Array.from(reviewPage.current?.querySelectorAll<HTMLElement>('[data-review-item]') ?? [])
+    const rows = Array.from(pendingReviewList.current?.querySelectorAll<HTMLElement>('[data-review-item]') ?? [])
     if (direction === -1) rows.reverse()
     const currentIndex = rows.findIndex(row => Number(row.dataset.reviewItem) === selectedItemId)
     const queuedItems = reviewQueue.current?.entries
@@ -433,6 +486,12 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
     if (!next) return
     next.focus({ preventScroll: true })
     next.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' })
+  }
+
+  const changeReviewTierFilter = (filter: ReviewTierFilter) => {
+    if (!batchDataForReview || !reviewLists || reviewLists.filter === filter) return
+    setReviewLists(snapshotReviewLists(batchDataForReview, filter, reviewLists))
+    setSelectedItemId(null)
   }
 
   const onReviewShortcut = useEffectEvent((event: KeyboardEvent) => {
@@ -446,8 +505,15 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
     if (event.code === 'KeyJ' || event.code === 'KeyK') {
       event.preventDefault()
       jumpToReviewItem(event.code === 'KeyJ' ? 1 : -1)
+    } else if (event.code === 'KeyT' && reviewLists) {
+      event.preventDefault()
+      const next = (reviewTierFilters.indexOf(reviewLists.filter) + 1) % reviewTierFilters.length
+      pendingReviewList.current?.querySelector<HTMLElement>(`[data-tier-filter="${reviewTierFilters[next]}"]`)
+        ?.focus({ preventScroll: true })
+      changeReviewTierFilter(reviewTierFilters[next])
     } else if (selectedItemId !== null && (event.code === 'KeyA' || event.code === 'KeyR')) {
-      const row = reviewPage.current?.querySelector(`[data-review-item="${selectedItemId}"]:not([data-review-stale])`)
+      if (event.target instanceof HTMLElement && event.target.closest('[data-review-stale]')) return
+      const row = pendingReviewList.current?.querySelector(`[data-review-item="${selectedItemId}"]:not([data-review-stale])`)
       if (!row) return
       event.preventDefault()
       const decision = event.code === 'KeyA' ? 'Approved' : 'Rejected'
@@ -571,7 +637,7 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
     )
   }
 
-  if (!batch) {
+  if (!batch || !reviewLists) {
     return (
       <div className="min-h-screen flex items-center justify-center p-8">
         <Card className="max-w-md">
@@ -598,15 +664,14 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
   const canAskMiao = batchData.status !== 'Approved' && batchData.pullRequests.some(item => !item.appliedAt)
   const hasConflicts = batchData.pullRequests.some(pr => pr.conflictInfo?.hasConflict ?? pr.hasConflict)
   const dependencyPendingIds = new Set(batchData.reviewProgress?.dependencyPendingIds)
-  const pendingPullRequests: PullRequest[] = []
-  const approvedPullRequests: PullRequest[] = []
-  for (const pr of batchData.pullRequests) {
-    if (pr.status === 'Approved' && (pr.appliedAt || !dependencyPendingIds.has(pr.id))) {
-      approvedPullRequests.push(pr)
-    } else {
-      pendingPullRequests.push(pr)
-    }
-  }
+  const pendingPullRequests = reviewLists.visible
+  const approvedPullRequests = reviewLists.approved
+  const awaitingReview = (item: PullRequest) => item.status === 'Pending' ||
+    (!!batchData.reviewProgress.dependencyConflictCount && dependencyPendingIds.has(item.id))
+  const hasVisibleReviewItem = pendingPullRequests.some(pr => {
+    const latest = pullRequestById.get(pr.id)
+    return latest && !latest.appliedAt && !pendingDecisions[pr.id] && awaitingReview(latest) && !changedReviewContent(pr, latest)
+  })
   const activeItem = activeReview ? pullRequestById.get(activeReview.itemId) : undefined
   const reviewOutdated = !!activeReview && (
     activeReview.expectedContentVersion < (batch.reviewedFromContentVersion ?? batchData.contentVersion) ||
@@ -625,17 +690,15 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
     const pendingDecision = pendingDecisions[itemId]
     const busy = stale || finalizing || checkingTarget !== null || !!activeReview || !!pendingDecision || !!error || reviewSyncError
     const selectedItem = selectedItemId === itemId && canReview
-    const awaitingReview = item.status === 'Pending' ||
-      (!!batchData.reviewProgress?.dependencyConflictCount && dependencyPendingIds.has(itemId))
     const tally = item._count
 
     return (
       <div role="group" aria-label={`审核词条「${word}」`}
         tabIndex={canReview ? -1 : undefined}
         data-review-item={canReview ? itemId : undefined}
-        data-review-pending={canReview && awaitingReview && !pendingDecision && !stale}
+        data-review-pending={canReview && awaitingReview(item) && !pendingDecision && !stale}
         data-review-stale={stale || undefined}
-        onFocusCapture={() => setSelectedItemId(itemId)}
+        onFocusCapture={() => setSelectedItemId(stale ? null : itemId)}
         className={`flex shrink-0 items-center gap-0.5 rounded-lg ${selectedItem ? 'ring-2 ring-primary' : ''}`}>
         {tally && (
           <span className="me-2">
@@ -690,11 +753,57 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
     )
   }
 
-  const renderReviewFooter = (itemId: number) => {
-    const item = pullRequestById.get(itemId)
-    if (!item) return null
+  const renderReviewFooter = (itemId: number, pendingList = false) => {
+    const snapshotItem = reviewLists.byId.get(itemId)
+    if (!snapshotItem) return null
+    const latest = reviewLists.reviewing ? pullRequestById.get(itemId) : snapshotItem
+    const item = latest ?? snapshotItem
     const waitingOnDependencies = item.status === 'Approved' && !item.appliedAt && dependencyPendingIds.has(item.id)
     const notes = item.reviewNotes ?? []
+    const noteList = notes.length > 0 && (
+      <ol className="space-y-2" aria-label="词条审核记录">
+        {notes.map(note => (
+          <li key={note.id} className="text-small">
+            <div className="flex flex-wrap items-baseline gap-x-2">
+              <p className="font-medium">{decisionLabels[note.decision]} · {note.reviewer?.nickname || note.reviewer?.name || '审核员'}</p>
+              <time className="text-default-500" dateTime={note.createdAt}>
+                {new Date(note.createdAt).toLocaleString('zh-CN')}
+              </time>
+            </div>
+            {note.reason && <p className="whitespace-pre-wrap break-words text-default-600">{note.reason}</p>}
+          </li>
+        ))}
+      </ol>
+    )
+
+    if (reviewLists.reviewing) {
+      const status = item.status === 'Pending' ? '待审核' : item.status === 'Rejected' ? '已拒绝' :
+        waitingOnDependencies ? '已同意，等待依赖处理' : '已同意'
+      const color = item.status === 'Pending' ? 'default' : item.status === 'Rejected' ? 'danger' :
+        waitingOnDependencies ? 'warning' : 'success'
+      return (
+        <div className="mt-3 flex items-center justify-between gap-1 border-t border-default-200 pt-3">
+          <div className="flex min-w-0 items-center gap-1">
+            <Chip size="sm" color={color} variant="flat" className="min-w-0 truncate" title={status}>{status}</Chip>
+            {notes.length > 0 ? (
+              <Popover placement="top">
+                <PopoverTrigger className="grid size-8 shrink-0 cursor-pointer place-items-center rounded-md hover:bg-default-100"
+                  aria-label="词条审核记录" title="词条审核记录">
+                  <MessageSquareText className="size-4" aria-hidden="true" />
+                </PopoverTrigger>
+                <PopoverContent aria-label="词条审核记录" className="max-h-72 max-w-xs overflow-auto p-3">
+                  {noteList}
+                </PopoverContent>
+              </Popover>
+            ) : <span className="size-8 shrink-0" aria-hidden="true" />}
+          </div>
+          {pendingList && <div className="h-8 shrink-0">
+            {renderReviewActions(itemId, !latest || changedReviewContent(snapshotItem, latest))}
+          </div>}
+        </div>
+      )
+    }
+
     if (!waitingOnDependencies && !notes.length && item.status !== 'Rejected') return null
 
     return (
@@ -703,28 +812,14 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
         {waitingOnDependencies && (
           <Chip size="sm" color="warning" variant="flat">已同意，等待依赖处理</Chip>
         )}
-        {notes.length > 0 && (
-          <ol className="space-y-2" aria-label="词条审核记录">
-            {notes.map(note => (
-              <li key={note.id} className="text-small">
-                <div className="flex flex-wrap items-baseline gap-x-2">
-                  <p className="font-medium">{decisionLabels[note.decision]} · {note.reviewer?.nickname || note.reviewer?.name || '审核员'}</p>
-                  <time className="text-default-500" dateTime={note.createdAt}>
-                    {new Date(note.createdAt).toLocaleString('zh-CN')}
-                  </time>
-                </div>
-                {note.reason && <p className="whitespace-pre-wrap break-words text-default-600">{note.reason}</p>}
-              </li>
-            ))}
-          </ol>
-        )}
+        {noteList}
       </div>
     )
   }
 
   return (
     <div className="min-h-screen">
-      <main ref={reviewPage} className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="mb-6">
           <div className="flex items-center gap-2 mb-4">
             <Button
@@ -821,24 +916,26 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
           </Card>
         </div>
 
-        {canReview && (
+        {reviewLists.reviewing && (
           <div className="sticky top-16 z-20 mb-4 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-default-200 bg-background px-3 py-2">
             <Button size="sm" variant="flat" color="primary" aria-keyshortcuts="Alt+J"
               startContent={<ArrowDown className="size-4" aria-hidden="true" />}
               onPress={() => jumpToReviewItem(1)}
-              isDisabled={!batchData.reviewProgress?.pendingCount && !batchData.reviewProgress?.dependencyConflictCount}>
+              isDisabled={!canReview || !hasVisibleReviewItem}>
               下一个待审词条
             </Button>
             <p className="text-small text-default-600">
               <kbd>Alt+J</kbd> 下一个 <span aria-hidden="true">·</span> <kbd>Alt+K</kbd> 上一个
               {' '}<span aria-hidden="true">·</span> <kbd>Alt+A</kbd> 同意并跳到下一条
               {' '}<span aria-hidden="true">·</span> <kbd>Alt+R</kbd> 拒绝当前词条
+              {' '}<span aria-hidden="true">·</span> <kbd>Alt+T</kbd> 切换筛选
               {' '}<span>（Mac 用 Option ⌥）</span>
             </p>
           </div>
         )}
         <div className="space-y-6 mb-6">
-          <BatchPreview batchId={resolvedParams.id} reviewing expectedContentVersion={batchData.contentVersion}
+          <BatchPreview batchId={resolvedParams.id}
+            defaultCollapsed={batchData.pullRequests.length > 200} reviewing expectedContentVersion={batchData.contentVersion}
             reviewedFromContentVersion={canReview ? batch.reviewedFromContentVersion : undefined}
             reviewCounts={canReview ? {
               pending: pendingReviewCount,
@@ -846,12 +943,26 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
             } : undefined}
             onNewerReviewPreview={refreshReviewDetails}
             lineActionItems={lineActionItems} renderLineActions={renderReviewActions} />
-          <section aria-labelledby="pending-item-reviews">
+          <section ref={pendingReviewList} aria-labelledby="pending-item-reviews">
             <h3 id="pending-item-reviews" className="text-xl font-semibold">
               待审核 <span className="text-default-500">{pendingPullRequests.length}</span>
             </h3>
+            {reviewLists.reviewing && (
+              <div className="mt-2 flex flex-wrap gap-2" role="group" aria-label="待审核筛选">
+                {reviewTierFilters.map(filter => (
+                  <Button key={filter} type="button" size="sm" variant="flat" className="rounded-full tabular-nums"
+                    color={reviewLists.filter === filter ? 'primary' : undefined}
+                    data-tier-filter={filter} aria-pressed={reviewLists.filter === filter}
+                    aria-keyshortcuts={reviewLists.filter === filter ? 'Alt+T' : undefined}
+                    onPress={() => changeReviewTierFilter(filter)}>
+                    {reviewTierLabels[filter]} {filter === 'all' ? reviewLists.all.length : reviewLists.byTier[filter].length}
+                  </Button>
+                ))}
+              </div>
+            )}
             {pendingPullRequests.length > 0 ? (
-              <BatchPRList pullRequests={pendingPullRequests} renderItemFooter={renderReviewFooter} />
+              <BatchPRList pullRequests={pendingPullRequests} getItemStatus={id => pullRequestById.get(id)}
+                renderItemFooter={id => renderReviewFooter(id, true)} />
             ) : <p className="mt-2 text-small text-default-500">暂无待审核词条。</p>}
           </section>
           <section aria-labelledby="approved-item-reviews">
@@ -859,7 +970,8 @@ export default function AdminBatchDetailPage({ params }: { params: Promise<{ id:
               已通过 <span className="text-default-500">{approvedPullRequests.length}</span>
             </h3>
             {approvedPullRequests.length > 0 ? (
-              <BatchPRList pullRequests={approvedPullRequests} renderItemFooter={renderReviewFooter} />
+              <BatchPRList pullRequests={approvedPullRequests} getItemStatus={id => pullRequestById.get(id)}
+                renderItemFooter={renderReviewFooter} />
             ) : <p className="mt-2 text-small text-default-500">暂无已通过词条。</p>}
           </section>
           {(error || reviewSyncError) && (

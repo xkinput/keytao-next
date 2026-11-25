@@ -1,6 +1,6 @@
 'use client'
-import { useCallback, useEffect, useMemo, type ReactNode } from 'react'
-import { Chip, Spinner } from '@/lib/heroui-compat'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { Button, Chip, Spinner } from '@/lib/heroui-compat'
 import { AlertTriangle, Bot, CheckCircle2, X } from 'lucide-react'
 import { useAPI } from '@/lib/hooks/useSWR'
 import { parseMiaomiaoReviewRemark, type MiaomiaoReviewRemarkBlock } from '@/lib/services/miaomiaoReviewRemark'
@@ -54,6 +54,7 @@ interface PreviewResult {
 
 interface BatchPreviewProps {
     batchId: string
+    defaultCollapsed?: boolean
     reviewing?: boolean
     expectedContentVersion?: number
     reviewedFromContentVersion?: number
@@ -431,7 +432,23 @@ function DiffView({ group, layout, renderLineActions }: {
     )
 }
 
-export default function BatchPreview({
+export default function BatchPreview({ defaultCollapsed = false, ...props }: BatchPreviewProps) {
+    const [collapsible] = useState(defaultCollapsed)
+    const [expanded, setExpanded] = useState(false)
+    if (!collapsible) return <BatchPreviewContent {...props} />
+
+    return (
+        <div className="space-y-4">
+            <Button type="button" size="sm" variant="flat" aria-expanded={expanded}
+                onPress={() => setExpanded(value => !value)}>
+                {expanded ? '收起差异' : '展开差异'}
+            </Button>
+            {expanded && <BatchPreviewContent {...props} />}
+        </div>
+    )
+}
+
+function BatchPreviewContent({
     batchId, reviewing = false, expectedContentVersion, reviewedFromContentVersion, onNewerReviewPreview,
     renderLineActions, lineActionItems, reviewCounts,
 }: BatchPreviewProps) {

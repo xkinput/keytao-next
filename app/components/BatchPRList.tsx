@@ -14,6 +14,7 @@ import { AlertTriangle, Bot, History } from 'lucide-react'
 import CodePhrasesPopover from './CodePhrasesPopover'
 import { getPhraseTypeLabel, type PhraseType } from '@/lib/constants/phraseTypes'
 import type { BatchAiReviewItem, BatchAiReviewStatus } from '@/lib/types/batchAiReview'
+import type { BatchReviewTier } from '@/lib/services/batchAiReviewService'
 import { getMiaomiaoEvidenceHighlights } from '@/lib/services/miaomiaoReviewRemark'
 
 interface PullRequest {
@@ -41,7 +42,7 @@ interface PullRequest {
         word: string
         code: string
     }
-    aiReview?: BatchAiReviewItem
+    aiReview?: BatchAiReviewItem & { tier?: BatchReviewTier }
     conflicts: Array<{
         code: string
         currentWord: string | null
@@ -69,6 +70,7 @@ interface BatchPRListProps {
     pullRequests: PullRequest[]
     canEdit?: boolean
     onAddFirst?: () => void
+    getItemStatus?: (id: number) => Pick<PullRequest, 'aiReview' | 'hasConflict' | 'conflictInfo'> | undefined
     renderItemFooter?: (id: number) => ReactNode
 }
 
@@ -76,6 +78,7 @@ export default function BatchPRList({
     pullRequests,
     canEdit,
     onAddFirst,
+    getItemStatus,
     renderItemFooter
 }: BatchPRListProps) {
     const getActionText = (action: string) => {
@@ -119,6 +122,41 @@ export default function BatchPRList({
             return 'border-danger-200 bg-danger-50/70 dark:bg-danger-100/10'
         }
         return 'border-warning-200 bg-warning-50/70 dark:bg-warning-100/10'
+    }
+
+    const renderStatusChips = (pr: PullRequest) => {
+        const { aiReview, conflictInfo, hasConflict } = getItemStatus?.(pr.id) ?? pr
+        const hasVisibleConflict = getItemStatus
+            ? conflictInfo?.hasConflict || hasConflict
+            : conflictInfo?.hasConflict ?? hasConflict
+        const tier = aiReview?.tier ?? 'look'
+        const botChip = (
+            <Chip color="primary" size="sm" variant="flat" className={aiReview?.reviewRecord ? undefined : 'invisible'}
+                startContent={<Bot className="w-3 h-3" />}>
+                喵审
+            </Chip>
+        )
+        return (
+            <>
+                {aiReview?.reviewRecord ? <Tooltip content={aiReview.reviewRecord.summary}>{botChip}</Tooltip>
+                    : getItemStatus && botChip}
+                {getItemStatus ? (
+                    <Chip color={tier === 'manual' ? 'danger' : tier === 'safe' ? 'success' : 'warning'} size="sm" variant="flat">
+                        {tier === 'manual' ? '需人工' : tier === 'safe' ? '可放行' : '需查看'}
+                    </Chip>
+                ) : aiReview && aiReview.status !== 'pass' && (
+                    <Chip color={getAiStatusColor(aiReview.status)} size="sm" variant="flat">
+                        {getAiStatusText(aiReview.status)}
+                    </Chip>
+                )}
+                {(getItemStatus || hasVisibleConflict) && (
+                    <Chip color="warning" size="sm" variant="flat" className={hasVisibleConflict ? undefined : 'invisible'}
+                        startContent={<AlertTriangle className="w-3 h-3" />}>
+                        冲突
+                    </Chip>
+                )}
+            </>
+        )
     }
 
     if (pullRequests.length === 0) {
@@ -204,23 +242,7 @@ export default function BatchPRList({
                             >
                                 <History className="h-4 w-4" />
                             </Link>
-                            {pr.aiReview?.reviewRecord && (
-                                <Tooltip content={pr.aiReview.reviewRecord.summary}>
-                                    <Chip color="primary" size="sm" variant="flat" startContent={<Bot className="w-3 h-3" />}>
-                                        喵审
-                                    </Chip>
-                                </Tooltip>
-                            )}
-                            {pr.aiReview && pr.aiReview.status !== 'pass' && (
-                                <Chip color={getAiStatusColor(pr.aiReview.status)} size="sm" variant="flat">
-                                    {getAiStatusText(pr.aiReview.status)}
-                                </Chip>
-                            )}
-                            {(pr.conflictInfo?.hasConflict ?? pr.hasConflict) && (
-                                <Chip color="warning" size="sm" variant="flat" startContent={<AlertTriangle className="w-3 h-3" />}>
-                                    冲突
-                                </Chip>
-                            )}
+                            {renderStatusChips(pr)}
                         </div>
                     </CardHeader>
                     <CardBody>

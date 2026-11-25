@@ -109,8 +109,9 @@ export async function getAdminBatchReviewDetail(id: string, includeVoteCounts = 
     dynamicDependedBy.get(resolverPR.id)!.push(byEntry)
   }
 
+  const conflictsById = new Map(conflictResults.map(result => [result.id, result]))
   const enrichedPRs = batch.pullRequests.map(pr => {
-    const conflictResult = conflictResults.find(result => result.id === String(pr.id))
+    const conflictResult = conflictsById.get(String(pr.id))
     return {
       ...pr,
       weight: conflictResult?.calculatedWeight ?? pr.weight,

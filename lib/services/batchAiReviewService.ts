@@ -19,6 +19,9 @@ import {
 } from './referenceReviewService'
 
 type PullRequestAction = 'Create' | 'Change' | 'Delete'
+export type BatchReviewTier = 'manual' | 'look' | 'safe'
+
+type ReviewItemWithTier = BatchAiReviewItem & { tier?: BatchReviewTier }
 
 interface ReviewPullRequest {
   id: number
@@ -30,6 +33,8 @@ interface ReviewPullRequest {
   weight: number | null
   remark: string | null
   hasConflict?: boolean
+  needsManualReview?: boolean
+  _count?: { likedBy: number; dislikedBy: number }
   conflictReason?: string | null
   conflictInfo?: ConflictInfo | null
   phrase?: {
@@ -216,10 +221,27 @@ function mergeReviewRecords(
 }
 
 function parseMiaomiaoReviewStatus(value: string | undefined): BatchAiReviewStatus {
-  const normalized = value || ''
-  if (normalized.includes('通过')) return 'pass'
-  if (normalized.includes('人工') || normalized.includes('不通过')) return 'manual_review'
+  const normalized = value?.trim() ?? ''
+  if (normalized.includes('不通过') || normalized.includes('人工')) return 'manual_review'
+  if (/^(?:可)?通过[。.!！]?$/.test(normalized)) return 'pass'
   return 'attention'
+}
+
+export function deriveBatchReviewTier(
+  item: Pick<ReviewPullRequest, 'action' | 'needsManualReview' | 'hasConflict' | '_count'> & {
+    conflictInfo?: Pick<ConflictInfo, 'hasConflict'> | null
+  },
+  status: BatchAiReviewStatus | undefined,
+  hasCodeMove: boolean,
+): BatchReviewTier {
+  if (status === 'manual_review' || item.needsManualReview || item.hasConflict || item.conflictInfo?.hasConflict) {
+    return 'manual'
+  }
+  if (status === 'pass' && item.action !== 'Change' && (item.action !== 'Delete' || hasCodeMove) &&
+    item._count && item._count.dislikedBy <= item._count.likedBy) {
+    return 'safe'
+  }
+  return 'look'
 }
 
 function severityForStatus(status: BatchAiReviewStatus): BatchAiReviewSeverity {
@@ -380,7 +402,7 @@ function buildReviewItem(
   pr: ReviewPullRequest,
   moves: MovePair[],
   referenceByWord: Map<string, ReferenceWordData>,
-): BatchAiReviewItem {
+): ReviewItemWithTier {
   const word = getWord(pr)
   const code = getCode(pr)
   const parsedRemark = parseStructuredRemark(pr.remark)
@@ -470,8 +492,7 @@ function buildReviewItem(
     reasons.splice(0, reasons.length, ...structuredReview.reasons)
     suggestions.splice(0, suggestions.length, ...structuredReview.suggestions)
 
-    const moveAfterStructuredReview = findMoveForPr(moves, pr)
-    if (pr.action === 'Delete' && !moveAfterStructuredReview) {
+    if (pr.action === 'Delete' && !move) {
       raiseStatus(state, 'manual_review', 'danger')
       addUnique(reasons, '这是纯删除操作，需要管理员确认。')
       addUnique(suggestions, '确认该词确实不应存在；若是改码，请补齐新增侧。')
@@ -504,6 +525,7 @@ function buildReviewItem(
     if (reviewRecord) return '喵喵已审'
     return '系统检查未发现硬性问题'
   })()
+  const tierStatus = state.status === 'pass' && !reviewRecord ? undefined : state.status
 
   return {
     prId: pr.id,
@@ -514,6 +536,8 @@ function buildReviewItem(
     suggestions: suggestions.length > 0 ? suggestions : ['可结合编码链位置做最终确认。'],
     reviewRecord,
     referenceEvidence,
+    // Only the admin detail supplies vote counts for the display tier.
+    ...(pr._count ? { tier: deriveBatchReviewTier(pr, tierStatus, Boolean(move)) } : {}),
   }
 }
 
@@ -874,7 +898,7 @@ async function prepareBatchAiReviewItems(pullRequests: ReviewPullRequest[]) {
   return { items, moves, referenceByWord }
 }
 
-export async function buildBatchAiReviewItems(pullRequests: ReviewPullRequest[]): Promise<BatchAiReviewItem[]> {
+export async function buildBatchAiReviewItems(pullRequests: ReviewPullRequest[]): Promise<ReviewItemWithTier[]> {
   const { items } = await prepareBatchAiReviewItems(pullRequests)
   return items
 }
