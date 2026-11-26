@@ -62,7 +62,7 @@ export function extractKeytaoDownloadInfo(assets: readonly ReleaseAssetLike[]): 
   }
 
   return {
-    downloadUrl: urls.linux ?? urls.macos ?? Object.values(urls)[0] ?? null,
+    downloadUrl: null,
     downloadUrls: urls,
   }
 }
