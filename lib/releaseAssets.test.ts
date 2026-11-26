@@ -45,7 +45,7 @@ describe('KeyTao release asset matching', () => {
 
     expect(findUniversalKeytaoAsset(assets)).toBeUndefined()
     expect(extractKeytaoDownloadInfo(assets)).toEqual({
-      downloadUrl: 'https://example/linux.zip',
+      downloadUrl: null,
       downloadUrls: {
         linux: 'https://example/linux.zip',
         macos: 'https://example/mac.zip',
