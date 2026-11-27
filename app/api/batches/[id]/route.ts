@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma'
 import { checkIsAdmin } from '@/lib/adminAuth'
 import { buildBatchAiReviewItems } from '@/lib/services/batchAiReviewService'
 import { getItemReviewProgress, reviewNotesInclude } from '@/lib/services/batchItemReview'
+import { isBotPreapprovedOnlySubmittedBatch } from '@/lib/services/batchWithdrawService'
 
 // GET /api/batches/:id - Get batch details
 export async function GET(
@@ -139,9 +140,14 @@ export async function GET(
       }))
       : enrichedPRs
 
+    const canWithdraw = batch.status === 'Submitted' && (
+      !batch.itemReviewStarted || await isBotPreapprovedOnlySubmittedBatch(prisma, batch)
+    )
+
     return NextResponse.json({
       batch: {
         ...batch,
+        canWithdraw,
         pullRequests: reviewedPRs,
         reviewProgress: getItemReviewProgress(batch.pullRequests, conflictResults),
       }

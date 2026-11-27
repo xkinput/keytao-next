@@ -9,6 +9,14 @@ const mocks = vi.hoisted(() => {
       updateMany: vi.fn(),
       findUniqueOrThrow: vi.fn(),
     },
+    pullRequest: {
+      findFirst: vi.fn(),
+      updateMany: vi.fn(),
+    },
+    pullRequestReviewNote: {
+      findFirst: vi.fn(),
+      deleteMany: vi.fn(),
+    },
   }
   return {
     getSession: vi.fn(),
@@ -17,6 +25,8 @@ const mocks = vi.hoisted(() => {
     prisma: {
       apiKey: { findUnique: vi.fn(), update: vi.fn() },
       batch: { findUnique: vi.fn() },
+      pullRequest: { findFirst: vi.fn() },
+      pullRequestReviewNote: { findFirst: vi.fn() },
       $transaction: vi.fn(),
     },
   }
@@ -48,6 +58,12 @@ beforeEach(() => {
   mocks.prisma.$transaction.mockImplementation(async (callback) => callback(mocks.tx))
   mocks.tx.batch.updateMany.mockResolvedValue({ count: 1 })
   mocks.tx.batch.findUniqueOrThrow.mockResolvedValue(withdrawnBatch)
+  mocks.prisma.pullRequest.findFirst.mockResolvedValue(null)
+  mocks.prisma.pullRequestReviewNote.findFirst.mockResolvedValue(null)
+  mocks.tx.pullRequest.findFirst.mockResolvedValue(null)
+  mocks.tx.pullRequest.updateMany.mockResolvedValue({ count: 0 })
+  mocks.tx.pullRequestReviewNote.findFirst.mockResolvedValue(null)
+  mocks.tx.pullRequestReviewNote.deleteMany.mockResolvedValue({ count: 0 })
 })
 
 describe('POST /api/batches/[id]/withdraw', () => {
@@ -59,6 +75,60 @@ describe('POST /api/batches/[id]/withdraw', () => {
       where: { id: 'batch-1', creatorId: 1, status: 'Submitted', contentVersion: 4, itemReviewStarted: false },
       data: { status: 'Draft', contentVersion: { increment: 1 } },
     })
+  })
+
+  it('withdraws a bot-preapproved-only submitted batch and resets bot approvals', async () => {
+    mocks.prisma.batch.findUnique.mockResolvedValue({
+      ...submittedBatch,
+      itemReviewStarted: true,
+      reviewerId: null,
+      reviewedAt: null,
+      syncTaskId: null,
+    })
+    const response = await POST(createRequest(legacyPath), context)
+
+    expect(response.status).toBe(200)
+    expect(mocks.tx.batch.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'batch-1',
+        creatorId: 1,
+        status: 'Submitted',
+        itemReviewStarted: true,
+        reviewerId: null,
+        reviewedAt: null,
+        syncTaskId: null,
+        contentVersion: 4,
+      },
+      data: { status: 'Draft', itemReviewStarted: false, contentVersion: { increment: 1 } },
+    })
+    expect(mocks.tx.pullRequest.updateMany).toHaveBeenCalledWith({
+      where: { batchId: 'batch-1', status: 'Approved', appliedAt: null },
+      data: { status: 'Pending' },
+    })
+    expect(mocks.tx.pullRequestReviewNote.deleteMany).toHaveBeenCalledWith({
+      where: {
+        pullRequest: { batchId: 'batch-1' },
+        reviewerId: null,
+        decision: 'Approved',
+        reason: '本喵根据逐条审核记录标记通过',
+      },
+    })
+  })
+
+  it('rejects withdraw when human item review has started', async () => {
+    mocks.prisma.batch.findUnique.mockResolvedValue({
+      ...submittedBatch,
+      itemReviewStarted: true,
+      reviewerId: null,
+      reviewedAt: null,
+      syncTaskId: null,
+    })
+    mocks.prisma.pullRequestReviewNote.findFirst.mockResolvedValue({ id: 77 })
+    const response = await POST(createRequest(legacyPath), context)
+
+    expect(response.status).toBe(409)
+    expect(await response.json()).toEqual({ error: '批次已开始逐词审核，不能整批撤销' })
+    expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
   })
 
   it('does not undo an approval that won the race', async () => {

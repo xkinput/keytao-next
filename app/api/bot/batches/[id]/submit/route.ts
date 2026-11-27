@@ -5,6 +5,7 @@ import { requireVerifiedBotUser } from '@/lib/botUserAuth'
 import { checkBatchConflictsWithWeight } from '@/lib/services/batchConflictService'
 import { classifyBatchDeleteRisk } from '@/lib/services/batchApprovalService'
 import { ItemReviewError } from '@/lib/services/batchItemReview'
+import { BOT_SUBMIT_APPROVAL_REASON } from '@/lib/services/batchWithdrawService'
 import { buildBatchSubmitWarnings } from '@/lib/services/batchSubmitWarnings'
 import { buildSkippedCandidateSlotWarnings } from '@/lib/services/batchSkippedCodeWarnings'
 import { buildPriorityOrderWarnings } from '@/lib/services/batchPriorityOrderWarnings'
@@ -316,7 +317,7 @@ export async function POST(
           data: approvedItemIds.map(pullRequestId => ({
             pullRequestId,
             decision: 'Approved',
-            reason: '本喵根据逐条审核记录标记通过',
+            reason: BOT_SUBMIT_APPROVAL_REASON,
           })),
         })
       }

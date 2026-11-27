@@ -3,6 +3,10 @@ import { prisma } from '@/lib/prisma'
 import { requireVerifiedBotUser } from '@/lib/botUserAuth'
 import { lockBotDraftUser } from '@/lib/services/batchContentGuard'
 import { BOT_BATCH_DESCRIPTION_PREFIX } from '@/lib/services/botDraftBatch'
+import {
+  isBotPreapprovedOnlySubmittedBatch,
+  resetBotPreapprovedItemsOnWithdraw,
+} from '@/lib/services/batchWithdrawService'
 
 export async function GET(request: NextRequest) {
   try {
@@ -24,12 +28,27 @@ export async function GET(request: NextRequest) {
         id: true,
         status: true,
         contentVersion: true,
+        itemReviewStarted: true,
+        reviewerId: true,
+        reviewedAt: true,
+        syncTaskId: true,
         _count: { select: { pullRequests: true } },
       },
     })
 
     if (!batch) {
       return NextResponse.json({ success: false, message: '没有找到可撤回的提审批次' }, { status: 404 })
+    }
+
+    if (batch.itemReviewStarted && !(await isBotPreapprovedOnlySubmittedBatch(prisma, batch))) {
+      return NextResponse.json(
+        {
+          success: false,
+          batchId: batch.id,
+          message: '最新提审批次已开始逐词审核，无法撤回',
+        },
+        { status: 409 },
+      )
     }
 
     return NextResponse.json({
@@ -99,16 +118,24 @@ export async function POST(request: NextRequest) {
           id: batchId,
           creatorId: user.id,
           status: 'Submitted',
-          itemReviewStarted: false,
           contentVersion: expectedContentVersion as number,
         },
         select: {
           id: true,
           contentVersion: true,
+          itemReviewStarted: true,
+          reviewerId: true,
+          reviewedAt: true,
+          syncTaskId: true,
           _count: { select: { pullRequests: true } },
         },
       })
       if (!batch) return { kind: 'stale' as const }
+
+      const isBotPreapproved = Boolean(batch.itemReviewStarted)
+      if (isBotPreapproved && !(await isBotPreapprovedOnlySubmittedBatch(tx, batch))) {
+        return { kind: 'item-review-started' as const }
+      }
 
       // Only a draft that actually holds content blocks a recall: after the
       // recall the restored batch owns the "current draft" pointer because the
@@ -124,17 +151,34 @@ export async function POST(request: NextRequest) {
       })
       if (existingDraft) return { kind: 'draft-exists' as const }
 
-      const updated = await tx.batch.updateMany({
-        where: {
-          id: batch.id,
-          creatorId: user.id,
-          status: 'Submitted',
-          itemReviewStarted: false,
-          contentVersion: expectedContentVersion as number,
-        },
-        data: { status: 'Draft', contentVersion: { increment: 1 } },
-      })
+      const updated = isBotPreapproved
+        ? await tx.batch.updateMany({
+            where: {
+              id: batch.id,
+              creatorId: user.id,
+              status: 'Submitted',
+              itemReviewStarted: true,
+              reviewerId: null,
+              reviewedAt: null,
+              syncTaskId: null,
+              contentVersion: expectedContentVersion as number,
+            },
+            data: { status: 'Draft', itemReviewStarted: false, contentVersion: { increment: 1 } },
+          })
+        : await tx.batch.updateMany({
+            where: {
+              id: batch.id,
+              creatorId: user.id,
+              status: 'Submitted',
+              itemReviewStarted: false,
+              contentVersion: expectedContentVersion as number,
+            },
+            data: { status: 'Draft', contentVersion: { increment: 1 } },
+          })
       if (updated.count !== 1) return { kind: 'stale' as const }
+      if (isBotPreapproved) {
+        await resetBotPreapprovedItemsOnWithdraw(tx, batch.id)
+      }
       return { kind: 'ok' as const, batch }
     })
 
@@ -142,6 +186,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         { success: false, message: '当前草稿批次已有内容，无法撤回之前的提交。请先清空或提交当前草稿。' },
         { status: 400 }
+      )
+    }
+    if (recall.kind === 'item-review-started') {
+      return NextResponse.json(
+        { success: false, message: '批次已开始逐词审核，不能整批撤销' },
+        { status: 409 }
       )
     }
     if (recall.kind !== 'ok') {

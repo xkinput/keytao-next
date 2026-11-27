@@ -34,6 +34,7 @@ interface BatchDetail {
   id: string
   contentVersion: number
   itemReviewStarted?: boolean
+  canWithdraw?: boolean
   reviewProgress?: { dependencyPendingIds: number[] }
   description: string
   status: 'Draft' | 'Submitted' | 'Approved' | 'Rejected'
@@ -466,10 +467,12 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
                       去审核
                     </Button>
                   )}
-                  {!batchData.itemReviewStarted && <BatchActionsDropdown
+                  {(!batchData.itemReviewStarted || batchData.canWithdraw) && <BatchActionsDropdown
                     batchId={batchData.id}
                     status={batchData.status}
                     creatorId={batchData.creator.id}
+                    itemReviewStarted={batchData.itemReviewStarted}
+                    canWithdrawOverride={batchData.canWithdraw}
                     onSuccess={mutate}
                     iconSize={18}
                   />}

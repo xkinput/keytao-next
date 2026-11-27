@@ -20,6 +20,7 @@ interface BatchActionsDropdownProps {
   status: 'Draft' | 'Submitted' | 'Approved' | 'Rejected'
   creatorId: number
   itemReviewStarted?: boolean
+  canWithdrawOverride?: boolean
   markRejectedReadVersion?: number
   onSuccess?: () => void | Promise<unknown>
   size?: 'sm' | 'md' | 'lg'
@@ -31,6 +32,7 @@ export default function BatchActionsDropdown({
   status,
   creatorId,
   itemReviewStarted,
+  canWithdrawOverride,
   markRejectedReadVersion,
   onSuccess,
   size = 'sm',
@@ -45,7 +47,7 @@ export default function BatchActionsDropdown({
 
   const isOwner = user?.id === creatorId
   const canDelete = isOwner && !itemReviewStarted && (status === 'Draft' || status === 'Rejected')
-  const canWithdraw = isOwner && !itemReviewStarted && status === 'Submitted'
+  const canWithdraw = isOwner && status === 'Submitted' && (canWithdrawOverride ?? !itemReviewStarted)
   const canMarkRead = isOwner && status === 'Rejected' && markRejectedReadVersion !== undefined
 
   if (!canDelete && !canWithdraw && !canMarkRead) {
