@@ -2,8 +2,10 @@
 
 import React, { useRef, useEffect, useCallback, useState } from 'react'
 import dynamic from 'next/dynamic'
+import Link from 'next/link'
 import { Button, Textarea, ScrollShadow } from '@/lib/heroui-compat'
 import { Trash2, X, Send, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, MessageCircle } from 'lucide-react'
+import { apiRequest } from '@/lib/hooks/useSWR'
 import { useChatStore } from '@/lib/store/chat'
 import { useAuthStore } from '@/lib/store/auth'
 
@@ -24,6 +26,7 @@ const IDLE_MESSAGES = [
 
 const SNAP_THRESHOLD = 60
 const STORAGE_KEY = 'chatwidget-pos'
+const CHAT_TIMEOUT_MS = 60_000
 
 type SnapEdge = 'left' | 'right' | 'top' | 'bottom' | null
 interface WidgetState { x: number; y: number; snap: SnapEdge }
@@ -38,30 +41,6 @@ function loadWidgetState(): WidgetState | null {
     if (raw) return JSON.parse(raw) as WidgetState
   } catch { }
   return null
-}
-
-function authHeaders(): Record<string, string> {
-  const token = useAuthStore.getState().token
-  return token ? { Authorization: `Bearer ${token}` } : {}
-}
-
-async function sendChat(message: string, sessionId: string): Promise<string> {
-  const res = await fetch('/api/bot/chat', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...authHeaders() },
-    body: JSON.stringify({ message, session_id: sessionId }),
-  })
-  if (!res.ok) throw new Error(`HTTP ${res.status}`)
-  const data = await res.json()
-  return data.reply as string
-}
-
-async function clearServerHistory(sessionId: string) {
-  await fetch('/api/bot/chat', {
-    method: 'DELETE',
-    headers: { 'Content-Type': 'application/json', ...authHeaders() },
-    body: JSON.stringify({ session_id: sessionId }),
-  }).catch(() => { })
 }
 
 // ── Snap restore tab ────────────────────────────────────────────────────────────
@@ -172,36 +151,70 @@ function SpeechBubble({ visible, text, canvasH }: { visible: boolean; text: stri
 // ── Chat panel ────────────────────────────────────────────────────────────────
 function ChatPanel({ onClose }: { onClose: () => void }) {
   const { messages, loading, addMessage, setLoading, clearMessages, getSessionId } = useChatStore()
+  const token = useAuthStore(state => state.token)
+  const user = useAuthStore(state => state.user)
+  const [rejectedToken, setRejectedToken] = useState<string | null>(null)
   const [input, setInput] = useState('')
   const bottomRef = useRef<HTMLDivElement>(null)
+  const needsLogin = !token || token === rejectedToken
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
-  const submit = useCallback(async () => {
+  const reportError = (error: unknown) => {
+    const status = (error as { status?: number } | null)?.status
+    if (status === 401) {
+      const auth = useAuthStore.getState()
+      if (auth.user === user) setRejectedToken(auth.token)
+      return
+    }
+    if (status === 429) {
+      addMessage('assistant', '说得太快啦，稍等一下再试')
+    } else if (status === 502 || status === 503 || status === 504 || error instanceof TypeError ||
+      (error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError'))) {
+      addMessage('assistant', '喵喵暂时连不上，请稍后再试')
+    } else {
+      addMessage('assistant', '呜呜，连接 bot 失败了 qwq')
+    }
+  }
+
+  const submit = async () => {
     const text = input.trim()
-    if (!text || loading) return
+    if (!text || loading || needsLogin) return
     setInput('')
     addMessage('user', text)
     setLoading(true)
     try {
-      const reply = await sendChat(text, getSessionId())
+      const { reply } = await apiRequest<{ reply: string }>('/api/bot/chat', {
+        method: 'POST',
+        body: { message: text, session_id: getSessionId() },
+        signal: AbortSignal.timeout?.(CHAT_TIMEOUT_MS),
+      })
       addMessage('assistant', reply)
-    } catch {
-      addMessage('assistant', '呜呜，连接 bot 失败了 qwq')
+    } catch (error) {
+      reportError(error)
     } finally {
       setLoading(false)
     }
-  }, [input, loading, addMessage, setLoading, getSessionId])
+  }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit() }
   }
 
   const handleClear = async () => {
-    await clearServerHistory(getSessionId())
-    clearMessages()
+    if (needsLogin) return
+    try {
+      await apiRequest('/api/bot/chat', {
+        method: 'DELETE',
+        body: { session_id: getSessionId() },
+        signal: AbortSignal.timeout?.(CHAT_TIMEOUT_MS),
+      })
+      clearMessages()
+    } catch (error) {
+      reportError(error)
+    }
   }
 
   return (
@@ -219,9 +232,11 @@ function ChatPanel({ onClose }: { onClose: () => void }) {
           <span className="text-xs font-medium text-foreground-500">喵喵 · 键道助手</span>
         </div>
         <div className="flex items-center gap-0.5">
-          <Button isIconOnly variant="light" size="sm" onPress={handleClear} aria-label="清空">
-            <Trash2 size={12} />
-          </Button>
+          {!needsLogin && (
+            <Button isIconOnly variant="light" size="sm" onPress={handleClear} aria-label="清空">
+              <Trash2 size={12} />
+            </Button>
+          )}
           <Button isIconOnly variant="light" size="sm" onPress={onClose} aria-label="关闭">
             <X size={14} />
           </Button>
@@ -275,30 +290,39 @@ function ChatPanel({ onClose }: { onClose: () => void }) {
         <div ref={bottomRef} />
       </ScrollShadow>
 
-      {/* Input */}
-      <div className="flex items-end gap-2 pt-2">
-        <Textarea
-          value={input}
-          onValueChange={setInput}
-          onKeyDown={handleKeyDown}
-          placeholder="输入消息… (Enter 发送)"
-          minRows={1}
-          maxRows={3}
-          isDisabled={loading}
-          classNames={{
-            inputWrapper: 'shadow-md',
-          }}
-          size="sm"
-        />
-        <Button
-          isIconOnly color="primary" size="sm"
-          onPress={submit}
-          isDisabled={loading || !input.trim()}
-          className="mb-0.5 flex-shrink-0"
+      {needsLogin ? (
+        <div
+          className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-lg px-3 py-2 text-sm shadow-sm"
+          style={{ background: 'var(--surface)', border: '1px solid var(--separator)' }}
         >
-          <Send size={14} />
-        </Button>
-      </div>
+          <span role="status">请先登录后再和喵喵聊天</span>
+          <Link href="/login" prefetch={false} onClick={onClose} className="text-primary underline">前往登录</Link>
+        </div>
+      ) : (
+        <div className="flex items-end gap-2 pt-2">
+          <Textarea
+            value={input}
+            onValueChange={setInput}
+            onKeyDown={handleKeyDown}
+            placeholder="输入消息… (Enter 发送)"
+            minRows={1}
+            maxRows={3}
+            isDisabled={loading}
+            classNames={{
+              inputWrapper: 'shadow-md',
+            }}
+            size="sm"
+          />
+          <Button
+            isIconOnly color="primary" size="sm"
+            onPress={submit}
+            isDisabled={loading || !input.trim()}
+            className="mb-0.5 flex-shrink-0"
+          >
+            <Send size={14} />
+          </Button>
+        </div>
+      )}
     </div>
   )
 }
@@ -467,6 +491,7 @@ export default function ChatWidget() {
         }}
       >
         <div
+          inert={!isOpen}
           style={{
             position: 'absolute',
             right: 12,
@@ -537,6 +562,7 @@ export default function ChatWidget() {
         >
           {/* Chat panel — slides in above the character */}
           <div
+            inert={!isOpen}
             style={{
               position: 'absolute',
               right: 0,
